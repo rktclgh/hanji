@@ -7,7 +7,8 @@ unreliable 쪽(글자층이 깨진 쪽)은 OCR을 쓸 수 있으면 scanned처�
 넣지 않고 글자 장부의 replaced로 센다. 표는 만들지 않는다), OCR을 쓸 수 없거나 받아들인 OCR 글자가 없으면(보이는
 글자층이 있을 때) digital과 같은 경로로 깨진 글자층에서 블록을 만든다(신뢰도 상한 group.UNRELIABLE_CONFIDENCE).
 어느 쪽이든 처리 이력에 한 줄 남긴다.
-쪽마다 글자 장부(PageInfo.coverage)를 센다. 장부가 맞지 않으면 그 쪽 coverage는 None이고 처리 이력에 한 줄 남긴다.
+쪽마다 글자 장부(PageInfo.coverage)를 센다. 어느 블록에도 들지 않은 보이는 글자는 구조 문단으로 살려(rescued) 처리
+이력에 한 줄 남기고, 장부가 맞지 않으면(이중 배정 등) 그 쪽 coverage는 None이고 처리 이력에 한 줄 남긴다.
 쪽 렌더는 필요한 쪽만 한 번(PDFIUM_LOCK 안), OCR·모델·PNG 인코딩은 잠금 밖에서 한다."""
 
 from dataclasses import dataclass, field
@@ -42,6 +43,7 @@ UNRELIABLE_OCR = "unreliable_text_layer_ocr"  # unreliable 쪽을 깨진 글자�
 # OCR로 읽으려던 unreliable 쪽에서 받아들인 OCR 글자가 없어 깨진 글자층으로 돌아왔다(UNRELIABLE_KEPT 기록에 붙인다)
 NO_OCR_TEXT = GateResult(passed=False, checks=(GateCheck(name="ocr_text", passed=False, value=0, threshold=">0"),))
 COVERAGE_MISMATCH = "coverage_mismatch"  # 글자 장부가 맞지 않는다(보이는 글자가 블록에 정확히 한 번씩 들지 않았다: 버그)
+UNASSIGNED_TEXT = "unassigned_text"  # 어느 블록에도 들지 않은 글자를 구조 문단으로 살렸다(버그 신호, 원문은 블록에 있다)
 FULL_PAGE = (0.0, 0.0, 1.0, 1.0)  # 쪽 단위 처리 이력의 상자(보이는 쪽 0~1)
 
 
@@ -126,6 +128,9 @@ class PdfParser:
                                            [d.figures for d in done], modes=modes)
         infos = []
         for page, s, state, mode, result in zip(pages, stats, states, modes, done, strict=True):
+            if ledgers[page.page].rescued:
+                result.regions.append(_region(page, "unassigned-text", FULL_PAGE, "paragraph", UNASSIGNED_TEXT, False,
+                                              _rescued_gate(ledgers[page.page])))
             coverage = _coverage(page, s, ledgers[page.page], mode)
             if coverage is None:
                 result.regions.append(_region(page, "coverage", FULL_PAGE, "paragraph", COVERAGE_MISMATCH, False,
@@ -145,13 +150,22 @@ def _placed(stats: TextLayerStats, mode: PageMode) -> int:
 
 def _coverage(page: PageText, stats: TextLayerStats, ledger: Ledger, mode: PageMode) -> TextCoverage | None:
     """쪽 글자 장부. 블록에 들 글자(_placed)가 블록에 정확히 한 번씩 들었을 때만, 아니면 None(버그 신호: 파싱을
-    실패시키지 않고 처리 이력에 coverage_mismatch를 남긴다). ocr 쪽의 보이는 글자는 replaced다. rescued는 아직 늘 0이다."""
+    실패시키지 않고 처리 이력에 coverage_mismatch를 남긴다). ocr 쪽의 보이는 글자는 replaced다. layer·scan 쪽은 블록에
+    들지 않은 글자를 구조 문단이 살리므로(rescued, in_blocks에 든다) None은 이중 배정·쪽에 없는 글자 순번(doubled)이거나
+    구조 문단으로도 줄을 만들지 못한 글자(살리기까지 실패: in_blocks가 모자란다)다. ocr 쪽은 텍스트 레이어 글자가
+    블록에 샌 것(in_blocks > 0)도 None이다."""
     placed = _placed(stats, mode)
     if ledger.in_blocks != placed or ledger.doubled:
         return None
     hidden = hidden_chars(page)
     return TextCoverage(layer_chars=stats.chars + hidden, in_blocks=ledger.in_blocks, hidden=hidden,
-                        replaced=stats.chars - placed)
+                        replaced=stats.chars - placed, rescued=ledger.rescued)
+
+
+def _rescued_gate(ledger: Ledger) -> GateResult:
+    """unassigned_text 처리 이력에 붙일 숫자: 구조 문단으로 살린 글자 수(기준 0)."""
+    return GateResult(passed=False, checks=(GateCheck(name="rescued", passed=False, value=ledger.rescued,
+                                                      threshold="==0"),))
 
 
 def _ledger_gate(stats: TextLayerStats, ledger: Ledger, mode: PageMode) -> GateResult:

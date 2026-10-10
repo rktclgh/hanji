@@ -483,3 +483,15 @@ def test_image_boxes_stop_at_the_cap_but_coverage_keeps_every_image(monkeypatch)
     capped = only_page(data)
     assert capped.images == full.images[:2]
     assert capped.image_coverage == full.image_coverage
+
+
+def test_chars_carry_their_index_on_the_page_as_id():
+    """Char.id는 page.chars 순번이다(0부터, 낸 글자만 센다): 쪽 밖이라 버린 글자는 순번을 차지하지 않는다."""
+    def draw(c):
+        put(c, 72, 770, 11, "가나 다")
+        put(c, -50, 700, 11, "라")  # 상자 중심이 쪽 밖: Char를 만들지 않는다
+        put(c, 72, 600, 11, "마", mode=3)
+
+    page = only_page(make_pdf(draw))
+    assert "".join(c.text for c in page.chars) == "가나 다마"
+    assert [c.id for c in page.chars] == list(range(5))

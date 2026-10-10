@@ -76,6 +76,9 @@ class Char:
     invisible: bool = False  # 렌더 모드 3
     unmapped: bool = False  # 유니코드 0·U+FFFD·매핑 오류(text는 U+FFFD)
     axes: Axes = UPRIGHT  # 읽는 방향: 회전한 쪽·음수 Tf·거울 행렬이면 바로 선 글자와 다르다
+    # 쪽 안 순번(= page.chars 순번, extract가 매긴다). 줄·조각·블록까지 따라가 글자 장부를 id로 센다. 값 비교·해시에는
+    # 쓰지 않는다(같은 자리 같은 글자 둘은 여전히 값이 같다)
+    id: int = field(default=-1, compare=False)
 
 
 RuleAxis = Literal["h", "v"]
@@ -325,6 +328,7 @@ def _chars(textpage: pdfium.PdfTextPage, box: Box, rotation: int, seen: set[int]
     modes: dict[int, int] = {}
     count = textpage.count_chars()
     skip = False
+    n = 0  # 낸 글자 수 = 다음 Char.id(PDFium이 끼운 글자·쪽 밖 글자처럼 건너뛴 글자는 세지 않는다)
     for i in range(count):
         if skip:
             skip = False
@@ -380,7 +384,8 @@ def _chars(textpage: pdfium.PdfTextPage, box: Box, rotation: int, seen: set[int]
                    baseline=_on_axis(*normalize_point(ox.value, oy.value, box, rotation), axes[1]),
                    size=abs(font_size) * math.hypot(m.c, m.d),  # Tf가 음수면 글자가 뒤집힐 뿐 크기는 양수
                    bold=weight >= _BOLD_WEIGHT or bold_name or mode == pdfium_c.FPDF_TEXTRENDERMODE_FILL_STROKE,
-                   invisible=mode == pdfium_c.FPDF_TEXTRENDERMODE_INVISIBLE, unmapped=unmapped, axes=axes)
+                   invisible=mode == pdfium_c.FPDF_TEXTRENDERMODE_INVISIBLE, unmapped=unmapped, axes=axes, id=n)
+        n += 1
 
 
 _MAX_FORM_DEPTH = 15
