@@ -1,4 +1,5 @@
 import unicodedata
+from dataclasses import replace
 
 import pytest
 
@@ -507,3 +508,23 @@ def test_ocr_mode_page_makes_no_text_layer_blocks_and_keeps_ocr_confidence():
     assert [(s["kind"], s["text"], s["text_source"], s["confidence"]) for s in result if s["locator"]["page"] == 2] == [
         ("paragraph", "다시 읽은 문단이다.", "ocr", 0.45), ("figure", "가로축", "ocr", 0.7)]
     assert ledgers[2] == Ledger(in_blocks=0, doubled=0)
+
+
+def test_fragments_keep_each_char_id_through_the_reading_frame():
+    """줄 조각 글자는 쪽 글자의 id를 그대로 든다: 읽기 좌표로 옮긴 글자(180° 뒤집힌 글자)도 같다. 공백·숨은 글자는
+    조각에 없다."""
+    upside = [Char(text=ch, x0=(400 - 11 * (k + 1)) / W, y0=(100 - 1.6) / H, x1=(400 - 11 * k) / W, y1=(100 + 8.3) / H,
+                   baseline=1 - 100 / H, size=11, axes=(2, 3)) for k, ch in enumerate("가나")]
+    chars = [*line("다 라", 72, 300), *upside, *line("숨은", 72, 400, invisible=True)]
+    frags = fragments(page([replace(c, id=i) for i, c in enumerate(chars)]))
+    assert [(f.text, [c.id for c in f.chars]) for f in frags] == [("다 라", [0, 2]), ("가나", [3, 4])]
+
+
+def test_ledger_counts_two_equal_glyphs_at_one_place_twice():
+    """같은 자리에 같은 글자를 두 번 찍은 쪽(PDFium이 지우지 않은 겹친 글자)은 값이 같은 Char 둘이다(id는 값 비교에 들지
+    않는다). 장부는 값이 아니라 id로 세므로 둘 다 센다."""
+    twice = line("가나", 72, 100)
+    p = page(twice, twice)
+    assert replace(p.chars[0], id=0) == replace(p.chars[2], id=2) and page_stats(p).chars == 4
+    _, ledgers = build_page_specs([p], ["digital"])
+    assert ledgers == {1: Ledger(in_blocks=4, doubled=0)}

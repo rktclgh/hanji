@@ -56,7 +56,7 @@ class Fragment:
 
     page: int
     text: str
-    chars: tuple[Char, ...]  # 공백이 아닌 글자(읽기 좌표 0~1)
+    chars: tuple[Char, ...]  # 공백이 아닌 글자(읽기 좌표 0~1). Char.id는 쪽 글자 순번 그대로다
     x0: float
     y0: float
     x1: float
@@ -92,9 +92,9 @@ class FigureBlock:
 
 @dataclass(frozen=True, slots=True)
 class Ledger:
-    """쪽 하나에서 블록이 된 텍스트 레이어 글자(보이는, 공백이 아닌 글자). in_blocks는 서로 다른 글자 수, doubled는
-    이미 다른 블록에 든 글자를 또 넣은 횟수(표·그림·캡션이 같은 글자를 나눠 가졌다: 버그 신호)와 쪽에 없는 글자
-    순번을 받은 횟수(이것도 버그 신호)."""
+    """쪽 하나에서 블록이 된 텍스트 레이어 글자(보이는, 공백이 아닌 글자)를 글자 id(page.chars 순번)로 센다. in_blocks는
+    서로 다른 id 수, doubled는 이미 다른 블록에 든 id를 또 넣은 횟수(블록 둘이 같은 글자를 나눠 가졌다: 버그 신호)와
+    쪽에 없는 글자 순번을 받은 횟수(이것도 버그 신호)."""
 
     in_blocks: int = 0
     doubled: int = 0
@@ -249,6 +249,13 @@ def unit_box(x0: float, y0: float, x1: float, y1: float) -> dict[str, float]:
     return {"x0": a, "y0": c, "x1": b, "y1": d}
 
 
+def _numbered(page: PageText) -> PageText:
+    """Char.id가 page.chars 순번과 같은 쪽. extract가 매긴 쪽은 그대로, 아니면(손으로 만든 쪽 등) 순번을 매긴 사본."""
+    if all(c.id == i for i, c in enumerate(page.chars)):
+        return page
+    return replace(page, chars=tuple(replace(c, id=i) for i, c in enumerate(page.chars)))
+
+
 def _box(frags: Sequence[Fragment], page: PageText) -> dict[str, float]:
     """보이는 쪽 기준 0~1(읽기 좌표에서 되돌린다), 소수 셋째 자리 반올림(_widen). frags는 같은 axes."""
     axes = frags[0].axes
@@ -359,9 +366,9 @@ def build_page_specs(pages: Sequence[PageText], states: Sequence[TextLayerState]
                      figures: Sequence[Sequence[FigureBlock]] | None = None,
                      modes: Sequence[PageMode] | None = None,
                      ) -> tuple[list[dict[str, Any]], dict[int, Ledger]]:
-    """(블록 명세, 쪽 번호 → 글자 장부). 장부는 명세를 만들 때 센다: 표·그림·캡션은 char_ids(그림과 짝 캡션은 따로),
-    줄·조각은 블록이 된 조각의 글자 수(표·그림 글자를 뺀 쪽에서 묶어 서로 겹치지 않는다). 숨은 글자·공백은 세지
-    않는다. 블록 명세(계약 build_blocks 입력). 모든 쪽에서 보이는 글자로 블록을 만든다(숨은 글자는 fragments가 버린다).
+    """(블록 명세, 쪽 번호 → 글자 장부). 장부는 명세를 만들 때 글자 id(page.chars 순번)로 센다: 표·그림·캡션은
+    char_ids(그림과 짝 캡션은 따로), 줄·조각은 블록이 된 조각 글자의 Char.id(쪽마다 _numbered로 순번을 맞춘다). 숨은
+    글자·공백은 세지 않는다. 블록 명세(계약 build_blocks 입력). 모든 쪽에서 보이는 글자로 블록을 만든다(숨은 글자는 fragments가 버린다).
     unreliable 쪽(깨진 글자층, layer 모드)도 같은 경로지만 그 쪽 조각은 본문 크기·머리말 반복·제목 단계에 쓰지 않고(섞인 문서의
     digital 쪽 블록이 바뀌지 않게. digital·scanned 글자가 없는 문서만 본문 크기를 그 쪽 글자로 정한다), 제목·머리말을
     만들지 않으며(section_path를 바꾸지 않는다), 그 쪽 블록 신뢰도는 UNRELIABLE_CONFIDENCE 이하다.
@@ -380,6 +387,7 @@ def build_page_specs(pages: Sequence[PageText], states: Sequence[TextLayerState]
     OCR로 읽는 unreliable)은 텍스트 레이어 조각을 만들지 않고(장부 in_blocks에 들지 않는다) 받은 OCR 문단·그림만 낸다.
     전제(파서가 보장한다): ocr 쪽은 tables가 비어 있고 그림에 텍스트 레이어 char_ids가 없다.
     위 unreliable 쪽 처리(문서 판정에서 빼기·신뢰도 상한)는 layer 모드 unreliable 쪽에만 쓴다."""
+    pages = [_numbered(page) for page in pages]  # 글자 id = page.chars 순번(장부가 id로 센다)
     found = list(tables) if tables is not None else [[] for _ in pages]
     read = list(ocr) if ocr is not None else [[] for _ in pages]
     pictures = list(figures) if figures is not None else [[] for _ in pages]
@@ -392,7 +400,7 @@ def build_page_specs(pages: Sequence[PageText], states: Sequence[TextLayerState]
             frags.append([])
             continue
         taken = {i for t in page_tables for i in t.char_ids} | {i for f in page_figures for i in f.char_ids}
-        rest = replace(page, chars=tuple(c for i, c in enumerate(page.chars) if i not in taken)) if taken else page
+        rest = replace(page, chars=tuple(c for c in page.chars if c.id not in taken)) if taken else page
         frags.append(fragments(rest))
     # 깨진 글자층으로 블록을 만드는 쪽(layer 모드 unreliable): 문서 판정에서 빼고 신뢰도를 누른다(ocr 쪽 블록은 OCR이
     # 읽은 글자라 누르지 않는다)
@@ -444,9 +452,8 @@ def build_page_specs(pages: Sequence[PageText], states: Sequence[TextLayerState]
                    reverse=True)
     specs: list[dict[str, Any]] = []
     stack: list[tuple[int, str]] = []  # (단계, 제목 글자)
-    owned: dict[int, set[int]] = defaultdict(set)  # 쪽 번호 → 블록이 된 표·그림·캡션 글자(page.chars 순번)
+    owned: dict[int, set[int]] = defaultdict(set)  # 쪽 번호 → 블록이 된 글자 id(page.chars 순번)
     doubled: Counter[int] = Counter()
-    loose: Counter[int] = Counter()  # 쪽 번호 → 블록이 된 조각 글자 수
 
     def own(page: PageText, char_ids: Iterable[int]) -> None:
         for i in char_ids:
@@ -505,9 +512,9 @@ def build_page_specs(pages: Sequence[PageText], states: Sequence[TextLayerState]
         specs.append({"kind": kind, "text": text, "section_path": path, "confidence": CONFIDENCE[kind],
                       "state": "det", "text_source": "text_layer",
                       "locator": {"kind": "page", "page": page.page, "bbox": _box(group, page)}, **extra})
-        loose[page.page] += sum(len(f.chars) for f in (group[:1] if margin is not None else group))
+        own(page, (c.id for f in group for c in f.chars))
     for spec in specs:
         if spec["locator"]["page"] in rough:
             spec["confidence"] = min(spec["confidence"], UNRELIABLE_CONFIDENCE)
-    ledgers = {page.page: Ledger(len(owned[page.page]) + loose[page.page], doubled[page.page]) for page in pages}
+    ledgers = {page.page: Ledger(len(owned[page.page]), doubled[page.page]) for page in pages}
     return specs, ledgers
