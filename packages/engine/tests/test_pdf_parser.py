@@ -546,3 +546,49 @@ def test_a_char_in_two_blocks_is_still_a_mismatch_next_to_rescued_text(monkeypat
     assert [(r.region_id, r.fallback_reason) for r in parsed.regions] == [
         ("p1-unassigned-text", "unassigned_text"), ("p1-coverage", "coverage_mismatch")]
     assert gate_numbers(parsed.regions[1]) == {"in_blocks": (True, 21, "==21"), "doubled": (False, 2, "==0")}
+
+
+def test_blank_ocr_fallback_page_rescues_a_lost_line_under_the_unreliable_cap(monkeypatch):
+    """OCR이 공백 줄만 읽어 유지 경로(layer)로 돌아간 unreliable 쪽도 구조 문단을 쓴다(쪽 상태가 아니라 최종 모드로
+    정한다): 잃은 줄은 구조 문단으로 나오고 신뢰도는 깨진 글자층 상한 0.2다. 처리 이력은 unreliable_text_layer_kept(ocr_text
+    실패 검사) 다음 unassigned_text이고, 장부는 잃은 글자를 rescued로 센다(replaced 0)."""
+    monkeypatch.setattr(pdf_parser, "classify", lambda stats: "unreliable")
+    fake_ocr(monkeypatch, [("   ", 0.99, OVER_BROKEN)])
+    losing(monkeypatch, "깨진 첫 줄이다.")
+    parsed = PdfParser(layout=False).parse(make_pdf([[(770, "깨진 첫 줄이다.", 0), (730, "깨진 둘째 줄이다.", 0)]]),
+                                           "a.pdf")
+    assert [(b["kind"], b["text"], b["text_source"], b["confidence"]) for b in parsed.blocks] == [
+        ("paragraph", "깨진 둘째 줄이다.", "text_layer", 0.2), ("paragraph", "깨진 첫 줄이다.", "text_layer", 0.2)]
+    assert parsed.pages[0].coverage == TextCoverage(layer_chars=15, in_blocks=15, hidden=0, replaced=0, rescued=7)
+    kept, lost = parsed.regions
+    assert [(r.region_id, r.fallback_reason) for r in parsed.regions] == [
+        ("p1-unreliable-text-layer", "unreliable_text_layer_kept"), ("p1-unassigned-text", "unassigned_text")]
+    assert [(c.name, c.passed, c.value, c.threshold) for c in kept.gate.checks] == [("ocr_text", False, 0, ">0")]
+    assert [(c.name, c.passed, c.value, c.threshold) for c in lost.gate.checks] == [("rescued", False, 7, "==0")]
+
+
+def test_mixed_document_rescues_on_digital_and_scanned_pages_but_not_on_the_ocr_page(monkeypatch):
+    """digital·scanned(OCR 문단 있음)·OCR로 읽는 unreliable 쪽이 섞인 문서에서 쪽마다 한 줄씩 배정을 잃으면: digital·
+    scanned 쪽은 잃은 줄을 구조 문단과 unassigned_text로 살린다. ocr 쪽은 텍스트 레이어 글자가 블록에 들지 않는 것이
+    정상이라 구조 문단도 unassigned_text도 없고 보이는 글자는 모두 replaced다(in_blocks 0)."""
+    states = iter(["digital", "scanned", "unreliable"])
+    monkeypatch.setattr(pdf_parser, "classify", lambda stats: next(states))
+    far = (70.0, 400.0, 250.0, 418.0)  # 글자층 줄과 겹치지 않는 OCR 줄 상자(pt)
+    fake_ocr(monkeypatch, [("스캔에서 읽은 글자다.", 0.9, far)], [("다시 읽은 쪽 글자다.", 0.9, OVER_BROKEN)])
+    losing(monkeypatch, "디지털 잃는 줄.", "스캔 잃는 줄.", "깨진 잃는 줄.")
+    data = make_pdf([[(770, "디지털 잃는 줄.", 0), (730, "디지털 남는 줄.", 0)],
+                     [(770, "스캔 잃는 줄.", 0), (730, "스캔 남는 줄.", 0)],
+                     [(770, "깨진 잃는 줄.", 0), (730, "깨진 남는 줄.", 0)]])
+    parsed = PdfParser(layout=False).parse(data, "a.pdf")
+    assert [p.text_layer for p in parsed.pages] == ["digital", "scanned", "unreliable"]
+    assert [(b["locator"]["page"], b["text"], b["text_source"], b["confidence"]) for b in parsed.blocks] == [
+        (1, "디지털 남는 줄.", "text_layer", 0.7), (1, "디지털 잃는 줄.", "text_layer", 0.3),
+        (2, "스캔 남는 줄.", "text_layer", 0.7), (2, "스캔에서 읽은 글자다.", "ocr", 0.45),
+        (2, "스캔 잃는 줄.", "text_layer", 0.3), (3, "다시 읽은 쪽 글자다.", "ocr", 0.45)]
+    assert [p.coverage for p in parsed.pages] == [
+        TextCoverage(layer_chars=14, in_blocks=14, hidden=0, replaced=0, rescued=7),
+        TextCoverage(layer_chars=12, in_blocks=12, hidden=0, replaced=0, rescued=6),
+        TextCoverage(layer_chars=12, in_blocks=0, hidden=0, replaced=12, rescued=0)]
+    assert [(r.region_id, r.fallback_reason) for r in parsed.regions] == [
+        ("p1-unassigned-text", "unassigned_text"), ("p2-unassigned-text", "unassigned_text"),
+        ("p3-unreliable-text-layer", "unreliable_text_layer_ocr")]

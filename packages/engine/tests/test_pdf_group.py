@@ -577,7 +577,8 @@ def test_lost_lines_come_back_once_as_structural_paragraphs_at_the_page_end(monk
     assert boxes["첫째 줄이다."] != boxes["셋째 줄이다."]
     for text, baseline in (("첫째 줄이다.", 100), ("셋째 줄이다.", 160)):
         box = boxes[text]
-        assert (box["y0"], box["y1"]) == pytest.approx(((baseline - 0.752 * 11) / H, (baseline + 0.142 * 11) / H), abs=2e-3)
+        assert (box["y0"], box["y1"]) == pytest.approx(
+            ((baseline - 0.752 * 11) / H, (baseline + 0.142 * 11) / H), abs=2e-3)
         assert box["x0"] == pytest.approx(72 / W, abs=2e-3) and 0 < box["x1"] - box["x0"] < 0.2
 
 

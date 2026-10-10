@@ -95,7 +95,8 @@ class FigureBlock:
 class Ledger:
     """쪽 하나에서 블록이 된 텍스트 레이어 글자(보이는, 공백이 아닌 글자)를 글자 id(page.chars 순번)로 센다. in_blocks는
     서로 다른 id 수, doubled는 이미 다른 블록에 든 id를 또 넣은 횟수(블록 둘이 같은 글자를 나눠 가졌다: 버그 신호)와
-    쪽에 없는 글자 순번을 받은 횟수(이것도 버그 신호)."""
+    쪽에 없는 글자 순번을 받은 횟수(이것도 버그 신호). rescued는 구조 문단으로 살린 글자 수로 in_blocks 안에서 센다
+    (따로 더하지 않는다: TextCoverage 검사가 rescued ≤ in_blocks를 본다)."""
 
     in_blocks: int = 0
     doubled: int = 0
@@ -524,7 +525,9 @@ def build_page_specs(pages: Sequence[PageText], states: Sequence[TextLayerState]
                                       "bbox": {"x0": x0, "y0": y0, "x1": x1, "y1": y1}}})
             own(page, group.char_ids)
             continue
-        shown = group[:1] if margin is not None else group  # 블록이 실제로 내는 조각
+        # 블록이 실제로 내는 조각. 머리말·꼬리말 묶음은 지금 늘 조각 하나다(위 잇기 조건: margin이 없는 조각만 잇고,
+        # 머리말·꼬리말 묶음 뒤에는 잇지 않는다). shown은 낸 글자만 장부에 들게 하는 지킴이다
+        shown = group[:1] if margin is not None else group
         if margin is not None:
             kind, text, path = margin, shown[0].text, ()
         elif is_heading(page, group):
