@@ -3,6 +3,7 @@ from dataclasses import replace
 
 import pytest
 
+from hanji.formats.pdf import group
 from hanji.formats.pdf.extract import Char, PageText
 from hanji.formats.pdf.figures import Caption, Figure
 from hanji.formats.pdf.group import (
@@ -537,3 +538,97 @@ def test_numbered_keeps_a_page_already_in_order_and_renumbers_the_rest():
     assert _numbered(ordered) is ordered
     wrong = page([replace(c, id=i) for c, i in zip(chars, [0, 0, 2], strict=True)])
     assert [c.id for c in _numbered(wrong).chars] == [0, 1, 2]
+
+
+def losing(monkeypatch, *texts: str) -> None:
+    """블록 명세가 쪽마다 처음 부르는 fragments(블록이 될 줄 묶기)에서 texts 줄 조각을 일부러 잃는다(배정 빠뜨리기). 같은
+    쪽의 다음 호출(블록에 들지 않은 글자를 줄로 묶는 구조 문단)은 그대로다."""
+    real, seen = group.fragments, set()
+
+    def dropping(page: PageText):
+        out = real(page)
+        if page.page in seen:
+            return out
+        seen.add(page.page)
+        return [f for f in out if f.text not in texts]
+
+    monkeypatch.setattr(group, "fragments", dropping)
+
+
+@pytest.mark.parametrize("state,mode,cap", [("digital", "layer", 1.0), ("scanned", "scan", 1.0),
+                                            ("unreliable", "layer", 0.2)])
+def test_lost_lines_come_back_once_as_structural_paragraphs_at_the_page_end(monkeypatch, state, mode, cap):
+    """어느 블록에도 들지 않은 보이는 글자는 줄마다 구조 문단(paragraph, text_layer, 신뢰도 0.3)으로 그 쪽 블록 끝에
+    윗변 순서로 정확히 한 번 나오고 장부 in_blocks에 들며 rescued로 센다(숨은 글자는 살리지 않는다). 글자층으로 블록을
+    만드는 쪽(digital, scanned 쪽의 보이는 글자, OCR 없이 둔 unreliable)이 모두 같고, unreliable 쪽은 쪽 상한 0.2가
+    구조 문단에도 씌워진다."""
+    p = page(line("첫째 줄이다.", 72, 100), line("둘째 줄이다.", 72, 130), line("셋째 줄이다.", 72, 160),
+             line("숨은", 72, 190, invisible=True))
+    losing(monkeypatch, "셋째 줄이다.", "첫째 줄이다.")
+    result, ledgers = build_page_specs([p], [state], modes=[mode])
+    assert [(s["kind"], s["text"], s["text_source"], s["confidence"]) for s in result] == [
+        ("paragraph", "둘째 줄이다.", "text_layer", min(0.7, cap)), ("paragraph", "첫째 줄이다.", "text_layer", min(0.3, cap)),
+        ("paragraph", "셋째 줄이다.", "text_layer", min(0.3, cap))]
+    assert ledgers == {1: Ledger(in_blocks=18, doubled=0, rescued=12)} and page_stats(p).chars == 18
+
+
+def test_ocr_mode_page_rescues_nothing():
+    """ocr 쪽(깨진 글자층 대신 OCR로 읽는 unreliable)의 텍스트 레이어 글자는 블록에 들지 않는 것이 정상이다(파서가
+    replaced로 센다): 구조 문단으로 살리지 않는다(살리면 in_blocks와 replaced에 두 번 든다)."""
+    p = page(line("깨진 줄이다.", 72, 100))
+    result, ledgers = build_page_specs([p], ["unreliable"], modes=["ocr"])
+    assert result == [] and ledgers == {1: Ledger()}
+
+
+def test_structural_paragraph_keeps_later_figure_caption_links(monkeypatch):
+    """구조 문단은 그 쪽 블록 끝(다음 쪽 블록 앞)에 끼므로 뒤 쪽 그림의 caption_ref(명세 목록의 절대 순번)도 그만큼 밀려
+    같은 캡션을 가리킨다."""
+    top, inside, under = line("위 문단", 72, 100), line("1분기", 120, 300), line("그림 1. 분기별 실적", 200, 360)
+    a, b = len(top), len(top) + len(inside)
+    caption = Caption(box=(200.0, 350.0, 420.0, 363.0), text="그림 1. 분기별 실적",
+                      char_ids=frozenset(range(b, b + len(under))), line_ids=frozenset(), above=False)
+    fig = Figure(box=(90.0, 140.0, 510.0, 330.0), category="chart", text="1분기", char_ids=frozenset(range(a, b)),
+                 caption=caption)
+    first = page(line("남은 줄이다.", 72, 100), line("잃은 줄이다.", 72, 130))
+    losing(monkeypatch, "잃은 줄이다.")
+    result = build_specs([first, page(top, inside, under, number=2)], ["digital"] * 2, None, None,
+                         [[], [FigureBlock(fig, "text_layer", IMAGE)]])
+    assert kinds_texts(result) == [("paragraph", "남은 줄이다."), ("paragraph", "잃은 줄이다."), ("paragraph", "위 문단"),
+                                   ("figure", "1분기"), ("caption", "그림 1. 분기별 실적")]
+    assert result[3]["figure"]["caption_ref"] == 4 and linked(result)[3]["figure"]["caption_ref"] == "그림 1. 분기별 실적"
+
+
+def upside(text: str, right: float, baseline: float) -> list[Char]:
+    """180° 뒤집힌 줄(axes (2, 3), 글자 너비 11pt): right는 첫 글자의 오른변, baseline은 보이는 쪽 기준선(pt). 오른쪽에서
+    왼쪽으로 읽는다."""
+    return [Char(text=ch, x0=(right - 11 * (k + 1)) / W, y0=(baseline - 1.6) / H, x1=(right - 11 * k) / W,
+                 y1=(baseline + 8.3) / H, baseline=1 - baseline / H, size=11, axes=(2, 3)) for k, ch in enumerate(text)]
+
+
+@pytest.mark.parametrize("lines,lost,rescued", [
+    ((upside("첫째줄", 400, 100), upside("둘째줄", 400, 130), upside("셋째줄", 400, 160)), ("첫째줄", "셋째줄"),
+     ["첫째줄", "셋째줄"]),
+    ((line("남은 바른 줄이다.", 72, 200), line("잃은 바른 줄이다.", 72, 300), upside("뒤집힌줄", 400, 100)),
+     ("잃은 바른 줄이다.", "뒤집힌줄"), ["뒤집힌줄", "잃은 바른 줄이다."])], ids=["upside_down", "mixed"])
+def test_structural_paragraphs_follow_the_visible_top_edge(monkeypatch, lines, lost, rescued):
+    """구조 문단은 읽는 방향과 상관없이 보이는 쪽 윗변 순서다: 180° 뒤집힌 쪽은 읽기 좌표의 위→아래가 보이는 쪽의
+    아래→위이고, 방향이 섞인 쪽은 fragments가 글자가 많은 방향(여기서는 바로 선 줄)부터 낸다."""
+    losing(monkeypatch, *lost)
+    result, _ = build_page_specs([page(*lines)], ["digital"])
+    assert [s["text"] for s in result if s["confidence"] == 0.3] == rescued
+
+
+def test_structural_paragraph_takes_the_heading_path_at_the_page_end(monkeypatch):
+    """구조 문단의 section_path는 제자리가 아니라 쪽 끝의 제목 경로다(첫째 제목 아래에서 잃은 줄도 그 쪽 마지막 제목
+    아래에 든다). 구조 문단은 제목 단계를 바꾸지 않아 다음 쪽 제목·section_path는 잃지 않았을 때와 같다."""
+    first = page(line("1. 첫째 제목", 72, 100, 16), line("잃은 줄이다.", 72, 130), line("2. 둘째 제목", 72, 200, 16),
+                 line("둘째 본문이다.", 72, 230))
+    second = page(line("다음 쪽 본문이다.", 72, 100), line("3. 셋째 제목", 72, 200, 16), line("셋째 본문이다.", 72, 230),
+                  number=2)
+    before = build_specs([first, second], ["digital"] * 2)
+    losing(monkeypatch, "잃은 줄이다.")
+    result = build_specs([first, second], ["digital"] * 2)
+    assert [(s["kind"], s["text"], s["section_path"]) for s in result if s["locator"]["page"] == 1] == [
+        ("heading", "1. 첫째 제목", ()), ("heading", "2. 둘째 제목", ()),
+        ("paragraph", "둘째 본문이다.", ("2. 둘째 제목",)), ("paragraph", "잃은 줄이다.", ("2. 둘째 제목",))]
+    assert [s for s in result if s["locator"]["page"] == 2] == [s for s in before if s["locator"]["page"] == 2]

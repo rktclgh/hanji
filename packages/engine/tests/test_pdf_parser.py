@@ -317,8 +317,9 @@ def gate_numbers(note) -> dict[str, tuple[bool, float | None, str | None]]:
 
 
 def test_lost_chars_leave_no_coverage_and_a_history_note(monkeypatch):
-    """장부가 맞지 않으면(여기서는 마지막 줄 조각을 일부러 잃는다) 파싱은 실패하지 않고, 그 쪽 coverage는 None이며
-    처리 이력에 coverage_mismatch 한 줄이 남는다."""
+    """구조 문단으로도 살리지 못한 글자가 있으면(여기서는 fragments가 불릴 때마다 마지막 줄 조각을 잃어 구조 문단
+    호출도 그 줄을 내지 못한다) 장부가 맞지 않는다: 파싱은 실패하지 않고, 그 쪽 coverage는 None이며 처리 이력에
+    coverage_mismatch 한 줄만 남는다(살린 글자가 없어 unassigned_text는 없다)."""
     fragments = group.fragments
     monkeypatch.setattr(group, "fragments", lambda page: fragments(page)[:-1])
     parsed = PdfParser(ocr=False, layout=False).parse(make_pdf(PARAS), "a.pdf")
@@ -496,3 +497,52 @@ def test_unreliable_page_whose_ocr_lines_are_all_blank_falls_back_to_its_text_la
     (note,) = parsed.regions
     assert (note.region_id, note.fallback_reason) == ("p1-unreliable-text-layer", "unreliable_text_layer_kept")
     assert [(c.name, c.passed, c.value, c.threshold) for c in note.gate.checks] == [("ocr_text", False, 0, ">0")]
+
+
+def losing(monkeypatch, *texts: str) -> None:
+    """블록 명세가 쪽마다 처음 부르는 group.fragments(블록이 될 줄 묶기)에서 texts 줄 조각을 일부러 잃는다(배정
+    빠뜨리기). 같은 쪽의 다음 호출(블록에 들지 않은 글자를 줄로 묶는 구조 문단)은 그대로다."""
+    real, seen = group.fragments, set()
+
+    def dropping(page):
+        out = real(page)
+        if page.page in seen:
+            return out
+        seen.add(page.page)
+        return [f for f in out if f.text not in texts]
+
+    monkeypatch.setattr(group, "fragments", dropping)
+
+
+def test_lost_chars_come_back_once_as_a_structural_paragraph_with_a_history_note(monkeypatch):
+    """어느 블록에도 들지 않은 보이는 글자(여기서는 첫 줄 조각을 일부러 잃는다)는 구조 문단(paragraph, 신뢰도 0.3)으로
+    쪽 블록 끝에 정확히 한 번 나온다. 장부는 맞고(in_blocks에 들고 rescued로 센다) 처리 이력에 unassigned_text 한 줄과
+    살린 글자 수가 남는다. 파싱은 실패하지 않는다."""
+    losing(monkeypatch, "첫째 문단이다.")
+    parsed = PdfParser(ocr=False, layout=False).parse(make_pdf(PARAS), "a.pdf")
+    assert [(b["kind"], b["text"], b["text_source"], b["confidence"]) for b in parsed.blocks] == [
+        ("paragraph", "둘째 문단이다.", "text_layer", 0.7), ("paragraph", "셋째 문단이다.", "text_layer", 0.7),
+        ("paragraph", "첫째 문단이다.", "text_layer", 0.3)]
+    (page,) = parsed.pages
+    assert page.coverage == TextCoverage(layer_chars=21, in_blocks=21, hidden=0, rescued=7)
+    (note,) = parsed.regions
+    assert (note.region_id, note.kind, note.fallback_reason, note.locator.bbox) == (
+        "p1-unassigned-text", "paragraph", "unassigned_text", BBox(x0=0.0, y0=0.0, x1=1.0, y1=1.0))
+    assert [(c.name, c.passed, c.value, c.threshold) for c in note.gate.checks] == [("rescued", False, 7, "==0")]
+
+
+def test_a_char_in_two_blocks_is_still_a_mismatch_next_to_rescued_text(monkeypatch):
+    """구조 문단은 블록에 들지 않은 글자만 살린다: 같은 글자가 두 블록에 든 것(두 표가 첫 줄 앞 두 글자를 함께 가졌다)은
+    그대로 장부 오류다. 잃은 줄은 구조 문단과 unassigned_text로, 이중 배정은 coverage=None과 coverage_mismatch로
+    남는다(in_blocks는 맞다)."""
+    cells = [Cell(row=0, col=0, text="첫째", text_source="text_layer")]
+    twin = TableSpec(bbox=(0.1, 0.07, 0.3, 0.09), table=Table(n_rows=1, n_cols=1, cells=cells),
+                     char_ids=frozenset(range(2)))
+    monkeypatch.setattr(pdf_parser, "find_tables", lambda page: [twin, twin])
+    losing(monkeypatch, "셋째 문단이다.")
+    parsed = PdfParser(ocr=False, layout=False).parse(make_pdf(PARAS), "a.pdf")
+    assert [b["text"] for b in parsed.blocks if b["confidence"] == 0.3] == ["셋째 문단이다."]
+    assert parsed.pages[0].coverage is None
+    assert [(r.region_id, r.fallback_reason) for r in parsed.regions] == [
+        ("p1-unassigned-text", "unassigned_text"), ("p1-coverage", "coverage_mismatch")]
+    assert gate_numbers(parsed.regions[1]) == {"in_blocks": (True, 21, "==21"), "doubled": (False, 2, "==0")}
