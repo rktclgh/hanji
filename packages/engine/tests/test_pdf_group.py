@@ -6,7 +6,7 @@ import pytest
 from hanji.formats.pdf.extract import Char, PageText
 from hanji.formats.pdf.figures import Caption, Figure
 from hanji.formats.pdf.group import (
-    LIST_MARKER, FigureBlock, Ledger, body_size, build_page_specs, build_specs, fragments, unit_box,
+    LIST_MARKER, FigureBlock, Ledger, _numbered, body_size, build_page_specs, build_specs, fragments, unit_box,
 )
 from hanji.formats.pdf.scan import OcrParagraph
 from hanji.formats.pdf.tables import TableSpec
@@ -528,3 +528,12 @@ def test_ledger_counts_two_equal_glyphs_at_one_place_twice():
     assert replace(p.chars[0], id=0) == replace(p.chars[2], id=2) and page_stats(p).chars == 4
     _, ledgers = build_page_specs([p], ["digital"])
     assert ledgers == {1: Ledger(in_blocks=4, doubled=0)}
+
+
+def test_numbered_keeps_a_page_already_in_order_and_renumbers_the_rest():
+    """_numbered: id가 이미 page.chars 순번이면 같은 쪽을 그대로, 하나라도 다르면 순번을 매긴 사본을 낸다."""
+    chars = line("가나다", 72, 100)
+    ordered = page([replace(c, id=i) for i, c in enumerate(chars)])
+    assert _numbered(ordered) is ordered
+    wrong = page([replace(c, id=i) for c, i in zip(chars, [0, 0, 2], strict=True)])
+    assert [c.id for c in _numbered(wrong).chars] == [0, 1, 2]

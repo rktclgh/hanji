@@ -494,8 +494,9 @@ def build_page_specs(pages: Sequence[PageText], states: Sequence[TextLayerState]
                                       "bbox": {"x0": x0, "y0": y0, "x1": x1, "y1": y1}}})
             own(page, group.char_ids)
             continue
+        shown = group[:1] if margin is not None else group  # 블록이 실제로 내는 조각
         if margin is not None:
-            kind, text, path = margin, group[0].text, ()
+            kind, text, path = margin, shown[0].text, ()
         elif is_heading(page, group):
             kind, text = "heading", unicodedata.normalize("NFC", " ".join(f.text for f in group))
             extra["level"] = min(sizes.index(group[0].size) + 1, MAX_LEVEL)
@@ -511,8 +512,9 @@ def build_page_specs(pages: Sequence[PageText], states: Sequence[TextLayerState]
             continue
         specs.append({"kind": kind, "text": text, "section_path": path, "confidence": CONFIDENCE[kind],
                       "state": "det", "text_source": "text_layer",
-                      "locator": {"kind": "page", "page": page.page, "bbox": _box(group, page)}, **extra})
-        own(page, (c.id for f in group for c in f.chars))
+                      "locator": {"kind": "page", "page": page.page, "bbox": _box(shown, page)}, **extra})
+        # 낸 조각 글자만 장부에 든다: 나머지는 주인 없이 남아 구조 문단(TC-C)이 살린다
+        own(page, (c.id for f in shown for c in f.chars))
     for spec in specs:
         if spec["locator"]["page"] in rough:
             spec["confidence"] = min(spec["confidence"], UNRELIABLE_CONFIDENCE)
