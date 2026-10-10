@@ -564,12 +564,21 @@ def test_lost_lines_come_back_once_as_structural_paragraphs_at_the_page_end(monk
     구조 문단에도 씌워진다."""
     p = page(line("첫째 줄이다.", 72, 100), line("둘째 줄이다.", 72, 130), line("셋째 줄이다.", 72, 160),
              line("숨은", 72, 190, invisible=True))
+    boxes = {f.text: group._box([f], p) for f in group.fragments(p)}  # 잃기 전 줄 조각마다의 위치 상자
     losing(monkeypatch, "셋째 줄이다.", "첫째 줄이다.")
     result, ledgers = build_page_specs([p], [state], modes=[mode])
     assert [(s["kind"], s["text"], s["text_source"], s["confidence"]) for s in result] == [
         ("paragraph", "둘째 줄이다.", "text_layer", min(0.7, cap)), ("paragraph", "첫째 줄이다.", "text_layer", min(0.3, cap)),
         ("paragraph", "셋째 줄이다.", "text_layer", min(0.3, cap))]
     assert ledgers == {1: Ledger(in_blocks=18, doubled=0, rescued=12)} and page_stats(p).chars == 18
+    # 위치 상자는 잃은 그 줄만 감싼다(쪽 전체나 다른 줄의 상자가 아니다)
+    assert [s["locator"] for s in result[1:]] == [{"kind": "page", "page": 1, "bbox": boxes["첫째 줄이다."]},
+                                                  {"kind": "page", "page": 1, "bbox": boxes["셋째 줄이다."]}]
+    assert boxes["첫째 줄이다."] != boxes["셋째 줄이다."]
+    for text, baseline in (("첫째 줄이다.", 100), ("셋째 줄이다.", 160)):
+        box = boxes[text]
+        assert (box["y0"], box["y1"]) == pytest.approx(((baseline - 0.752 * 11) / H, (baseline + 0.142 * 11) / H), abs=2e-3)
+        assert box["x0"] == pytest.approx(72 / W, abs=2e-3) and 0 < box["x1"] - box["x0"] < 0.2
 
 
 def test_ocr_mode_page_rescues_nothing():
