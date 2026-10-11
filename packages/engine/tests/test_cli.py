@@ -22,6 +22,7 @@ from hanji.formats.pdf import ocr
 from hanji.formats.pdf import parser as pdf_parser
 from hanji.formats.pdf.ocr import OcrLine
 from hanji.store import SqliteStore
+from hanji.store import sqlite as sqlite_store
 from hanji_contracts import ChangeBatch, DocumentTree, PageInfo, ProcessingHistory, SourceInfo
 
 
@@ -195,7 +196,7 @@ def test_deeply_nested_markdown_exit_4_and_store_unchanged(capsys, db, tmp_path)
 
 def test_db_priority(capsys, tmp_path, monkeypatch):
     option, env, default_dir = tmp_path / "opt.db", tmp_path / "env.db", tmp_path / "기본"
-    monkeypatch.setattr(cli, "user_data_dir", lambda appname, appauthor: str(default_dir))
+    monkeypatch.setattr(sqlite_store, "user_data_dir", lambda appname, appauthor: str(default_dir))
     monkeypatch.delenv("HANJI_DB", raising=False)
     assert cli.resolve_db(None) == default_dir / "state.db"
     monkeypatch.setenv("HANJI_DB", str(env))

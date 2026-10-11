@@ -1,5 +1,6 @@
 """SQLite 상태 파일 저장소(CLI 기본). 버전 스냅숏을 검증된 계약 JSON으로 통째 저장한다(D4)."""
 
+import os
 import sqlite3
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager, suppress
@@ -7,11 +8,14 @@ from pathlib import Path
 from types import TracebackType
 from typing import Self
 
+from platformdirs import user_data_dir
+
 from hanji_contracts import ChangeBatch, DocRef, DocumentChange, DocumentTree, ProcessingHistory
 
 from ..errors import AssetNotFound, DocumentNotFound, HanjiError, VersionNotFound
 from .base import NO_ASSETS, check_commit, check_query, make_batch
 
+DB_ENV = "HANJI_DB"
 FORMAT_VERSION = "4"  # 4 = 계약 0.4 스키마(쪽 글자 장부). 다른 형식은 다시 수집해야 한다
 _TABLES = (
     "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
@@ -25,6 +29,16 @@ _TABLES = (
     " history_json TEXT NOT NULL, PRIMARY KEY (document_id, version))",
     "CREATE TABLE IF NOT EXISTS assets (sha TEXT PRIMARY KEY, mime TEXT NOT NULL, bytes BLOB NOT NULL)",
 )
+
+
+def resolve_db(option: str | os.PathLike[str] | None) -> Path:
+    """상태 파일 경로: 주어진 값 > 환경변수 HANJI_DB > 사용자 데이터 폴더/hanji/state.db(CLI와 ingest_many가 같이 쓴다)."""
+    if option:
+        return Path(option)
+    env = os.environ.get(DB_ENV)
+    if env:
+        return Path(env)
+    return Path(user_data_dir("hanji", appauthor=False)) / "state.db"
 
 
 class SqliteStore:

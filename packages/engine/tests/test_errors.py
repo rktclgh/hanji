@@ -1,9 +1,10 @@
 import pytest
 
 import hanji
+from hanji import errors
 from hanji.errors import (
-    DocumentNotFound, HanjiError, ModelError, ParseError, StoreConflict, UnsupportedFormat, VersionNotFound,
-    VlmUnavailable,
+    AssetNotFound, DocumentNotFound, HanjiError, ModelError, OcrUnavailable, ParseError, StoreConflict,
+    UnsupportedFormat, VersionNotFound, VlmUnavailable,
 )
 
 
@@ -23,3 +24,13 @@ def test_parse_error_keeps_reason_and_location():
     assert (err.reason, err.location) == ("invalid table", "보고서.md:3-5")
     assert str(err) == "invalid table (보고서.md:3-5)"
     assert str(ParseError("empty")) == "empty" and ParseError("empty").location is None
+
+
+@pytest.mark.parametrize(("exc", "code"), [
+    (UnsupportedFormat("x"), 3), (ParseError("x", "a.md:1"), 4), (DocumentNotFound("d"), 5), (VersionNotFound("d"), 5),
+    (AssetNotFound("sha256:0"), 5), (StoreConflict("x"), 1), (OcrUnavailable("x"), 1), (HanjiError("x"), 1),
+    (FileNotFoundError("x"), 1), (MemoryError(), 1),
+])
+def test_exit_code_maps_errors_like_the_cli(exc, code):
+    """parse의 종료 코드와 ingest의 문서별 error.code가 같은 대응을 쓴다: 3 형식, 4 파싱, 5 없음, 그 밖 1."""
+    assert errors.exit_code(exc) == code
