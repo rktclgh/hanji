@@ -75,3 +75,138 @@ def test_bad_hanji_ort_threads_stops_sessions_as_a_setting_error(monkeypatch):
             build()
         assert type(info.value) is HanjiError
     assert ocr._reader is None and layout._detector is None
+
+
+V2_MOUNT = "30 23 0:26 / /sys/fs/cgroup rw,nosuid,nodev,noexec,relatime shared:4 - cgroup2 cgroup2 rw,nsdelegate\n"
+V1_MOUNTS = ("35 25 0:30 / /sys/fs/cgroup/memory rw,nosuid shared:15 - cgroup cgroup rw,memory\n"
+             "36 25 0:31 / /sys/fs/cgroup/cpu,cpuacct rw,nosuid shared:16 - cgroup cgroup rw,cpu,cpuacct\n")
+
+
+def fake_root(tmp_path, files: dict[str, str]):
+    """가짜 파일 시스템 뿌리: {뿌리 기준 경로: 내용}."""
+    for rel, text in files.items():
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    return tmp_path
+
+
+def test_cgroup_v2_takes_the_smallest_room_from_its_own_group_up_to_the_mount(tmp_path):
+    """자기 경로부터 마운트 뿌리까지 min(memory.max, 물리) − memory.current의 최솟값. 'max' 단계는 건너뛴다. 조상이 더
+    작으면 조상. 마운트 뿌리(/kubepods)는 경로에서 뺀다."""
+    root = fake_root(tmp_path, {
+        "proc/self/cgroup": "0::/kubepods/pod1/c1\n",
+        "proc/self/mountinfo": V2_MOUNT.replace(" / /sys/fs/cgroup", " /kubepods /sys/fs/cgroup"),
+        "sys/fs/cgroup/pod1/c1/memory.max": "max\n",
+        "sys/fs/cgroup/pod1/c1/memory.current": "100\n",
+        "sys/fs/cgroup/pod1/memory.max": str(8 * resources.GiB),
+        "sys/fs/cgroup/pod1/memory.current": str(3 * resources.GiB),
+        "sys/fs/cgroup/memory.max": str(6 * resources.GiB),
+        "sys/fs/cgroup/memory.current": str(2 * resources.GiB),
+    })
+    assert resources._available(root, 64 * resources.GiB) == 4 * resources.GiB  # 뿌리 6 − 2 < pod1 8 − 3
+    (root / "sys/fs/cgroup/memory.max").write_text("max\n", encoding="utf-8")
+    assert resources._available(root, 64 * resources.GiB) == 5 * resources.GiB
+
+
+def test_cgroup_v1_counts_the_unlimited_marker_as_physical_minus_usage(tmp_path):
+    """v1 memory 계층: 자기 경로와 조상의 최솟값. '제한 없음' 표시값(물리 이상)도 min(한도, 물리) − 사용량이다."""
+    root = fake_root(tmp_path, {
+        "proc/self/cgroup": "12:cpu,cpuacct:/docker/abc\n9:memory:/docker/abc\n0::/\n",
+        "proc/self/mountinfo": V1_MOUNTS,
+        "sys/fs/cgroup/memory/docker/abc/memory.limit_in_bytes": "9223372036854771712\n",
+        "sys/fs/cgroup/memory/docker/abc/memory.usage_in_bytes": str(resources.GiB),
+        "sys/fs/cgroup/memory/docker/memory.limit_in_bytes": str(20 * resources.GiB),
+        "sys/fs/cgroup/memory/docker/memory.usage_in_bytes": str(resources.GiB),
+    })
+    assert resources._available(root, 16 * resources.GiB) == 15 * resources.GiB
+    (root / "sys/fs/cgroup/memory/docker/memory.limit_in_bytes").write_text(str(4 * resources.GiB), encoding="utf-8")
+    assert resources._available(root, 16 * resources.GiB) == 3 * resources.GiB
+
+
+def test_root_files_are_read_when_proc_is_missing_and_usage_is_still_subtracted(tmp_path):
+    """/proc 정보가 없으면 뿌리 파일만 본다. 사용량을 빼고, 물리 이상 유한 한도는 min(한도, 물리) − 사용량."""
+    root = fake_root(tmp_path, {"sys/fs/cgroup/memory.max": str(32 * resources.GiB),
+                                "sys/fs/cgroup/memory.current": str(resources.GiB)})
+    assert resources._available(root, 16 * resources.GiB) == 15 * resources.GiB
+    root = fake_root(tmp_path / "v1", {"sys/fs/cgroup/memory/memory.limit_in_bytes": str(4 * resources.GiB)})
+    assert resources._available(root, 16 * resources.GiB) == 4 * resources.GiB  # 사용량 파일이 없으면 0
+
+
+def test_root_files_are_read_when_proc_is_there_but_no_mount_or_limit_is_found(tmp_path):
+    """/proc는 읽히지만 cgroup 마운트를 찾지 못하거나(다른 마운트뿐), 찾은 계층 어디에도 한도 파일이 없으면 뿌리
+    파일을 본다(스펙 §8.5-3). 예전 코드는 물리 메모리를 돌려 예산을 크게 잡았다."""
+    root = fake_root(tmp_path / "nomount", {
+        "proc/self/cgroup": "0::/app\n", "proc/self/mountinfo": "22 1 0:21 / /proc rw - proc proc rw\n",
+        "sys/fs/cgroup/memory.max": str(4 * resources.GiB), "sys/fs/cgroup/memory.current": str(resources.GiB)})
+    assert resources._available(root, 16 * resources.GiB) == 3 * resources.GiB
+    root = fake_root(tmp_path / "nolimit", {  # 통합 계층이 /sys/fs/cgroup/unified에 있고 거기엔 한도가 없다
+        "proc/self/cgroup": "0::/app\n",
+        "proc/self/mountinfo": V2_MOUNT.replace("/sys/fs/cgroup ", "/sys/fs/cgroup/unified "),
+        "sys/fs/cgroup/unified/app/memory.current": "100\n",
+        "sys/fs/cgroup/memory/memory.limit_in_bytes": str(2 * resources.GiB)})
+    assert resources._available(root, 16 * resources.GiB) == 2 * resources.GiB
+
+
+def test_without_cgroup_limits_memory_is_physical_or_unknown(tmp_path, monkeypatch):
+    root = fake_root(tmp_path, {"proc/self/cgroup": "0::/user.slice\n", "proc/self/mountinfo": V2_MOUNT,
+                                "sys/fs/cgroup/user.slice/memory.max": "max\n"})
+    assert resources._available(root, 16 * resources.GiB) == 16 * resources.GiB
+    assert resources._available(tmp_path / "empty", None) is None
+    monkeypatch.delattr(os, "sysconf", raising=False)  # Windows
+    assert resources.physical_memory() is None
+
+
+@pytest.mark.parametrize(("files", "cores"), [
+    ({"sys/fs/cgroup/app/cpu.max": "200000 100000\n"}, 2),
+    ({"sys/fs/cgroup/app/cpu.max": "150000 100000\n"}, 2),
+    ({"sys/fs/cgroup/app/cpu.max": "max 100000\n"}, 8),
+    ({"sys/fs/cgroup/app/cpu.max": "max 100000\n", "sys/fs/cgroup/cpu.max": "300000 100000\n"}, 3),
+])
+def test_cgroup_v2_cpu_quota_rounds_up_and_takes_the_smallest(tmp_path, files, cores):
+    root = fake_root(tmp_path, {"proc/self/cgroup": "0::/app\n", "proc/self/mountinfo": V2_MOUNT, **files})
+    assert resources._cores(root, [8, 12]) == cores
+
+
+@pytest.mark.parametrize(("quota", "cores"), [("-1", 6), ("250000", 3)])
+def test_cgroup_v1_cpu_quota(tmp_path, quota, cores):
+    root = fake_root(tmp_path, {"proc/self/cgroup": "12:cpu,cpuacct:/docker/abc\n9:memory:/docker/abc\n",
+                                "proc/self/mountinfo": V1_MOUNTS,
+                                "sys/fs/cgroup/cpu,cpuacct/docker/abc/cpu.cfs_quota_us": quota,
+                                "sys/fs/cgroup/cpu,cpuacct/docker/abc/cpu.cfs_period_us": "100000"})
+    assert resources._cores(root, [6]) == cores
+
+
+def test_cpu_count_takes_a_smaller_affinity_and_a_smaller_quota(tmp_path, monkeypatch):
+    """실효 코어 = min(os.cpu_count(), sched_getaffinity(있을 때), cgroup 쿼터). 가짜 os 값과 가짜 뿌리로 본다."""
+    monkeypatch.setattr(os, "cpu_count", lambda: 8)
+    monkeypatch.setattr(os, "sched_getaffinity", lambda pid: {0, 1, 2}, raising=False)
+    assert resources._cpu_count(fake_root(tmp_path / "plain", {})) == 3  # affinity 3 < cpu_count 8
+    root = fake_root(tmp_path / "quota", {"proc/self/cgroup": "0::/app\n", "proc/self/mountinfo": V2_MOUNT,
+                                          "sys/fs/cgroup/app/cpu.max": "200000 100000\n"})
+    assert resources._cpu_count(root) == 2  # 쿼터 2 < affinity 3
+    monkeypatch.delattr(os, "sched_getaffinity")  # macOS·Windows: affinity 없음
+    assert resources._cpu_count(fake_root(tmp_path / "plain", {})) == 8
+
+
+@pytest.mark.parametrize(("text", "size"), [
+    ("8G", 8 * 2**30), ("512M", 512 * 2**20), ("1.5GiB", 3 * 2**29), ("4096", 4096), ("2k", 2048), ("1TB", 2**40),
+    (" 8G ", 8 * 2**30),
+])
+def test_parse_size_reads_1024_multiples(text, size):
+    assert resources.parse_size(text) == size
+
+
+@pytest.mark.parametrize("text", ["", "abc", "1.5", "0", "0.0001K", "-1G", "8X", "G", "3 GiB"])
+def test_parse_size_rejects_other_text(text):
+    with pytest.raises(ValueError, match="invalid size"):
+        resources.parse_size(text)
+
+
+def test_budget_is_eighty_percent_of_the_limit_and_a_larger_max_memory_is_clipped():
+    assert resources.budget(None, 10 * resources.GiB) == (8 * resources.GiB, [])
+    assert resources.budget(None, None) == (None, [])
+    assert resources.budget(4 * resources.GiB, 10 * resources.GiB) == (4 * resources.GiB, [])
+    assert resources.budget(4 * resources.GiB, None) == (4 * resources.GiB, [])
+    assert resources.budget(16 * resources.GiB, 10 * resources.GiB) == (10 * resources.GiB, [
+        "max memory 16.0GiB is above the available memory 10.0GiB; using 10.0GiB"])
