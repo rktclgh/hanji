@@ -317,3 +317,83 @@ def test_parse_size_is_exact_for_whole_numbers_and_takes_a_plain_b(text, size):
 def test_parse_size_rejects_ib_without_a_prefix_overflow_and_other_digits(text):
     with pytest.raises(ValueError, match="invalid size"):
         resources.parse_size(text)
+
+
+SPEC = resources.Cost(base=2138 * resources.MiB, per_page=8 * resources.MiB)  # 스펙 §8.5 예의 OCR + 레이아웃 상수
+
+
+def test_config_and_estimate_cover_the_four_settings_and_both_formats():
+    """설정 4가지는 상수가 있고, 추가 몫 = 쪽 몫 × 쪽 수 + 바이트 배수 × 크기(배수는 PDF·그 밖 따로, MD는 쪽 0)."""
+    names = {resources.config_of(o, la) for o in (False, True) for la in (False, True)}
+    assert names == set(resources.COSTS) == {"none", "layout", "ocr", "both"}
+    assert all(c.base > 0 and c.per_page > 0 for c in resources.COSTS.values())
+    cost = resources.Cost(base=1000, per_page=10)
+    pdf, other = resources.BYTES_FACTOR["pdf"], resources.BYTES_FACTOR["other"]
+    assert resources.estimate(cost, 12, 1000, pdf=True) == 12 * 10 + pdf * 1000
+    assert resources.estimate(cost, 0, 1000, pdf=False) == other * 1000
+
+
+@pytest.mark.parametrize(("budget", "cores", "workers"), [
+    (int(48 * resources.GiB * 0.8), 15, 15),  # 이 기계: 38.4GiB
+    (int(16 * resources.GiB * 0.8), 8, 5),  # 16GiB 노트북
+    (int(8 * resources.GiB * 0.8), 4, 2),  # Docker -m 8g --cpus 4
+    (int(4 * resources.GiB * 0.8), 4, 1),  # Docker -m 4g: 작업 1개
+])
+def test_workers_fit_the_budget_after_the_parent_reserve(budget, cores, workers):
+    """W = max(1, min(cores, floor((예산 − 256MiB) / (base + 50쪽 몫)))). 스펙 §8.5 표의 예."""
+    assert resources.plan_workers(budget, SPEC, cores, None, windows=False) == (workers, [])
+
+
+@pytest.mark.parametrize("budget", [0, 100 * resources.MiB])
+def test_a_budget_below_one_worker_still_runs_one_worker_with_a_warning(budget):
+    """예산이 0(사용 가능 메모리가 다 찼다)이거나 작업 1개 몫보다 작아도 W = 1(0이 아니다)이고 경고한다(컨트롤러 판정)."""
+    assert resources.plan_workers(budget, SPEC, 4, None, windows=False) == (1, [
+        f"memory {resources.format_size(budget)} is below what one worker needs (2.7GiB); using 1 worker"])
+
+
+def test_requested_workers_are_an_upper_bound_with_a_warning():
+    budget = int(16 * resources.GiB * 0.8)
+    assert resources.plan_workers(budget, SPEC, 8, 3, windows=False) == (3, [])
+    assert resources.plan_workers(budget, SPEC, 8, 9, windows=False) == (5, [
+        "workers 9 is above what memory 12.8GiB and 8 CPUs allow; using 5"])
+    tiny = resources.Cost(base=resources.MiB, per_page=0)
+    assert resources.plan_workers(budget, tiny, 128, None, windows=True)[0] == 61  # Windows 상한
+
+
+def test_without_a_budget_workers_are_requested_or_one():
+    assert resources.plan_workers(None, SPEC, 8, None, windows=False) == (1, [
+        "memory limit unknown; using 1 worker (set --max-memory or --workers)"])
+    assert resources.plan_workers(None, SPEC, 8, 6, windows=False) == (6, [])
+    assert resources.plan_workers(None, SPEC, 8, 64, windows=True) == (61, [
+        "workers 64 is above the Windows limit; using 61"])
+
+
+def test_room_and_the_over_budget_exception():
+    """여유 = 예산 − 부모 몫 − W × base. 혼자여도 부모 몫 + base + 추가 몫이 예산을 넘으면 예외(경고하고 돌린다)."""
+    budget = int(4 * resources.GiB * 0.8)
+    free = resources.room(budget, 1, SPEC)
+    assert free == budget - 256 * resources.MiB - 2138 * resources.MiB
+    assert resources.room(None, 3, SPEC) is None
+    assert not resources.over_budget(free, SPEC, budget) and resources.over_budget(free + 1, SPEC, budget)
+    assert not resources.over_budget(10**15, SPEC, None)
+
+
+def test_admission_is_fifo_with_room_slots_and_one_run_per_sha():
+    """맨 앞 문서만 본다: 같은 sha가 돌면 기다리고, 자리·여유가 없으면 기다리며, 여유보다 큰 문서는 돌던 문서가 모두
+    끝난 뒤 혼자 돈다. 예산이 없으면 개수만 본다."""
+    running = [("a", 300), ("b", 300)]
+    assert resources.admit("c", 300, running, 3, 1000) == "run"
+    assert resources.admit("a", 1, running, 3, 1000) == "wait"  # 같은 sha
+    assert resources.admit("c", 300, running, 2, 1000) == "wait"  # 자리 없음
+    assert resources.admit("c", 401, running, 3, 1000) == "wait"  # 여유 모자람(뒤 문서가 작아도 앞지르지 않는다)
+    assert resources.admit("c", 1001, running, 3, 1000) == "wait"  # 여유보다 크다: 돌던 문서가 끝나기를
+    assert resources.admit("c", 1001, [], 3, 1000) == "alone"
+    assert resources.admit("c", 10**12, running, 3, None) == "run"
+
+
+@pytest.mark.parametrize(("workers", "cores", "total", "threads"), [
+    (15, 15, 15, 1), (5, 8, 8, 1), (2, 4, 15, 2), (1, 8, 8, None),
+    (1, 4, 15, 4),  # 작업 1개라도 실효 코어(쿼터·affinity)가 os.cpu_count()보다 작으면 실효 코어(개정 1 판정 1)
+])
+def test_pool_threads_split_the_effective_cores(workers, cores, total, threads):
+    assert resources.pool_threads(workers, cores, total) == threads

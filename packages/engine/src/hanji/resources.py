@@ -4,7 +4,10 @@
 import math
 import os
 import re
+from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from .errors import HanjiError
 
@@ -230,3 +233,101 @@ def budget(max_memory: int | None, limit: int | None) -> tuple[int | None, list[
         return limit, [f"max memory {format_size(max_memory)} is above the available memory "
                        f"{format_size(limit)}; using {format_size(limit)}"]
     return max_memory, []
+
+
+# 비용과 입장(스펙 §8.1·8.2)
+Config = Literal["none", "layout", "ocr", "both"]  # 켠 모델: 없음·레이아웃만·OCR만·둘 다
+Admission = Literal["run", "wait", "alone"]
+PARENT_RESERVE = 256 * MiB  # 부모 몫(계획 탐침 실측 60MiB)
+SLOT_PAGES = 50  # 작업 수를 정할 때 작업 프로세스마다 남기는 자리(50쪽 PDF 하나, D11)
+MAX_WINDOWS_WORKERS = 61  # Windows ProcessPoolExecutor 상한
+RECYCLE_PER_WORKER = 20  # 풀을 20 × W건마다 새로 만든다(§8.6)
+
+
+@dataclass(frozen=True, slots=True)
+class Cost:
+    """설정 하나의 비용(바이트). base: 살아 있는 작업 프로세스마다 늘 잡는 상주 몫, per_page: 돌고 있는 PDF의 쪽마다."""
+
+    base: int
+    per_page: int
+
+
+# 잰 값(2026-10-11, 스펙 §8.3 방법: 실제 작업 경로 SqliteStore + LocalEngine.ingest(force=True), 문서마다 새 프로세스와
+# 다시 쓰는 작업 프로세스, ORT 기본 스레드, 실데이터 185건 보통·모든 쪽 OCR + 합성 큰 입력 4건 + 한 쪽 예제, macOS arm64와
+# 리눅스 Docker aarch64 중 큰 값을 MiB로 올림. 모델을 더 켠 설정은 덜 켠 설정보다 작게 잡지 않는다). 잰 세트를 덮는
+# 값이지 새 문서의 상한이 아니다. 엔진 동작이 바뀌는 PR은 같은 탐침을 다시 돌린다
+COSTS: dict[Config, Cost] = {
+    "none": Cost(base=224 * MiB, per_page=3 * MiB),
+    "layout": Cost(base=850 * MiB, per_page=2 * MiB),
+    "ocr": Cost(base=1889 * MiB, per_page=11 * MiB),
+    "both": Cost(base=1889 * MiB, per_page=11 * MiB),
+}
+BYTES_FACTOR = {"pdf": 2, "other": 20}  # 입력 바이트마다(큰 MD는 입력의 약 20배를 쓴다)
+
+
+def config_of(ocr: bool, layout: bool) -> Config:
+    """켠 모델(끄지 않았고 쓸 수 있음) → 비용 설정 이름."""
+    return ("both" if layout else "ocr") if ocr else ("layout" if layout else "none")
+
+
+def estimate(cost: Cost, pages: int, size: int, pdf: bool) -> int:
+    """돌고 있는 문서 하나의 추가 몫 = 쪽 몫 × 쪽 수 + 바이트 배수 × 파일 크기(MD는 쪽 수 0)."""
+    return cost.per_page * pages + BYTES_FACTOR["pdf" if pdf else "other"] * size
+
+
+def plan_workers(budget: int | None, cost: Cost, cores: int, requested: int | None,
+                 windows: bool) -> tuple[int, list[str]]:
+    """작업 수와 경고. 예산이 있으면 max(1, min(cores, floor((예산 − 부모 몫) / (base + 50쪽 몫)), Windows 61)),
+    requested는 그 상한 안에서만(넘으면 경고하고 자른다, D10). 예산이 0이거나 작업 1개 몫보다 작아도 0이 아니라 1이고
+    경고한다(컨트롤러 판정). 예산이 없으면 requested(Windows 61까지), 없으면 1."""
+    if budget is None:
+        if requested is None:
+            return 1, ["memory limit unknown; using 1 worker (set --max-memory or --workers)"]
+        if windows and requested > MAX_WINDOWS_WORKERS:
+            return MAX_WINDOWS_WORKERS, [f"workers {requested} is above the Windows limit; "
+                                         f"using {MAX_WINDOWS_WORKERS}"]
+        return requested, []
+    slot = cost.base + cost.per_page * SLOT_PAGES
+    fit = (budget - PARENT_RESERVE) // slot
+    limit = max(1, min(cores, fit, MAX_WINDOWS_WORKERS if windows else cores))
+    warnings = []
+    if fit < 1:
+        warnings.append(f"memory {format_size(budget)} is below what one worker needs "
+                        f"({format_size(PARENT_RESERVE + slot)}); using 1 worker")
+    if requested is not None and requested > limit:
+        warnings.append(f"workers {requested} is above what memory {format_size(budget)} and {cores} CPUs allow; "
+                        f"using {limit}")
+        return limit, warnings
+    return (limit if requested is None else requested), warnings
+
+
+def room(budget: int | None, workers: int, cost: Cost) -> int | None:
+    """여유 = 예산 − 부모 몫 − W × base: 돌고 있는 문서의 추가 몫 합이 넘으면 안 된다. 예산이 없으면 None."""
+    return None if budget is None else budget - PARENT_RESERVE - workers * cost.base
+
+
+def admit(sha: str, extra: int, running: Sequence[tuple[str, int]], workers: int, free: int | None) -> Admission:
+    """맨 앞 문서(FIFO, 앞질러 가지 않음)를 지금 보낼 수 있나. running은 돌고 있는 문서의 (sha256, 추가 몫).
+    wait: 같은 sha가 돌고 있다, 자리가 없다, 여유가 모자란다, 여유보다 큰데 돌던 문서가 있다. alone: 여유보다 크고 돌던
+    문서가 없다(작업 1개 풀에서 혼자). run: 보낸다. free가 None이면(예산 없음) 개수만 본다."""
+    if any(other == sha for other, _ in running):
+        return "wait"
+    if free is not None and extra > free:
+        return "wait" if running else "alone"
+    if len(running) >= workers or (free is not None and sum(e for _, e in running) + extra > free):
+        return "wait"
+    return "run"
+
+
+def over_budget(extra: int, cost: Cost, budget: int | None) -> bool:
+    """혼자 돌아도 추정이 예산을 넘는가(부모 몫 + base + 추가 몫 > 예산): 예산 보장의 유일한 예외(경고하고 돌린다)."""
+    return budget is not None and PARENT_RESERVE + cost.base + extra > budget
+
+
+def pool_threads(workers: int, cores: int, total: int) -> int | None:
+    """작업 프로세스의 ORT 스레드 수. cores는 실효 코어(cpu_count), total은 os.cpu_count(). W ≥ 2이면
+    max(1, cores // W). W = 1이면 실효 코어가 total보다 작을 때만 cores(onnxruntime 기본값은 cgroup 쿼터를 보지 않고
+    total만큼 띄운다), 아니면 None(기본값). 사용자가 정한 HANJI_ORT_THREADS가 이긴다(작업 프로세스가 본다)."""
+    if workers >= 2:
+        return max(1, cores // workers)
+    return cores if cores < total else None
