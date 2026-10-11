@@ -86,7 +86,8 @@ def _retry_locked[T](fn: Callable[[], T], conn: Any = None) -> T:
                 shortened = True
     finally:
         if shortened:
-            _busy(conn, BUSY_TIMEOUT)
+            with suppress(sqlite3.Error):  # 되돌리기가 실패해도 원래 오류를 가리지 않는다
+                _busy(conn, BUSY_TIMEOUT)
 
 
 class SqliteStore:
