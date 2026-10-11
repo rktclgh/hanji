@@ -9,17 +9,23 @@ from pathlib import Path
 from .errors import HanjiError
 
 ORT_THREADS_ENV = "HANJI_ORT_THREADS"
+ORT_THREADS_MAX = 2**31 - 1  # onnxruntime 스레드 수는 int32
 
 
 def ort_threads_env() -> int | None:
-    """환경변수 HANJI_ORT_THREADS(양의 정수). 없거나 비었으면 None(onnxruntime 기본값). 잘못된 값은 HanjiError(설정 오류,
-    종료 코드 1). OCR·레이아웃 세션과 ingest_many가 같은 함수로 읽는다."""
+    """환경변수 HANJI_ORT_THREADS(1 이상 2**31 − 1 이하 정수). 없거나 비었으면 None(onnxruntime 기본값). 잘못된 값은
+    HanjiError(설정 오류, 종료 코드 1). OCR·레이아웃 세션과 ingest_many가 같은 함수로 읽는다. 값은 세션을 만들 때 한 번
+    읽으므로 프로세스를 시작하기 전에 정한다."""
     raw = os.environ.get(ORT_THREADS_ENV, "").strip()
     if not raw:
         return None
-    if not (raw.isascii() and raw.isdigit()) or int(raw) < 1:
+    try:
+        threads = int(raw) if raw.isascii() and raw.isdigit() else 0
+    except ValueError:  # int 자릿수 한도를 넘는 숫자 문자열
+        threads = 0
+    if not 1 <= threads <= ORT_THREADS_MAX:
         raise HanjiError(f"{ORT_THREADS_ENV} must be a positive integer, got {raw!r}")
-    return int(raw)
+    return threads
 
 
 def set_ort_threads(options: object) -> None:
@@ -34,19 +40,28 @@ def set_ort_threads(options: object) -> None:
 GiB, MiB = 2**30, 2**20
 BUDGET_SHARE = 0.8  # 기본 예산 = 알아낸 사용 가능 메모리 × 0.8(D5)
 _UNITS = {"": 1, "K": 2**10, "M": 2**20, "G": 2**30, "T": 2**40}
-_SIZE = re.compile(r"(\d+(?:\.\d+)?)([KMGT]?)(?:I?B)?", re.IGNORECASE)
+_SIZE = re.compile(r"([0-9]+(?:\.[0-9]+)?)(?:([KMGT])(?:I?B)?|B)?", re.IGNORECASE)
+_INT = re.compile(r"-?[0-9]+")
+_V1_UNLIMITED = 2**62  # cgroup v1 "제한 없음" 표시값(9223372036854771712, 0x7FFFFFFFFFFF0000 등)은 이 값 이상
 
 
 def parse_size(text: str) -> int:
-    """크기 문자열 → 바이트: "8G", "512M", "1.5GiB", "4096"(바이트). K·M·G·T는 1024배수, B·iB를 붙여도 된다(대소문자
-    무시). 단위 없는 소수, 1바이트 아래, 그 밖은 ValueError."""
+    """크기 문자열 → 바이트: "8G", "512M", "1.5GiB", "4096"·"4096B"(바이트). K·M·G·T는 1024배수, 그 뒤에 B·iB를 붙여도
+    된다(대소문자 무시, 단위 없이 iB는 안 된다). 정수는 정확히 센다. 단위 없는 소수, 1바이트 아래, 너무 큰 소수, 그 밖은
+    ValueError."""
     match = _SIZE.fullmatch(text.strip())
     if match is None:
         raise ValueError(f"invalid size {text!r} (use e.g. 8G, 512M, 1.5GiB or a byte count)")
-    number, unit = match.group(1), match.group(2).upper()
-    if not unit and "." in number:
+    number, unit = match.group(1), (match.group(2) or "").upper()
+    if "." not in number:
+        value = int(number) * _UNITS[unit]
+    elif not unit:
         raise ValueError(f"invalid size {text!r} (a byte count must be a whole number)")
-    value = int(float(number) * _UNITS[unit])
+    else:
+        try:
+            value = int(float(number) * _UNITS[unit])
+        except OverflowError:
+            raise ValueError(f"invalid size {text!r} (too large)") from None
     if value < 1:
         raise ValueError(f"invalid size {text!r} (must be at least 1 byte)")
     return value
@@ -58,11 +73,12 @@ def format_size(value: int) -> str:
 
 
 def physical_memory() -> int | None:
-    """물리 메모리 바이트(sysconf: 리눅스·macOS). 알 수 없으면(Windows) None."""
+    """물리 메모리 바이트(sysconf: 리눅스·macOS). 알 수 없으면(Windows, sysconf가 0 이하를 주면) None."""
     try:
-        return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+        value = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
     except (AttributeError, ValueError, OSError):
         return None
+    return value if value > 0 else None
 
 
 def _read(path: Path) -> str | None:
@@ -72,15 +88,25 @@ def _read(path: Path) -> str | None:
         return None
 
 
+def _int(text: str | None) -> int | None:
+    """ASCII 정수 글자. 없거나 깨졌으면 None(예외를 내지 않는다)."""
+    if text is None or _INT.fullmatch(text) is None:
+        return None
+    try:
+        return int(text)
+    except ValueError:  # int 자릿수 한도를 넘는 숫자
+        return None
+
+
 def _number(path: Path) -> int | None:
-    text = _read(path)
-    return int(text) if text is not None and text.lstrip("-").isdigit() else None
+    return _int(_read(path))
 
 
 def _cgroup_dirs(root: Path, version: int, controller: str) -> list[Path] | None:
     """자기 cgroup 폴더부터 그 계층의 마운트 지점까지(아래 → 위). version 2는 통합 계층("0::경로"와 cgroup2 마운트),
     1은 controller 계층("번호:…,controller,…:경로"와 그 옵션이 있는 cgroup 마운트). 마운트 뿌리는 경로에서 뺀다.
-    /proc 파일이 없거나 계층을 찾지 못하면 None."""
+    자기 경로를 품은 마운트를 먼저 고르고, 그런 마운트가 없으면(다른 이름공간) 첫 마운트의 마운트 지점만 본다. ".."가
+    든 경로도 다른 이름공간에서 본 것이라 "/"로 본다. /proc 파일이 없거나 계층을 찾지 못하면 None."""
     groups, mounts = _read(root / "proc/self/cgroup"), _read(root / "proc/self/mountinfo")
     if groups is None or mounts is None:
         return None
@@ -93,6 +119,9 @@ def _cgroup_dirs(root: Path, version: int, controller: str) -> list[Path] | None
             break
     if own is None:
         return None
+    if ".." in own.split("/"):  # 이름공간 밖 경로: 마운트 지점 밖 폴더를 읽지 않는다
+        own = "/"
+    found = []
     for line in mounts.splitlines():
         left, sep, right = line.partition(" - ")
         fields, tail = left.split(), right.split()
@@ -101,29 +130,30 @@ def _cgroup_dirs(root: Path, version: int, controller: str) -> list[Path] | None
         if (version == 2 and tail[0] != "cgroup2") or (
                 version == 1 and (tail[0] != "cgroup" or controller not in tail[2].split(","))):
             continue
-        mount_root, point = fields[3], root / fields[4].lstrip("/")
+        found.append((fields[3], root / fields[4].lstrip("/")))
+    for mount_root, point in found:
         if mount_root == "/":
             rel = own
         elif own == mount_root or own.startswith(mount_root + "/"):
             rel = own[len(mount_root):]
-        else:  # 자기 경로가 마운트 밖(다른 이름공간): 마운트 지점을 본다
-            rel = "/"
+        else:
+            continue
         folder, dirs = point / rel.strip("/"), []
         while True:
             dirs.append(folder)
             if folder == point or point not in folder.parents:
                 return dirs
             folder = folder.parent
-    return None
+    return [found[0][1]] if found else None  # 자기 경로가 어느 마운트에도 없다(다른 이름공간): 마운트 지점
 
 
 def _cgroup_room(dirs: list[Path], limit_file: str, usage_file: str, physical: int | None) -> int | None:
-    """폴더마다 min(한도, 물리) − 사용량의 최솟값(0 아래는 0). 한도 파일이 없거나 'max'인 폴더는 건너뛰고, 사용량
-    파일이 없으면 0. 숫자 한도가 하나도 없으면 None."""
+    """폴더마다 min(한도, 물리) − 사용량의 최솟값(0 아래는 0). 한도 파일이 없거나 깨졌거나 'max'이거나 v1 "제한 없음"
+    표시값(2**62 이상)인 폴더는 건너뛰고 그 사용량도 빼지 않는다. 사용량 파일이 없으면 0. 숫자 한도가 하나도 없으면 None."""
     best = None
     for folder in dirs:
         limit = _number(folder / limit_file)
-        if limit is None:
+        if limit is None or limit >= _V1_UNLIMITED:
             continue
         room = (limit if physical is None else min(limit, physical)) - (_number(folder / usage_file) or 0)
         best = room if best is None else min(best, room)
@@ -148,7 +178,8 @@ def _available(root: Path, physical: int | None) -> int | None:
 def available_memory() -> int | None:
     """사용 가능 메모리 바이트(먼저 찾은 것): cgroup v2(자기 경로부터 마운트 뿌리까지), cgroup v1(memory 계층, 같다),
     /proc 정보를 읽을 수 없으면 뿌리 파일(/sys/fs/cgroup/memory.max·memory/memory.limit_in_bytes), cgroup 한도가 없으면
-    물리 메모리(다른 프로세스 사용량은 빼지 않는다). 한도를 찾으면 늘 min(한도, 물리) − 사용량. 알 수 없으면 None."""
+    물리 메모리(다른 프로세스 사용량은 빼지 않는다). 한도를 찾으면 늘 min(한도, 물리) − 사용량. v1 "제한 없음" 표시값
+    (2**62 이상)은 한도가 아니라 그 단계를 건너뛰고 사용량도 빼지 않는다. 알 수 없으면 None."""
     return _available(Path("/"), physical_memory())
 
 
@@ -156,11 +187,12 @@ def _cpu_quota(dirs: list[Path], version: int) -> int | None:
     best = None
     for folder in dirs:
         if version == 2:
-            quota, _, period = (_read(folder / "cpu.max") or "max").partition(" ")
-            cores = math.ceil(int(quota) / int(period)) if quota.isdigit() and period.isdigit() else None
+            text, _, period_text = (_read(folder / "cpu.max") or "max").partition(" ")
+            quota, period = _int(text), _int(period_text)
         else:
-            quota_us, period_us = _number(folder / "cpu.cfs_quota_us"), _number(folder / "cpu.cfs_period_us")
-            cores = math.ceil(quota_us / period_us) if quota_us and quota_us > 0 and period_us else None
+            quota, period = _number(folder / "cpu.cfs_quota_us"), _number(folder / "cpu.cfs_period_us")
+        # 깨진 값·0 이하 주기는 쿼터 없음. 정수 올림(ceil)이라 큰 값도 정확하다
+        cores = -(-quota // period) if quota is not None and quota > 0 and period is not None and period > 0 else None
         if cores is not None:
             best = cores if best is None else min(best, cores)
     return best
@@ -175,7 +207,10 @@ def _cores(root: Path, counts: list[int]) -> int:
 def _cpu_count(root: Path) -> int:
     counts = [os.cpu_count() or 1]
     if hasattr(os, "sched_getaffinity"):
-        counts.append(len(os.sched_getaffinity(0)))
+        try:
+            counts.append(len(os.sched_getaffinity(0)))
+        except OSError:  # 읽을 수 없으면 없는 것
+            pass
     return _cores(root, counts)
 
 

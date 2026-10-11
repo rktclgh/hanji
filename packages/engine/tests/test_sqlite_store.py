@@ -167,9 +167,16 @@ def lock_error(code: int | None = 5, message: str = "database is locked") -> sql
     return exc
 
 
-def test_open_waits_while_another_connection_holds_a_new_state_file(db):
+def test_open_waits_while_another_connection_holds_a_new_state_file(db, monkeypatch):
     """다른 연결이 새 상태 파일의 쓰기 잠금을 쥐고 있으면 WAL 전환이 바쁨 대기 없이 바로 잠금 오류를 낸다. 여는 쪽은
-    잠금이 놓일 때까지 다시 해서 연다."""
+    잠금이 놓일 때까지 다시 해서 연다(실제로 한 번 이상 쉬었다가)."""
+    slept, real_sleep = [], sqlite_store.sleep
+
+    def spy(seconds):
+        slept.append(seconds)
+        real_sleep(seconds)
+
+    monkeypatch.setattr(sqlite_store, "sleep", spy)
     db.parent.mkdir(parents=True)
     holder = sqlite3.connect(db, isolation_level=None, check_same_thread=False)
     holder.execute("BEGIN IMMEDIATE")
@@ -181,17 +188,21 @@ def test_open_waits_while_another_connection_holds_a_new_state_file(db):
     finally:
         release.join()
         holder.close()
+    assert slept, "the open must have retried after a lock error"
 
 
 def test_eight_processes_open_a_new_state_file_together(tmp_path):
     """장벽으로 맞춘 spawn 프로세스 8개가 새 상태 파일을 동시에 연다(3라운드). 모두 연다."""
     outcomes = scenario(tmp_path, r"""
-        import json, multiprocessing as mp, os, sys
+        import json, multiprocessing as mp, os, sys, threading, time
 
 
         def open_store(path, barrier, queue):
             from hanji import SqliteStore
-            barrier.wait()
+            try:
+                barrier.wait(timeout=60)  # 부모가 죽어 장벽이 안 차도 스스로 끝난다
+            except threading.BrokenBarrierError:
+                return
             try:
                 SqliteStore(path).close()
                 queue.put("ok")
@@ -201,6 +212,7 @@ def test_eight_processes_open_a_new_state_file_together(tmp_path):
 
         if __name__ == "__main__":
             ctx = mp.get_context("spawn")
+            deadline = time.monotonic() + 90  # 바깥 subprocess.run 상한(120초)보다 먼저 끝낸다
             outcomes = []
             for round_ in range(3):
                 path = os.path.join(os.getcwd(), f"race{round_}", "state.db")
@@ -209,16 +221,19 @@ def test_eight_processes_open_a_new_state_file_together(tmp_path):
                 try:
                     for p in procs:
                         p.start()
-                    outcomes += [queue.get(timeout=60) for _ in procs]
-                except BaseException:  # 실패해도 자식을 남기지 않는다
+                    outcomes += [queue.get(timeout=max(0.1, deadline - time.monotonic())) for _ in procs]
+                except BaseException:  # 실패하면 남은 자식을 바로 죽인다
                     for p in procs:
                         if p.is_alive():
-                            p.terminate()
+                            p.kill()
                     raise
-                finally:
+                finally:  # 자식을 남기지 않는다: 잠깐 기다리고 남은 것은 죽인다
                     for p in procs:
                         if p.pid is not None:
-                            p.join()
+                            p.join(timeout=5)
+                            if p.is_alive():
+                                p.kill()
+                                p.join()
             print(json.dumps(outcomes))
     """)
     assert outcomes == ["ok"] * 24
@@ -361,7 +376,7 @@ def test_two_processes_ingesting_the_same_file_make_one_version(tmp_path):
     """두 프로세스가 같은 내용을 동시에 수집하면 하나는 새 버전, 하나는 같은 원본(StoreConflict를 한 번 다시 해서)이고
     변경 로그는 한 줄이다."""
     result = scenario(tmp_path, r"""
-        import json, multiprocessing as mp, os, sqlite3
+        import json, multiprocessing as mp, os, sqlite3, threading, time
         from pathlib import Path
 
 
@@ -371,7 +386,10 @@ def test_two_processes_ingesting_the_same_file_make_one_version(tmp_path):
             with SqliteStore(db) as store:
                 engine = LocalEngine(store, default_parsers(ocr=False, layout=False))
                 data = Path(path).read_bytes()
-                barrier.wait()
+                try:
+                    barrier.wait(timeout=60)  # 부모가 죽어 장벽이 안 차도 스스로 끝난다
+                except threading.BrokenBarrierError:
+                    return
                 queue.put(engine._ingest_outcome(data, "같은.md").created)
 
 
@@ -381,19 +399,23 @@ def test_two_processes_ingesting_the_same_file_make_one_version(tmp_path):
             Path(path).write_text("# 지어낸 제목\n\n지어낸 문단\n", encoding="utf-8")
             barrier, queue = ctx.Barrier(2), ctx.Queue()
             procs = [ctx.Process(target=ingest, args=(path, db, barrier, queue)) for _ in range(2)]
+            deadline = time.monotonic() + 90  # 바깥 subprocess.run 상한(120초)보다 먼저 끝낸다
             try:
                 for p in procs:
                     p.start()
-                created = sorted(queue.get(timeout=60) for _ in procs)
-            except BaseException:  # 실패해도 자식을 남기지 않는다
+                created = sorted(queue.get(timeout=max(0.1, deadline - time.monotonic())) for _ in procs)
+            except BaseException:  # 실패하면 남은 자식을 바로 죽인다
                 for p in procs:
                     if p.is_alive():
-                        p.terminate()
+                        p.kill()
                 raise
-            finally:
+            finally:  # 자식을 남기지 않는다: 잠깐 기다리고 남은 것은 죽인다
                 for p in procs:
                     if p.pid is not None:
-                        p.join()
+                        p.join(timeout=5)
+                        if p.is_alive():
+                            p.kill()
+                            p.join()
             conn = sqlite3.connect(db)
             rows = [conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in ("versions", "change_log")]
             conn.close()
