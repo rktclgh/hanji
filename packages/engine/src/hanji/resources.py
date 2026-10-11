@@ -43,14 +43,15 @@ def set_ort_threads(options: object) -> None:
 GiB, MiB = 2**30, 2**20
 BUDGET_SHARE = 0.8  # 기본 예산 = 알아낸 사용 가능 메모리 × 0.8(D5)
 _UNITS = {"": 1, "K": 2**10, "M": 2**20, "G": 2**30, "T": 2**40}
-_SIZE = re.compile(r"([0-9]+(?:\.[0-9]+)?)(?:([KMGT])(?:I?B)?|B)?", re.IGNORECASE)
+# re.ASCII: 대소문자 무시가 켈빈 기호(U+212A)·ı·İ를 K·I로 맞추지 않게 한다
+_SIZE = re.compile(r"([0-9]+(?:\.[0-9]+)?)(?:([KMGT])(?:I?B)?|B)?", re.IGNORECASE | re.ASCII)
 _INT = re.compile(r"-?[0-9]+")
 _V1_UNLIMITED = 2**62  # cgroup v1 "제한 없음" 표시값(9223372036854771712, 0x7FFFFFFFFFFF0000 등)은 이 값 이상
 
 
 def parse_size(text: str) -> int:
     """크기 문자열 → 바이트: "8G", "512M", "1.5GiB", "4096"·"4096B"(바이트). K·M·G·T는 1024배수, 그 뒤에 B·iB를 붙여도
-    된다(대소문자 무시, 단위 없이 iB는 안 된다). 정수는 정확히 센다. 단위 없는 소수, 1바이트 아래, 너무 큰 소수, 그 밖은
+    된다(ASCII 글자만, 대소문자 무시, 단위 없이 iB는 안 된다). 정수는 정확히 센다. 단위 없는 소수, 1바이트 아래, 너무 큰 소수, 그 밖은
     ValueError."""
     match = _SIZE.fullmatch(text.strip())
     if match is None:
@@ -258,7 +259,7 @@ class Cost:
 # 값이지 새 문서의 상한이 아니다. 엔진 동작이 바뀌는 PR은 같은 탐침을 다시 돌린다
 COSTS: dict[Config, Cost] = {
     "none": Cost(base=224 * MiB, per_page=3 * MiB),
-    "layout": Cost(base=850 * MiB, per_page=2 * MiB),
+    "layout": Cost(base=850 * MiB, per_page=3 * MiB),  # 잰 값 2MiB를 none의 3MiB로 올렸다(위 약속)
     "ocr": Cost(base=1889 * MiB, per_page=11 * MiB),
     "both": Cost(base=1889 * MiB, per_page=11 * MiB),
 }
@@ -295,8 +296,11 @@ def plan_workers(budget: int | None, cost: Cost, cores: int, requested: int | No
         warnings.append(f"memory {format_size(budget)} is below what one worker needs "
                         f"({format_size(PARENT_RESERVE + slot)}); using 1 worker")
     if requested is not None and requested > limit:
-        warnings.append(f"workers {requested} is above what memory {format_size(budget)} and {cores} CPUs allow; "
-                        f"using {limit}")
+        if windows and min(cores, fit) > MAX_WINDOWS_WORKERS:  # 메모리·CPU가 아니라 Windows 상한이 자른다
+            warnings.append(f"workers {requested} is above the Windows limit; using {limit}")
+        else:
+            warnings.append(f"workers {requested} is above what memory {format_size(budget)} and {cores} CPUs "
+                            f"allow; using {limit}")
         return limit, warnings
     return (limit if requested is None else requested), warnings
 

@@ -24,7 +24,7 @@ from .store.sqlite import DB_ENV, SqliteStore, resolve_db
 from .viewer import DEFAULT_DPI, render_html, render_page_images
 
 APP_NAME = "hanji"
-EXIT_OK, EXIT_ERROR, EXIT_USAGE, EXIT_UNSUPPORTED, EXIT_PARSE, EXIT_NOT_FOUND = 0, 1, 2, 3, 4, 5
+EXIT_OK, EXIT_ERROR, EXIT_USAGE = 0, 1, 2  # 문서 오류 코드(3·4·5)는 errors.exit_code
 MAX_DPI = 600
 OCR_HELP = ("스캔 쪽과 글자층이 깨진(unreliable) 쪽의 OCR을 끈다. 끄거나 OCR 추가 설치가 없으면 unreliable 쪽은 깨진 "
             "글자층으로 블록을 만든다(신뢰도 0.2 이하) (기본: OCR 추가 설치가 있으면 켠다. 원본이 같으면 저장된 버전을 "

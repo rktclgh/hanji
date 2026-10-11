@@ -305,6 +305,19 @@ def test_an_own_path_outside_the_namespace_is_read_as_the_mount_point(tmp_path):
     assert resources._available(root, 16 * resources.GiB) == 3 * resources.GiB
 
 
+def test_an_own_path_under_no_mount_root_falls_back_to_the_mount_point(tmp_path):
+    """자기 경로(/elsewhere/app)를 품은 마운트 뿌리가 없으면(다른 이름공간) 첫 마운트의 마운트 지점만 본다. 그 아래
+    폴더나 다른 마운트를 읽지 않는다."""
+    mount = V2_MOUNT.replace(" / /sys/fs/cgroup", " /kubepods /sys/fs/cgroup")
+    root = fake_root(tmp_path, {"proc/self/cgroup": "0::/elsewhere/app\n", "proc/self/mountinfo": mount,
+                                "sys/fs/cgroup/elsewhere/app/memory.max": str(resources.GiB),
+                                "sys/fs/cgroup/app/memory.max": str(resources.GiB),
+                                "sys/fs/cgroup/memory.max": str(3 * resources.GiB),
+                                "sys/fs/cgroup/memory.current": str(resources.GiB)})
+    assert resources._cgroup_dirs(root, 2, "memory") == [root / "sys/fs/cgroup"]
+    assert resources._available(root, 16 * resources.GiB) == 2 * resources.GiB
+
+
 @pytest.mark.parametrize(("text", "size"), [
     ("9007199254740993", 2**53 + 1), ("9007199254740993K", (2**53 + 1) * 1024), ("8B", 8), ("8kb", 8192),
     ("1.5KiB", 1536),
@@ -319,13 +332,22 @@ def test_parse_size_rejects_ib_without_a_prefix_overflow_and_other_digits(text):
         resources.parse_size(text)
 
 
+@pytest.mark.parametrize("text", ["8\u212a", "8\u212aB", "8G\u0131B", "8G\u0130B"])
+def test_parse_size_rejects_unicode_look_alike_units(text):
+    """단위 글자는 ASCII만: 켈빈 기호(U+212A)·점 없는 ı·점 있는 İ는 대소문자 무시로 K·I에 맞지만 크기가 아니다. KeyError가
+    아니라 ValueError("invalid size …")."""
+    with pytest.raises(ValueError, match="invalid size"):
+        resources.parse_size(text)
+
+
 SPEC = resources.Cost(base=2138 * resources.MiB, per_page=8 * resources.MiB)  # 스펙 §8.5 예의 OCR + 레이아웃 상수
 
 
 def test_config_and_estimate_cover_the_four_settings_and_both_formats():
     """설정 4가지는 상수가 있고, 추가 몫 = 쪽 몫 × 쪽 수 + 바이트 배수 × 크기(배수는 PDF·그 밖 따로, MD는 쪽 0)."""
-    names = {resources.config_of(o, la) for o in (False, True) for la in (False, True)}
-    assert names == set(resources.COSTS) == {"none", "layout", "ocr", "both"}
+    assert {(o, la): resources.config_of(o, la) for o in (False, True) for la in (False, True)} == {
+        (False, False): "none", (False, True): "layout", (True, False): "ocr", (True, True): "both"}
+    assert set(resources.COSTS) == {"none", "layout", "ocr", "both"}
     assert all(c.base > 0 and c.per_page > 0 for c in resources.COSTS.values())
     cost = resources.Cost(base=1000, per_page=10)
     pdf, other = resources.BYTES_FACTOR["pdf"], resources.BYTES_FACTOR["other"]
@@ -358,6 +380,32 @@ def test_requested_workers_are_an_upper_bound_with_a_warning():
         "workers 9 is above what memory 12.8GiB and 8 CPUs allow; using 5"])
     tiny = resources.Cost(base=resources.MiB, per_page=0)
     assert resources.plan_workers(budget, tiny, 128, None, windows=True)[0] == 61  # Windows 상한
+
+
+def test_a_request_above_the_windows_cap_says_it_is_the_windows_limit():
+    """메모리·CPU가 61개보다 많이 허락해도 Windows 상한이 61이면 경고가 그 까닭(Windows 상한)을 말한다. 메모리·CPU가
+    61 아래로 자르면 예전 경고 그대로."""
+    budget = int(16 * resources.GiB * 0.8)
+    tiny = resources.Cost(base=resources.MiB, per_page=0)
+    assert resources.plan_workers(budget, tiny, 128, 64, windows=True) == (61, [
+        "workers 64 is above the Windows limit; using 61"])
+    assert resources.plan_workers(budget, tiny, 128, 61, windows=True) == (61, [])
+    assert resources.plan_workers(budget, tiny, 60, 64, windows=True) == (60, [
+        "workers 64 is above what memory 12.8GiB and 60 CPUs allow; using 60"])
+
+
+def test_a_budget_below_one_worker_and_a_larger_request_give_two_warnings():
+    """D12(예산이 작업 1개 몫보다 작다)와 요청이 상한보다 크다는 경고가 둘 다, 그 순서로 나온다."""
+    assert resources.plan_workers(100 * resources.MiB, SPEC, 4, 3, windows=False) == (1, [
+        "memory 100MiB is below what one worker needs (2.7GiB); using 1 worker",
+        "workers 3 is above what memory 100MiB and 4 CPUs allow; using 1"])
+
+
+def test_more_models_never_cost_less_than_fewer():
+    """비용 상수 주석의 약속: 모델을 더 켠 설정은 덜 켠 설정보다 base·per_page 모두 작지 않다."""
+    costs = resources.COSTS
+    for small, large in (("none", "layout"), ("none", "ocr"), ("layout", "both"), ("ocr", "both")):
+        assert costs[small].base <= costs[large].base and costs[small].per_page <= costs[large].per_page
 
 
 def test_without_a_budget_workers_are_requested_or_one():
