@@ -21,7 +21,8 @@ DB_ENV = "HANJI_DB"
 BUSY_TIMEOUT = 60.0  # 쓰기 잠금을 기다리는 초(그림이 많은 커밋은 잠금을 몇 초 쥘 수 있다)
 RETRY_LIMIT = 120.0  # 잠금 오류를 다시 하는 총 초(처음 호출부터)
 RETRY_PAUSES = (0.05, 0.1, 0.2, 0.4, 0.8)  # 다시 하기 전 쉬는 초(마지막 값을 되풀이)
-_LOCK_CODES = (5, 6)  # SQLITE_BUSY, SQLITE_LOCKED(확장 코드는 아래 8비트가 같다)
+_LOCK_CODES = (5, 6)  # SQLITE_BUSY, SQLITE_LOCKED(확장 코드는 아래 8비트가 같다). 6은 같은 연결의 "table is locked"도 덮어
+# 기다려도 풀리지 않는 경우가 있다(저장소 경로에 DROP·ALTER가 없어 지금은 문제 없다)
 _LOCK_MESSAGES = ("database is locked", "database is busy")
 FORMAT_VERSION = "4"  # 4 = 계약 0.4 스키마(쪽 글자 장부). 다른 형식은 다시 수집해야 한다
 _TABLES = (

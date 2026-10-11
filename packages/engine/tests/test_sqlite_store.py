@@ -170,22 +170,29 @@ def lock_error(code: int | None = 5, message: str = "database is locked") -> sql
 def test_open_waits_while_another_connection_holds_a_new_state_file(db, monkeypatch):
     """다른 연결이 새 상태 파일의 쓰기 잠금을 쥐고 있으면 WAL 전환이 바쁨 대기 없이 바로 잠금 오류를 낸다. 여는 쪽은
     잠금이 놓일 때까지 다시 해서 연다(실제로 한 번 이상 쉬었다가)."""
-    slept, real_sleep = [], sqlite_store.sleep
+    slept, real_sleep, retried = [], sqlite_store.sleep, threading.Event()
 
     def spy(seconds):
         slept.append(seconds)
+        retried.set()
         real_sleep(seconds)
 
     monkeypatch.setattr(sqlite_store, "sleep", spy)
     db.parent.mkdir(parents=True)
     holder = sqlite3.connect(db, isolation_level=None, check_same_thread=False)
     holder.execute("BEGIN IMMEDIATE")
-    release = threading.Timer(0.5, lambda: holder.execute("ROLLBACK"))
+
+    def release_after_first_retry():  # 시간이 아니라 사건: 여는 쪽이 한 번 쉰 뒤에만 놓는다(느린 CI에서도 같다)
+        retried.wait(timeout=60)  # 퇴보하면 영원히 매달리지 않고 아래 단언이 실패한다
+        holder.execute("ROLLBACK")
+
+    release = threading.Thread(target=release_after_first_retry)
     release.start()
     try:
         with SqliteStore(db) as store:
             assert store.documents() == ()
     finally:
+        retried.set()  # 열기가 실패해도 놓는 쪽 스레드를 풀어 준다
         release.join()
         holder.close()
     assert slept, "the open must have retried after a lock error"

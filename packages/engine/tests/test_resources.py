@@ -318,6 +318,16 @@ def test_an_own_path_under_no_mount_root_falls_back_to_the_mount_point(tmp_path)
     assert resources._available(root, 16 * resources.GiB) == 2 * resources.GiB
 
 
+def test_mountinfo_octal_escapes_in_the_mount_point_are_decoded(tmp_path):
+    """mountinfo는 마운트 지점의 공백을 \\040으로 적는다. 풀지 않으면 그 폴더를 찾지 못한다."""
+    mount = V2_MOUNT.replace(" / /sys/fs/cgroup", " / /sys/fs/cg\\040root")
+    root = fake_root(tmp_path, {"proc/self/cgroup": "0::/app\n", "proc/self/mountinfo": mount,
+                                "sys/fs/cg root/app/memory.max": str(resources.GiB),
+                                "sys/fs/cg root/app/memory.current": str(resources.GiB // 4)})
+    assert resources._cgroup_dirs(root, 2, "memory") == [root / "sys/fs/cg root/app", root / "sys/fs/cg root"]
+    assert resources._available(root, 16 * resources.GiB) == resources.GiB * 3 // 4
+
+
 @pytest.mark.parametrize(("text", "size"), [
     ("9007199254740993", 2**53 + 1), ("9007199254740993K", (2**53 + 1) * 1024), ("8B", 8), ("8kb", 8192),
     ("1.5KiB", 1536),
@@ -340,7 +350,7 @@ def test_parse_size_rejects_unicode_look_alike_units(text):
         resources.parse_size(text)
 
 
-SPEC = resources.Cost(base=2138 * resources.MiB, per_page=8 * resources.MiB)  # 스펙 §8.5 예의 OCR + 레이아웃 상수
+SPEC = resources.COSTS["both"]  # 실측 상수(OCR + 레이아웃)
 
 
 def test_config_and_estimate_cover_the_four_settings_and_both_formats():
@@ -370,7 +380,7 @@ def test_workers_fit_the_budget_after_the_parent_reserve(budget, cores, workers)
 def test_a_budget_below_one_worker_still_runs_one_worker_with_a_warning(budget):
     """예산이 0(사용 가능 메모리가 다 찼다)이거나 작업 1개 몫보다 작아도 W = 1(0이 아니다)이고 경고한다(컨트롤러 판정)."""
     assert resources.plan_workers(budget, SPEC, 4, None, windows=False) == (1, [
-        f"memory {resources.format_size(budget)} is below what one worker needs (2.7GiB); using 1 worker"])
+        f"memory {resources.format_size(budget)} is below what one worker needs (2.6GiB); using 1 worker"])
 
 
 def test_requested_workers_are_an_upper_bound_with_a_warning():
@@ -397,7 +407,7 @@ def test_a_request_above_the_windows_cap_says_it_is_the_windows_limit():
 def test_a_budget_below_one_worker_and_a_larger_request_give_two_warnings():
     """D12(예산이 작업 1개 몫보다 작다)와 요청이 상한보다 크다는 경고가 둘 다, 그 순서로 나온다."""
     assert resources.plan_workers(100 * resources.MiB, SPEC, 4, 3, windows=False) == (1, [
-        "memory 100MiB is below what one worker needs (2.7GiB); using 1 worker",
+        "memory 100MiB is below what one worker needs (2.6GiB); using 1 worker",
         "workers 3 is above what memory 100MiB and 4 CPUs allow; using 1"])
 
 
@@ -420,7 +430,7 @@ def test_room_and_the_over_budget_exception():
     """여유 = 예산 − 부모 몫 − W × base. 혼자여도 부모 몫 + base + 추가 몫이 예산을 넘으면 예외(경고하고 돌린다)."""
     budget = int(4 * resources.GiB * 0.8)
     free = resources.room(budget, 1, SPEC)
-    assert free == budget - 256 * resources.MiB - 2138 * resources.MiB
+    assert free == budget - 256 * resources.MiB - SPEC.base
     assert resources.room(None, 3, SPEC) is None
     assert not resources.over_budget(free, SPEC, budget) and resources.over_budget(free + 1, SPEC, budget)
     assert not resources.over_budget(10**15, SPEC, None)

@@ -134,7 +134,7 @@ def _cgroup_dirs(root: Path, version: int, controller: str) -> list[Path] | None
         if (version == 2 and tail[0] != "cgroup2") or (
                 version == 1 and (tail[0] != "cgroup" or controller not in tail[2].split(","))):
             continue
-        found.append((fields[3], root / fields[4].lstrip("/")))
+        found.append((_unescape(fields[3]), root / _unescape(fields[4]).lstrip("/")))
     for mount_root, point in found:
         if mount_root == "/":
             rel = own
@@ -149,6 +149,11 @@ def _cgroup_dirs(root: Path, version: int, controller: str) -> list[Path] | None
                 return dirs
             folder = folder.parent
     return [found[0][1]] if found else None  # 자기 경로가 어느 마운트에도 없다(다른 이름공간): 마운트 지점
+
+
+def _unescape(field: str) -> str:
+    """mountinfo는 공백·탭·개행·역슬래시를 \\040처럼 8진수 3자리로 적는다."""
+    return re.sub(r"\\([0-7]{3})", lambda m: chr(int(m[1], 8)), field)
 
 
 def _cgroup_room(dirs: list[Path], limit_file: str, usage_file: str, physical: int | None) -> int | None:
