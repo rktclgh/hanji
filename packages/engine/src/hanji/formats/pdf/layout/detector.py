@@ -5,6 +5,7 @@ from pathlib import Path
 import onnxruntime as ort
 from PIL import Image
 
+from ....resources import set_ort_threads
 from . import LayoutBox
 from .boxes import LABELS, postprocess, preprocess, read_labels
 
@@ -16,7 +17,7 @@ class LayoutDetector:
 
     def __init__(self, model: Path, config: Path) -> None:
         """model: inference.onnx, config: inference.yml(분류 목록이 LABELS와 같아야 한다: 세션을 열기 전에 본다).
-        CPU, 스레드 수는 onnxruntime 기본값. 메모리 아레나와 메모리 패턴을 끈다(OCR 세션과 같다: 결과는 같고 최대 RSS가
+        CPU, 스레드 수는 HANJI_ORT_THREADS(없으면 onnxruntime 기본값). 메모리 아레나와 메모리 패턴을 끈다(OCR 세션과 같다: 결과는 같고 최대 RSS가
         준다). 분류 목록이나 입력 이름이 PP-DocLayout_plus-L과 다르면 ValueError."""
         labels = read_labels(config)
         if labels != LABELS:
@@ -26,6 +27,7 @@ class LayoutDetector:
         options.enable_cpu_mem_arena = False
         options.enable_mem_pattern = False
         options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL  # 채점 게이트(Task 10)도 이 값
+        set_ort_threads(options)
         self.session = ort.InferenceSession(str(model), options, providers=["CPUExecutionProvider"])
         names = sorted(i.name for i in self.session.get_inputs())
         if names != sorted(INPUTS):

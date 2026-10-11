@@ -8,6 +8,7 @@ import numpy as np
 import onnxruntime as ort
 from PIL import Image
 
+from ....resources import set_ort_threads
 from . import OcrLine
 from .det import detect
 from .pixels import crop_quad, resize_linear
@@ -19,7 +20,7 @@ PRE_SHRINK_PIXELS = 16_000_000  # 화소 수가 이보다 많은 그림은 numpy
 
 
 def _session(path: Path) -> ort.InferenceSession:
-    """CPU, 스레드 수는 onnxruntime 기본값. 메모리 아레나와 메모리 패턴(입력 크기별 미리 잡는 버퍼)을 끈다: A4 200 DPI
+    """CPU, 스레드 수는 HANJI_ORT_THREADS(없으면 onnxruntime 기본값). 메모리 아레나와 메모리 패턴(입력 크기별 미리 잡는 버퍼)을 끈다: A4 200 DPI
     한 쪽을 거듭 읽을 때 최대 RSS 약 1.42GiB → 0.97GiB, 채점 10쪽 연속 약 1.63GiB → 1.16GiB(macOS arm64 실측).
     결과는 같고 쪽당 시간 차이는 1% 안."""
     options = ort.SessionOptions()
@@ -27,6 +28,7 @@ def _session(path: Path) -> ort.InferenceSession:
     options.enable_cpu_mem_arena = False
     options.enable_mem_pattern = False
     options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+    set_ort_threads(options)
     return ort.InferenceSession(str(path), options, providers=["CPUExecutionProvider"])
 
 

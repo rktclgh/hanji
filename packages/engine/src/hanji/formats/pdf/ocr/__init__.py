@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from .... import models
 from ....errors import ModelError, OcrUnavailable
+from ....resources import ort_threads_env
 from . import charset
 
 if TYPE_CHECKING:
@@ -75,6 +76,7 @@ def available() -> bool:
 
 
 def _build() -> "OcrReader":
+    ort_threads_env()  # 잘못된 HANJI_ORT_THREADS는 설치 문제가 아니라 설정 오류다(HanjiError, 세션을 만들기 전에)
     missing = _missing()
     if missing is not None:
         raise OcrUnavailable(f"{missing}, or run with --no-ocr")
