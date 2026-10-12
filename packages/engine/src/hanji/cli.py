@@ -11,23 +11,20 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from platformdirs import user_data_dir
-
 from hanji_contracts import DocumentTree
 
 from . import models as model_files
 from .engine import LocalEngine
-from .errors import AssetNotFound, DocumentNotFound, HanjiError, ParseError, UnsupportedFormat, VersionNotFound
+from .errors import HanjiError, exit_code
 from .export import asset_name, to_markdown
 from .formats.detect import default_parsers
 from .formats.pdf import layout as layout_runtime
 from .formats.pdf.parser import MIME as PDF_MIME
-from .store.sqlite import SqliteStore
+from .store.sqlite import DB_ENV, SqliteStore, resolve_db
 from .viewer import DEFAULT_DPI, render_html, render_page_images
 
 APP_NAME = "hanji"
-DB_ENV = "HANJI_DB"
-EXIT_OK, EXIT_ERROR, EXIT_USAGE, EXIT_UNSUPPORTED, EXIT_PARSE, EXIT_NOT_FOUND = 0, 1, 2, 3, 4, 5
+EXIT_OK, EXIT_ERROR, EXIT_USAGE = 0, 1, 2  # 문서 오류 코드(3·4·5)는 errors.exit_code
 MAX_DPI = 600
 OCR_HELP = ("스캔 쪽과 글자층이 깨진(unreliable) 쪽의 OCR을 끈다. 끄거나 OCR 추가 설치가 없으면 unreliable 쪽은 깨진 "
             "글자층으로 블록을 만든다(신뢰도 0.2 이하) (기본: OCR 추가 설치가 있으면 켠다. 원본이 같으면 저장된 버전을 "
@@ -37,20 +34,6 @@ LAYOUT_HELP = ("레이아웃 모델(선·도형 그림·캡션)을 끈다. 사�
 FETCH_TO_HELP = "받을 폴더 (기본: 사용자 캐시). 폐쇄망은 이 폴더를 옮겨 HANJI_MODEL_DIR로 가리킨다"
 ASSETS_HELP = ("그림 이미지를 이 폴더에 <sha256 앞 16자>.png로 쓴다(--format md면 마크다운이 그 파일을 가리킨다. 링크는 "
                "--out 파일 폴더 기준 상대 경로, 표준 출력이면 현재 폴더 기준)")
-_EXIT_CODES: tuple[tuple[type[HanjiError], int], ...] = (
-    (UnsupportedFormat, EXIT_UNSUPPORTED), (ParseError, EXIT_PARSE),
-    (DocumentNotFound, EXIT_NOT_FOUND), (VersionNotFound, EXIT_NOT_FOUND), (AssetNotFound, EXIT_NOT_FOUND),
-)
-
-
-def resolve_db(option: str | None) -> Path:
-    """--db > 환경변수 HANJI_DB > 사용자 데이터 폴더/state.db."""
-    if option:
-        return Path(option)
-    env = os.environ.get(DB_ENV)
-    if env:
-        return Path(env)
-    return Path(user_data_dir(APP_NAME, appauthor=False)) / "state.db"
 
 
 def _positive(text: str) -> int:
@@ -305,7 +288,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             _run(args, LocalEngine(store, parsers))
     except HanjiError as exc:
         print(f"{APP_NAME}: {exc}", file=sys.stderr)
-        return next((code for kind, code in _EXIT_CODES if isinstance(exc, kind)), EXIT_ERROR)
+        return exit_code(exc)
     except Exception as exc:  # 그 밖(파일 없음·권한 등)
         print(f"{APP_NAME}: {type(exc).__name__}: {exc}", file=sys.stderr)
         return EXIT_ERROR

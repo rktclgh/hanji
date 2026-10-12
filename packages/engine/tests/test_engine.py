@@ -1,6 +1,7 @@
 import hashlib
 import inspect
 import unicodedata
+from pathlib import Path
 
 import pytest
 
@@ -8,6 +9,7 @@ from hanji import LocalEngine, MemoryStore, SqliteStore
 from hanji.core import build_tree, diff_trees
 from hanji.errors import AssetNotFound, ParseError, StoreConflict, UnsupportedFormat, VlmUnavailable
 from hanji.formats.base import ParsedSource
+from hanji.formats.detect import default_parsers
 from hanji_contracts import Attempt, DocFilter, Engine, ProcessingHistory, RegionRecord, SourceInfo
 
 
@@ -324,3 +326,29 @@ def test_caption_pairing_change_is_an_update_of_the_same_figure(tmp_path):
     change = store.changes_after(1, 10).changes[0]
     assert ref.version == 2 and change.updated == (store.get_tree("d", 1).blocks[0].block_id,)
     assert change.added == change.removed == ()
+
+
+def test_ingest_outcome_tells_whether_a_new_version_was_stored():
+    """_ingest_outcome은 ingest_bytes와 같은 경로이고 새 버전을 저장했는지를 함께 돌려준다: 새 문서, 같은 원본, 원본은
+    다르고 블록이 같음, force(차이 없음·있음). ingest_bytes는 그 DocRef 그대로다."""
+    store = MemoryStore()
+    engine = LocalEngine(store, parsers=[FakeParser()])
+    data = "가\n".encode()
+    first = engine._ingest_outcome(data, "x.fake", "d")
+    assert (first.ref.version, first.created, first.pages) == (1, True, None)
+    assert engine._ingest_outcome(data, "x.fake", "d") == (first.ref, False, None)
+    assert engine._ingest_outcome(data + b"\n\n", "x.fake", "d") == (first.ref, False, None)  # 블록이 같다
+    assert engine._ingest_outcome(data, "x.fake", "d", force=True) == (first.ref, False, None)
+    second = LocalEngine(store, parsers=[FakeParser(suffix=".")])._ingest_outcome(data, "x.fake", "d", force=True)
+    assert (second.ref.version, second.created) == (2, True)
+    assert engine.ingest_bytes(b"x\n", "y.fake") == engine._ingest_outcome(b"x\n", "y.fake").ref
+
+
+def test_ingest_outcome_counts_pages_for_pdf_only():
+    """쪽 수는 그 버전의 source.page_count다: PDF는 쪽 수(새 버전이든 그대로든), Markdown은 None."""
+    engine = LocalEngine(MemoryStore(), default_parsers(ocr=False, layout=False))
+    pdf = (Path(__file__).resolve().parent / "fixtures" / "pdf" / "inputs" / "report.pdf").read_bytes()
+    created = engine._ingest_outcome(pdf, "report.pdf")
+    assert (created.created, created.pages) == (True, 2)
+    assert engine._ingest_outcome(pdf, "report.pdf") == (created.ref, False, 2)
+    assert engine._ingest_outcome("# 제목\n".encode(), "a.md").pages is None

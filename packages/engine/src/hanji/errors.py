@@ -1,4 +1,4 @@
-"""엔진 예외. 종료 코드 대응은 cli.py가 정한다."""
+"""엔진 예외와 종료 코드 대응(exit_code: CLI parse와 ingest의 문서별 오류 코드가 같이 쓴다)."""
 
 
 class HanjiError(Exception):
@@ -53,3 +53,12 @@ class ModelError(HanjiError):
 class LayoutUnavailable(HanjiError):
     """레이아웃 모델을 켜라고 했는데(또는 자동 모드에서 모델을 돌릴 쪽이 있는데) 레이아웃 추가 설치
     (hanji[layout])나 모델 파일이 없거나 깨졌다. 설정 오류(종료 코드 1)."""
+
+
+def exit_code(exc: BaseException) -> int:
+    """예외 → 종료 코드: 3 지원하지 않는 형식, 4 파싱 실패, 5 문서·버전·그림 이미지 없음, 그 밖(엔진 밖 예외 포함) 1."""
+    for kind, code in ((UnsupportedFormat, 3), (ParseError, 4), (DocumentNotFound, 5), (VersionNotFound, 5),
+                       (AssetNotFound, 5)):
+        if isinstance(exc, kind):
+            return code
+    return 1
