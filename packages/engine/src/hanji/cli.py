@@ -1,12 +1,15 @@
 """hanji 명령줄. main(argv)는 종료 코드를 돌려준다."""
 
 import argparse
+import dataclasses
 import json
 import os
 import stat
 import sys
 import tempfile
+import time
 import unicodedata
+from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -14,6 +17,8 @@ from typing import Any
 from hanji_contracts import DocumentTree
 
 from . import models as model_files
+from . import resources
+from .batch import IngestResult, IngestRun, ingest_many
 from .engine import LocalEngine
 from .errors import HanjiError, exit_code
 from .export import asset_name, to_markdown
@@ -25,6 +30,8 @@ from .viewer import DEFAULT_DPI, render_html, render_page_images
 
 APP_NAME = "hanji"
 EXIT_OK, EXIT_ERROR, EXIT_USAGE = 0, 1, 2  # 문서 오류 코드(3·4·5)는 errors.exit_code
+EXIT_FAILED_DOCS, EXIT_BATCH_ABORTED, EXIT_INTERRUPTED = 6, 7, 130  # ingest: 일부 문서 실패, 배치 중단, Ctrl+C
+STATUSES = ("created", "unchanged", "failed", "worker_crashed", "interrupted")
 MAX_DPI = 600
 OCR_HELP = ("스캔 쪽과 글자층이 깨진(unreliable) 쪽의 OCR을 끈다. 끄거나 OCR 추가 설치가 없으면 unreliable 쪽은 깨진 "
             "글자층으로 블록을 만든다(신뢰도 0.2 이하) (기본: OCR 추가 설치가 있으면 켠다. 원본이 같으면 저장된 버전을 "
@@ -55,6 +62,13 @@ def _dpi(text: str) -> int:
     if not 1 <= value <= MAX_DPI:
         raise argparse.ArgumentTypeError(f"must be between 1 and {MAX_DPI}")
     return value
+
+
+def _size(text: str) -> int:
+    try:
+        return resources.parse_size(text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def _non_empty(text: str) -> str:
@@ -107,6 +121,16 @@ def _build_parser() -> argparse.ArgumentParser:
     view.add_argument("--dpi", type=_dpi, default=DEFAULT_DPI, help=f"쪽 이미지 해상도 (기본 {DEFAULT_DPI})")
     view.add_argument("--no-ocr", action="store_true", help=OCR_HELP)
     view.add_argument("--no-layout", action="store_true", help=LAYOUT_HELP)
+    ingest = sub.add_parser("ingest", parents=[common],
+                            help="파일·폴더를 메모리 예산 안에서 병렬로 수집하고 문서마다 결과 한 줄(JSON Lines)")
+    ingest.add_argument("paths", nargs="+", metavar="PATH", help="파일(확장자와 상관없이) 또는 폴더(지원 확장자만)")
+    ingest.add_argument("--recursive", action="store_true", help="폴더의 하위 폴더까지 고른다")
+    ingest.add_argument("--workers", type=_positive, help="작업 프로세스 상한 (기본: 메모리 예산과 CPU 수로 정한다)")
+    ingest.add_argument("--max-memory", type=_size, metavar="SIZE",
+                        help="메모리 예산(8G, 512M, 1.5GiB, 바이트 수) (기본: 알아낸 사용 가능 메모리의 80%%)")
+    ingest.add_argument("--force", action="store_true", help="원본이 같아도 다시 파싱")
+    ingest.add_argument("--no-ocr", action="store_true", help=OCR_HELP)
+    ingest.add_argument("--no-layout", action="store_true", help=LAYOUT_HELP)
     models = sub.add_parser("models", help="모델 파일(OCR·레이아웃)")
     models_sub = models.add_subparsers(dest="models_command", required=True)
     fetch = models_sub.add_parser("fetch", help="모델 파일을 업스트림 고정 주소에서 받아 크기·SHA-256을 확인한다")
@@ -247,6 +271,60 @@ def _fetch_models(args: argparse.Namespace) -> None:
         _write(f"{path}\n", None)
 
 
+def _summary(counts: Counter[str], run: IngestRun, seconds: float) -> str:
+    """표준 오류 끝의 요약 한 줄(상태별 수, 고르지 않은 파일, 시작하지 않은 문서, 시간, 작업 수·ORT 스레드·예산)."""
+    done = ", ".join(f"{counts[s]} {s}" for s in STATUSES if counts[s])
+    parts = [f"{sum(counts.values())} documents" + (f": {done}" if done else "")]
+    if run.skipped:
+        parts.append(f"{run.skipped} files skipped (unsupported extension)")
+    if run.not_started:
+        parts.append(f"{run.not_started} not started")
+    if run.aborted:
+        parts.append("batch aborted")
+    budget = "unknown" if run.budget is None else resources.format_size(run.budget)
+    threads = "default" if run.ort_threads is None else run.ort_threads
+    parts += [f"{seconds:.1f}s", f"workers {run.workers}, ORT threads {threads}, memory budget {budget}"]
+    return f"{APP_NAME}: " + "; ".join(parts)
+
+
+def _ingest(args: argparse.Namespace) -> int:
+    """문서마다 JSON 한 줄(끝난 순서, 줄마다 flush), 표준 오류에 경고와 요약. 종료 코드: 0 모두 created·unchanged,
+    6 failed·worker_crashed가 있음, 7 배치 중단, 130 Ctrl+C."""
+    start = time.perf_counter()
+    run = ingest_many(args.paths, db=resolve_db(args.db), workers=args.workers, max_memory=args.max_memory,
+                      ocr=False if args.no_ocr else None, layout=False if args.no_layout else None,
+                      force=args.force, recursive=args.recursive)
+    counts: Counter[str] = Counter()
+    warned = 0
+
+    def emit(result: IngestResult | None = None) -> None:
+        nonlocal warned
+        for warning in run.warnings[warned:]:
+            print(f"{APP_NAME}: warning: {warning}", file=sys.stderr, flush=True)
+        warned = len(run.warnings)
+        if result is not None:
+            _write(json.dumps(dataclasses.asdict(result), ensure_ascii=False) + "\n", None)
+            counts[result.status] += 1
+
+    interrupted = False
+    with run:
+        emit()
+        try:
+            for result in run:
+                emit(result)
+        except KeyboardInterrupt:
+            interrupted = True
+            for result in run.close():
+                emit(result)
+    emit()
+    print(_summary(counts, run, time.perf_counter() - start), file=sys.stderr, flush=True)
+    if interrupted:
+        return EXIT_INTERRUPTED
+    if run.aborted:
+        return EXIT_BATCH_ABORTED
+    return EXIT_FAILED_DOCS if counts["failed"] or counts["worker_crashed"] else EXIT_OK
+
+
 def _run(args: argparse.Namespace, engine: LocalEngine) -> None:
     match args.command:
         case "parse":
@@ -277,6 +355,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "models":  # 모델 받기는 상태 파일을 열지 않는다
             _fetch_models(args)
             return EXIT_OK
+        if args.command == "ingest":  # 시작 실패(상태 파일·설정)는 아래 except가 종료 코드로 바꾼다
+            return _ingest(args)
         out = (view_path(args.file, args.out) if args.command == "view"
                else args.out if args.command in ("parse", "export") else None)
         if out and Path(out).is_dir():  # 저장소·그림 파일을 건드리기 전에 막는다(view는 기본 출력 경로도)

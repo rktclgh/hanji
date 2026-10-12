@@ -31,12 +31,21 @@ def ort_threads_env() -> int | None:
     return threads
 
 
+# 작업 프로세스(ingest_many)는 False로 바꾼다: 쉬는 ORT 스레드가 코어를 붙잡고 돌면(spin) 여러 프로세스가 서로의
+# 코어와 다른 앱의 코어를 빼앗는다. 끄면 결과는 그대로이고 W=2 무거운 12건에서 16% 빨랐다(2026-10-12 실측)
+SPIN = True
+
+
 def set_ort_threads(options: object) -> None:
-    """onnxruntime 세션 옵션에 스레드 수를 정한다: HANJI_ORT_THREADS가 있으면 intra_op n, inter_op 1. 없으면 그대로."""
+    """onnxruntime 세션 옵션에 스레드 수를 정한다: HANJI_ORT_THREADS가 있으면 intra_op n, inter_op 1. 없으면 그대로.
+    SPIN이 거짓이면 스레드 풀 spin도 끈다."""
     threads = ort_threads_env()
     if threads is not None:
         options.intra_op_num_threads = threads  # type: ignore[attr-defined]
         options.inter_op_num_threads = 1  # type: ignore[attr-defined]
+    if not SPIN:
+        for key in ("session.intra_op.allow_spinning", "session.inter_op.allow_spinning"):
+            options.add_session_config_entry(key, "0")  # type: ignore[attr-defined]
 
 
 # 메모리·CPU 한도(스펙 §8.5). 파일 시스템 뿌리를 인자로 받아 가짜 /proc·cgroup 파일로 테스트한다
