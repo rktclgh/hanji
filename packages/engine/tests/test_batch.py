@@ -5,6 +5,7 @@
 import hashlib
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -258,3 +259,460 @@ def test_worker_init_leaves_onnxruntime_alone_and_user_threads_win(tmp_path, use
                           timeout=120, cwd=tmp_path, env=env)
     assert done.returncode == 0, done.stderr
     assert json.loads(done.stdout) == ["created", False, "1", expected, threads]
+
+
+DUMP = r'''
+def dump(db):
+    """문서별 저장 내용(표 바이트)과 변경 로그 다중집합."""
+    import sqlite3
+    conn = sqlite3.connect(db)
+    try:
+        tables = [conn.execute(f"SELECT * FROM {t} ORDER BY {k}").fetchall() for t, k in (
+            ("documents", "document_id"), ("versions", "document_id, version"),
+            ("histories", "document_id, version"), ("assets", "sha"))]
+        log = sorted(conn.execute("SELECT document_id, version, change_json FROM change_log").fetchall())
+    finally:
+        conn.close()
+    return tables, log
+'''
+
+
+def test_pool_results_match_parse_in_input_order_byte_for_byte(tmp_path):
+    """같은 입력·설정·실효 ORT 스레드 수면 ingest_many(작업 3개, 그리고 작업 1개 + 2건마다 풀 새로)와 입력 순서대로
+    LocalEngine.ingest를 부른 상태 파일이 문서별로 바이트까지 같다(change_log는 다중집합). 같은 내용 쌍은 앞 파일
+    이름이고 뒤 파일은 unchanged. force로 한 번 더 해도 같다(A·B)."""
+    inputs = sorted((FIXTURES / "inputs").glob("*.md")) + sorted((FIXTURES / "pdf" / "inputs").glob("*.pdf"))
+    inputs += [FIXTURES / "ocr" / "scanned.pdf", FIXTURES / "layout" / "figures.pdf",
+               write(tmp_path / "쌍" / "앞.md"), write(tmp_path / "쌍" / "뒤.md")]
+    assert len(inputs) == 15
+    result = scenario(tmp_path, DUMP + r'''
+import json, os, sys
+from hanji import LocalEngine, SqliteStore
+from hanji.batch import ingest_many
+from hanji.formats.detect import default_parsers
+
+
+def pool(db, force, **options):
+    with ingest_many(paths, db=db, force=force, **options) as run:
+        results = sorted(run, key=lambda r: r.index)
+    return run, [r.status for r in results]
+
+
+if __name__ == "__main__":
+    paths = json.loads(sys.argv[1])
+    same, statuses = [], []
+    for force in (False, True):
+        b, b_status = pool("B.db", force, workers=3)
+        if b.ort_threads is not None:
+            os.environ["HANJI_ORT_THREADS"] = str(b.ort_threads)  # A·C도 B와 같은 실효 스레드 수
+        with SqliteStore("A.db") as store:
+            engine = LocalEngine(store, default_parsers())
+            for path in paths:
+                engine.ingest(path, force=force)
+        if force:  # force 한 번 더는 A·B만(시간)
+            same.append(dump("A.db") == dump("B.db"))
+            statuses.append([b_status])
+            continue
+        _, c_status = pool("C.db", force, workers=1, _recycle_every=2)
+        same.append(dump("A.db") == dump("B.db") == dump("C.db"))
+        statuses.append([b_status, c_status])
+    with SqliteStore("B.db") as store:
+        pair = store.get_tree("doc_" + __import__("hashlib").sha256(open(paths[-1], "rb").read()).hexdigest()[:24])
+    print(json.dumps([same, statuses, pair.source.name]))
+''', json.dumps([str(p) for p in inputs]), timeout=600)
+    same, statuses, pair_name = result
+    assert same == [True, True]
+    assert statuses[0] == [["created"] * 14 + ["unchanged"]] * 2
+    assert all(s == "unchanged" or s == "created" for run in statuses[1] for s in run)
+    assert pair_name == "앞.md"
+
+
+def test_workers_are_replaced_after_every_recycle_batch(tmp_path):
+    """작업 1개, 2건마다 풀을 비우고 새로 만든다: 5건이면 작업 프로세스 3개."""
+    for i in range(5):
+        write(tmp_path / "in" / f"d{i}.md", f"# 지어낸 제목 {i}\n")
+    result = scenario(tmp_path, r'''
+import json
+from hanji.batch import ingest_many
+
+if __name__ == "__main__":
+    with ingest_many(["in"], db="s.db", workers=1, ocr=False, layout=False, _recycle_every=2) as run:
+        statuses = [r.status for r in run]
+    print(json.dumps([statuses, len(set(run._pids)), run._pids == sorted(run._pids, key=run._pids.index)]))
+''')
+    assert result == [["created"] * 5, 3, True]
+
+
+CRASH = r'''
+import json, multiprocessing, os, sqlite3, sys
+from hanji.batch import ingest_many
+
+
+def run_once(**options):
+    with ingest_many(["in"], db="s.db", ocr=False, layout=False, **options) as run:
+        results = sorted(run, key=lambda r: r.index)
+    return run, results
+
+
+def stored(document_id):
+    conn = sqlite3.connect("s.db")
+    try:
+        return conn.execute("SELECT COUNT(*) FROM documents WHERE document_id = ?", (document_id,)).fetchone()[0]
+    finally:
+        conn.close()
+'''
+
+
+@pytest.mark.parametrize(("stage", "stored", "again"), [("before_commit", 0, "created"),
+                                                         ("after_commit", 1, "unchanged")])
+def test_a_dying_worker_leaves_a_crashed_result_whose_storage_is_unknown(tmp_path, stage, stored, again):
+    """작업 프로세스가 커밋 앞에서 죽으면 저장되지 않았고, 커밋 뒤 응답 전에 죽으면 저장돼 있다. 둘 다 결과는
+    worker_crashed(기본 ID 함께)이고 다른 문서는 성공한다. 같은 명령을 다시 돌리면 각각 created·unchanged."""
+    for name in ("a.md", "b.md", "c.md"):
+        write(tmp_path / "in" / name, f"# {name} 지어낸 제목\n")
+    result = scenario(tmp_path, CRASH + r'''
+if __name__ == "__main__":
+    _, first = run_once(workers=1)
+    crashed = first[1]
+    in_store = stored(crashed.document_id)
+    os.environ.pop("HANJI_TEST_WORKER_EXIT")
+    _, second = run_once(workers=1)
+    print(json.dumps([[r.status for r in first], crashed.document_id is not None, crashed.version, crashed.error.type,
+                      in_store, [r.status for r in second], multiprocessing.active_children()]))
+''', env={"HANJI_TEST_WORKER_EXIT": f"b.md:{stage}"})
+    first, has_id, version, kind, in_store, second, children = result
+    assert first == ["created", "worker_crashed", "created"]
+    assert (has_id, version, kind, in_store, children) == (True, None, "WorkerCrashed", stored, [])
+    assert second == ["unchanged", again, "unchanged"]
+
+
+def test_three_broken_pool_generations_in_a_row_abort_only_the_unsent_documents(tmp_path):
+    """작업 프로세스가 매번 죽으면 세대마다 실패(보낸 문서는 worker_crashed)이고 연속 3세대 뒤 멈춘다. 보내지 않은 문서만
+    BatchAborted, 남은 자식 0."""
+    for i in range(8):
+        write(tmp_path / "in" / f"d{i}.md", f"# 지어낸 제목 {i}\n")
+    result = scenario(tmp_path, CRASH + r'''
+if __name__ == "__main__":
+    run, results = run_once(workers=2)
+    print(json.dumps([[r.status if r.error is None else r.error.type for r in results], run.aborted,
+                      multiprocessing.active_children()]))
+''', env={"HANJI_TEST_WORKER_EXIT": "*:before_commit"})
+    assert result == [["WorkerCrashed"] * 6 + ["BatchAborted"] * 2, True, []]
+
+
+def test_init_failures_count_per_generation_and_a_good_generation_resets_the_count(tmp_path):
+    """작업 프로세스 초기화 실패는 그 문서의 WorkerInitFailed이고 그 세대를 실패로 센다. 세대마다 1건(갈아 끼우기 1)으로
+    실패·실패·성공·실패·실패·성공이면 성공한 세대에서 연속 수가 0으로 돌아가 멈추지 않는다. 매번 실패하면 3세대 뒤 멈춘다.
+    작업 2개에서 한 작업 프로세스만 실패해도 그 세대의 다른 문서는 확정 결과다."""
+    names = ("1-bad.md", "2-bad.md", "3-ok.md", "4-bad.md", "5-bad.md", "6-ok.md")  # 폴더 순서 그대로
+    for i, name in enumerate(names):  # 크기가 같아 추정이 같다: 비용 내림차순에서도 입력 순서로 보낸다
+        write(tmp_path / "in" / name, f"# 지어낸 제목 {i}\n")
+    for i, name in enumerate(("1-bad.md", "2-ok.md", "3-ok.md", "4-ok.md")):
+        write(tmp_path / "two" / name, f"# 다른 지어낸 제목 {i}\n")
+    result = scenario(tmp_path, r'''
+import json, multiprocessing, os
+from hanji.batch import ingest_many
+
+
+def run_once(folder, db, **options):
+    with ingest_many([folder], db=db, ocr=False, layout=False, **options) as run:
+        results = sorted(run, key=lambda r: r.index)
+    return [[r.status if r.error is None else r.error.type for r in results], run.aborted]
+
+
+if __name__ == "__main__":
+    runs = [run_once("in", "a.db", workers=1, _recycle_every=1), run_once("two", "b.db", workers=2)]
+    os.environ["HANJI_TEST_WORKER_EXIT"] = "*:init"
+    runs.append(run_once("in", "c.db", workers=1, _recycle_every=1))
+    print(json.dumps([runs, multiprocessing.active_children()]))
+''', env={"HANJI_TEST_WORKER_EXIT": "*-bad.md:init"})
+    runs, children = result
+    assert runs[0] == [["WorkerInitFailed", "WorkerInitFailed", "created", "WorkerInitFailed", "WorkerInitFailed",
+                        "created"], False]
+    assert runs[1] == [["WorkerInitFailed", "created", "created", "created"], False]
+    assert runs[2] == [["WorkerInitFailed"] * 3 + ["BatchAborted"] * 3, True] and children == []
+
+
+def test_a_file_changed_after_planning_is_not_ingested(tmp_path):
+    write(tmp_path / "in" / "a.md")
+    result = scenario(tmp_path, r'''
+import json
+from hanji.batch import ingest_many
+
+
+def change(path):
+    with open(path, "a", encoding="utf-8") as f:
+        f.write("덧붙인 지어낸 문단\n")
+
+
+if __name__ == "__main__":
+    with ingest_many(["in"], db="s.db", ocr=False, layout=False, _after_plan=change) as run:
+        (result,) = list(run)
+    print(json.dumps([result.status, result.error.type, result.document_id]))
+''')
+    assert result == ["failed", "ChangedDuringRun", None]
+
+
+def test_documents_are_sent_largest_estimate_first_and_ties_keep_input_order():
+    """보내는 순서는 같은 sha 묶음 단위로 첫 문서의 추정 추가 몫 내림차순(가장 긴 일 먼저), 같으면 입력 순서. 묶음
+    안은 입력 순서: 뒤 문서의 추정이 더 커도(f: 5 → 500) 앞 문서가 먼저다. 순수 함수라 프로세스를 띄우지 않는다."""
+    rows = [("a", 10), ("b", 300), ("c", 10), ("b", 300), ("d", 50), ("e", 0), ("f", 5), ("f", 500)]
+    docs = [batch._Doc(batch._Entry(i, f"{i}.md", f"{i}.md"), sha, extra) for i, (sha, extra) in enumerate(rows)]
+    assert [d.entry.index for d in batch._submission_order(docs)] == [1, 3, 4, 0, 2, 6, 7, 5]
+    assert batch._submission_order([]) == []
+
+
+def test_same_bytes_under_two_extensions_keep_input_order_like_a_serial_run(tmp_path):
+    """같은 바이트를 first.md와 second.pdf로: PDF 추정(쪽 몫)이 더 커도 같은 sha라 입력 순서대로 돈다. 결과는 차례
+    실행과 같다(created → unchanged, source.name은 first.md). PDF가 먼저 돌면 ParseError가 난다."""
+    data = "# 지어낸 제목\n\n지어낸 문단\n".encode()
+    (tmp_path / "in").mkdir()
+    for name in ("first.md", "second.pdf"):
+        (tmp_path / "in" / name).write_bytes(data)
+    result = scenario(tmp_path, r'''
+import json
+from hanji import LocalEngine, SqliteStore, resources
+from hanji.batch import _Entry, _plan, ingest_many
+from hanji.formats.detect import default_parsers
+
+if __name__ == "__main__":
+    paths = ["in/first.md", "in/second.pdf"]
+    cost = resources.COSTS["none"]
+    extras = [_plan(_Entry(i, p, p), cost).extra for i, p in enumerate(paths)]
+    with SqliteStore("serial.db") as store:
+        engine = LocalEngine(store, default_parsers(ocr=False, layout=False))
+        serial = ["created" if engine._ingest_outcome(open(p, "rb").read(), p.split("/")[1]).created else "unchanged"
+                  for p in paths]
+    with ingest_many(paths, db="pool.db", workers=2, ocr=False, layout=False) as run:
+        results = sorted(run, key=lambda r: r.index)
+    with SqliteStore("pool.db") as store:
+        name = store.get_tree(results[0].document_id).source.name
+    print(json.dumps([extras[1] > extras[0], serial, [r.status for r in results],
+                      [r.error and r.error.type for r in results], name]))
+''')
+    assert result == [True, ["created", "unchanged"], ["created", "unchanged"], [None, None], "first.md"]
+
+
+def test_a_document_bigger_than_the_room_runs_alone_with_a_warning(tmp_path):
+    """여유보다 큰 문서는 작업 1개짜리 세대에서 혼자 돌고, 그 뒤 W개 세대를 새로 만든다. 추정이 가장 커서 먼저
+    보낸다(비용 내림차순). 혼자여도 추정이 예산을 넘으면 경고 한 줄(그래도 돌린다). 바이트 배수를 키워 작은 파일로
+    흉내 낸다."""
+    write(tmp_path / "in" / "a.md", "# 가\n")
+    write(tmp_path / "in" / "big.md", "# 지어낸 큰 문서\n\n" + "지어낸 문단 " * 100 + "\n")
+    write(tmp_path / "in" / "c.md", "# 다\n")
+    result = scenario(tmp_path, r'''
+import json, os
+from hanji import resources
+from hanji.batch import ingest_many
+
+if __name__ == "__main__":
+    resources.BYTES_FACTOR["other"] = 10**6  # 부모가 추정에만 쓴다: 작은 문서 수 MB, big.md 약 1.4GB
+    cost = resources.COSTS["none"]  # 예산을 작업 2개가 꼭 들어가게: 여유 = 2 × 50쪽 몫
+    budget = resources.PARENT_RESERVE + 2 * (cost.base + cost.per_page * resources.SLOT_PAGES)
+    with ingest_many(["in"], db="s.db", workers=2, max_memory=budget, ocr=False, layout=False) as run:
+        results = list(run)
+    print(json.dumps([run.workers, [os.path.basename(r.path) for r in results], [r.status for r in results],
+                      run._pids, run.warnings]))
+''')
+    workers, order, statuses, pids, warnings = result
+    assert workers == 2 and statuses == ["created"] * 3
+    assert order[0] == "big.md" and sorted(order[1:]) == ["a.md", "c.md"]  # big(혼자) → a·c(작업 2개 세대)
+    assert pids[0] not in pids[1:]  # 혼자 세대의 작업 프로세스는 다음 세대에 없다
+    assert len(warnings) == 1 and re.fullmatch(r"in[/\\]big\.md: estimated memory \S+ is above the budget \S+ even "
+                                               r"alone; running it anyway", warnings[0])
+
+
+def test_with_one_worker_documents_over_the_room_share_one_worker_and_warn_once(tmp_path):
+    """작업 1개(예산이 작업 1개 몫보다 작아 모든 문서가 여유보다 크다)면 혼자 경로도 문서마다 세대를 새로 만들지 않고
+    한 작업 프로세스에서 차례로 돈다. 예산을 넘는다는 경고는 배치에 한 번만(컨트롤러 판정)."""
+    for name in ("a.md", "b.md", "c.md"):
+        write(tmp_path / "in" / name, f"# {name} 지어낸 제목\n")
+    result = scenario(tmp_path, r'''
+import json
+from hanji.batch import ingest_many
+
+if __name__ == "__main__":
+    with ingest_many(["in"], db="s.db", workers=1, max_memory="1M", ocr=False, layout=False) as run:
+        statuses = [r.status for r in run]
+    print(json.dumps([run.workers, statuses, len(run._pids), len(set(run._pids)), run.warnings]))
+''')
+    workers, statuses, sent, pids, warnings = result
+    assert (workers, statuses, sent, pids) == (1, ["created"] * 3, 3, 1)
+    assert len([w for w in warnings if w.endswith("even alone; running it anyway")]) == 1
+
+
+@pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0, reason="POSIX 권한(root가 아닐 때)")
+def test_an_unreadable_file_fails_on_its_own_and_the_batch_goes_on(tmp_path):
+    write(tmp_path / "in" / "a.md")
+    write(tmp_path / "in" / "b.md", "# 읽을 수 없는 지어낸 문서\n").chmod(0)
+    write(tmp_path / "in" / "c.md", "# 다른 지어낸 문서\n")
+    try:
+        result = scenario(tmp_path, r'''
+import json
+from hanji.batch import ingest_many
+
+if __name__ == "__main__":
+    with ingest_many(["in"], db="s.db", workers=2, ocr=False, layout=False) as run:
+        results = sorted(run, key=lambda r: r.index)
+    print(json.dumps([[r.status, r.error and r.error.type, r.error and r.error.code] for r in results]))
+''')
+    finally:
+        (tmp_path / "in" / "b.md").chmod(0o644)
+    assert result == [["created", None, None], ["failed", "PermissionError", 1], ["created", None, None]]
+
+
+def test_a_script_without_a_main_guard_gets_crashed_results_instead_of_hanging(tmp_path):
+    """spawn 작업 프로세스는 스크립트를 다시 import한다. if __name__ == "__main__": 없이 부르면 작업 프로세스가 시작하다
+    죽는다: 멈추지 않고 worker_crashed와 BatchAborted로 끝난다(README의 spawn 주의)."""
+    for i in range(4):
+        write(tmp_path / "in" / f"d{i}.md", f"# 지어낸 제목 {i}\n")
+    result = scenario(tmp_path, r'''
+import json, multiprocessing
+from hanji.batch import ingest_many
+
+with ingest_many(["in"], db="s.db", workers=1, ocr=False, layout=False) as run:
+    statuses = sorted({r.status if r.error is None else r.error.type for r in run})
+if multiprocessing.parent_process() is None:
+    print(json.dumps([statuses, run.aborted]))
+''', timeout=120)
+    assert result == [["BatchAborted", "WorkerCrashed"], True]
+
+
+def test_close_ends_only_this_runs_workers_and_reports_the_running_document(tmp_path):
+    """느린 문서가 도는 중(시작 표시를 본 뒤) close(): 돌던 문서는 interrupted(기본 ID), 이 실행의 작업 프로세스만
+    끝나고(따로 띄운 프로세스는 산다) 돌아온다(시간 상한은 시나리오 바깥 timeout). 끝낸 뒤 다시 부르면 같은 결과."""
+    write(tmp_path / "in" / "a.md")
+    write(tmp_path / "in" / "slow.md", "# 느린 지어낸 제목\n")
+    result = scenario(tmp_path, r'''
+import json, multiprocessing, os, time
+from hanji.batch import ingest_many
+
+if __name__ == "__main__":
+    other = multiprocessing.get_context("spawn").Process(target=time.sleep, args=(60,))
+    other.start()
+    run = ingest_many(["in"], db="s.db", workers=2, ocr=False, layout=False)
+    first = next(run)
+    while not os.path.exists("slow.md.started"):  # 느린 문서가 작업 프로세스에서 돌기 시작했다
+        time.sleep(0.05)
+    closed = run.close()
+    alive = [p is other for p in multiprocessing.active_children()]
+    other.terminate()
+    print(json.dumps([first.status, [(r.status, r.error.type, r.document_id is not None) for r in closed],
+                      alive, run.close() == closed, run.not_started]))
+''', timeout=60, env={"HANJI_TEST_WORKER_EXIT": "slow.md:hang"})
+    assert result == ["created", [["interrupted", "Interrupted", True]], [True], True, 0]
+
+
+def test_iterator_contract_with_block_and_close_after_break(tmp_path):
+    """with에서 중간에 나오면 남은 자식 0. 참조를 쥔 채 break하면 풀이 남고 close()가 거둔다. close() 없이 참조를 놓으면
+    GC가 거둔다."""
+    for i in range(6):
+        write(tmp_path / "in" / f"d{i}.md", f"# 지어낸 제목 {i}\n")
+    result = scenario(tmp_path, r'''
+import gc, json, multiprocessing
+from hanji.batch import ingest_many
+
+if __name__ == "__main__":
+    with ingest_many(["in"], db="a.db", workers=2, ocr=False, layout=False) as run:
+        for result in run:
+            break
+    after_with = len(multiprocessing.active_children())
+    run = ingest_many(["in"], db="b.db", workers=2, ocr=False, layout=False)
+    for result in run:
+        break
+    before_close = len(multiprocessing.active_children())
+    run.close()
+    after_close = len(multiprocessing.active_children())
+    run = ingest_many(["in"], db="c.db", workers=2, ocr=False, layout=False)
+    for result in run:
+        break
+    del run, result
+    gc.collect()
+    print(json.dumps([after_with, before_close > 0, after_close, len(multiprocessing.active_children())]))
+''')
+    assert result == [0, True, 0, 0]
+
+
+def test_the_parent_never_imports_onnxruntime(tmp_path):
+    """OCR·레이아웃을 켠(자동) 실행에서 부모는 onnxruntime·numpy를 import하지 않는다(세션은 작업 프로세스가 만든다)."""
+    result = scenario(tmp_path, r'''
+import json, sys
+from hanji.batch import ingest_many
+
+if __name__ == "__main__":
+    with ingest_many(sys.argv[1:], db="s.db", workers=2) as run:
+        statuses = sorted(r.status for r in run)
+    print(json.dumps([statuses, "onnxruntime" in sys.modules, "numpy" in sys.modules]))
+''', FIXTURES / "ocr" / "scanned.pdf", FIXTURES / "layout" / "figures.pdf", write(tmp_path / "a.md"))
+    assert result == [["created"] * 3, False, False]
+
+
+def test_two_batches_with_the_same_file_store_one_version(tmp_path):
+    """서로 다른 두 배치(다른 프로세스의 ingest_many)가 같은 내용을 동시에 수집하면 하나는 created, 하나는 unchanged이고
+    변경 로그는 한 줄이다."""
+    write(tmp_path / "in" / "a.md")
+    result = scenario(tmp_path, r'''
+import json, multiprocessing as mp, sqlite3
+from hanji import SqliteStore
+
+
+def one(barrier, queue):
+    from hanji.batch import ingest_many
+    barrier.wait()
+    with ingest_many(["in"], db="s.db", workers=1, ocr=False, layout=False) as run:
+        queue.put([r.status for r in run])
+
+
+if __name__ == "__main__":
+    SqliteStore("s.db").close()
+    ctx = mp.get_context("spawn")
+    barrier, queue = ctx.Barrier(2), ctx.Queue()
+    procs = [ctx.Process(target=one, args=(barrier, queue)) for _ in range(2)]
+    for p in procs:
+        p.start()
+    statuses = sorted(s for _ in procs for s in queue.get(timeout=120))
+    for p in procs:
+        p.join()
+    conn = sqlite3.connect("s.db")
+    print(json.dumps([statuses, conn.execute("SELECT COUNT(*) FROM change_log").fetchone()[0]]))
+''')
+    assert result == [["created", "unchanged"], 1]
+
+
+def test_the_private_worker_table_batch_relies_on_is_still_there(tmp_path):
+    """세대 끝내기는 ProcessPoolExecutor._processes(비공개, 3.12~3.14 같음)의 프로세스만 끝낸다. 없어지면 크게 실패한다."""
+    result = scenario(tmp_path, r'''
+import concurrent.futures as cf, json, multiprocessing
+
+if __name__ == "__main__":
+    with cf.ProcessPoolExecutor(1, mp_context=multiprocessing.get_context("spawn")) as executor:
+        executor.submit(int, "1").result()
+        table = getattr(executor, "_processes", None)
+        print(json.dumps([type(table).__name__, [type(p).__name__ for p in (table or {}).values()]]))
+''')
+    assert result == ["dict", ["SpawnProcess"]], "ProcessPoolExecutor._processes is gone; update batch.py"
+
+
+def test_start_failures_raise_before_any_document_is_sent(tmp_path, monkeypatch):
+    """상태 파일을 열 수 없음·형식이 다름, HANJI_ORT_THREADS 값 오류, 명시적 ocr=True인데 설치·모델이 없음은 풀을 띄우기
+    전에 예외(CLI 종료 코드 1). 잘못된 workers·max_memory는 ValueError."""
+    from hanji.errors import HanjiError, OcrUnavailable
+    from hanji.formats.pdf import ocr
+
+    paths = [write(tmp_path / "a.md")]
+    (tmp_path / "bad.db").write_bytes(b"not a database file at all" * 10)
+    with pytest.raises(Exception, match="file is not a database"):
+        batch.ingest_many(paths, db=tmp_path / "bad.db")
+    monkeypatch.setenv("HANJI_ORT_THREADS", "x")
+    with pytest.raises(HanjiError, match="HANJI_ORT_THREADS"):
+        batch.ingest_many(paths, db=tmp_path / "s.db")
+    monkeypatch.delenv("HANJI_ORT_THREADS")
+    monkeypatch.setattr(ocr, "available", lambda: False)
+    monkeypatch.setattr(ocr, "_missing", lambda: "OCR is not installed (missing numpy)")
+    with pytest.raises(OcrUnavailable, match="missing numpy"):
+        batch.ingest_many(paths, db=tmp_path / "s.db", ocr=True)
+    for bad in ({"workers": 0}, {"max_memory": "1.5"}, {"max_memory": 0}):
+        with pytest.raises(ValueError):
+            batch.ingest_many(paths, db=tmp_path / "s.db", **bad)
+    with pytest.raises(TypeError):
+        batch.ingest_many(str(paths[0]), db=tmp_path / "s.db")
