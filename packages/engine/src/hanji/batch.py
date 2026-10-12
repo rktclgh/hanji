@@ -379,6 +379,7 @@ class IngestRun(Iterator[IngestResult], contextlib.AbstractContextManager["Inges
         pool: _Pool | None = None
         failures, reason, finished = 0, "", False
         warned = False  # 혼자여도 예산을 넘는다는 경고를 냈다(배치에 한 번)
+        pending: deque[IngestResult] = deque()  # 한꺼번에 생긴 결과. 내기 직전에 꺼내 닫힐 때 남은 것은 close()가 돌려준다
 
         def retire() -> None:  # 보통 닫기(돌던 문서가 없다). 확정 결과 없이 실패한 세대면 연속 실패 수를 올리고 아니면 0으로
             nonlocal pool, failures, reason
@@ -473,8 +474,9 @@ class IngestRun(Iterator[IngestResult], contextlib.AbstractContextManager["Inges
                         pool.progress = True
                     yield self._received(doc, reply)
                 if broken:  # 세대 끝내기: 받지 못한 문서는 worker_crashed
-                    for result in self._end(pool, "worker_crashed"):
-                        yield result
+                    pending.extend(self._end(pool, "worker_crashed"))
+                    while pending:
+                        yield pending.popleft()
                     if pool.progress:  # 확정 결과를 낸 세대는 깨져도 연속 실패를 끊는다
                         failures, pool = 0, None
                     else:
@@ -485,15 +487,18 @@ class IngestRun(Iterator[IngestResult], contextlib.AbstractContextManager["Inges
                     f"batch stopped after {failures} failed worker pools in a row ({reason}); not ingested"))
                 unsent = ([head] if head is not None else []) + list(queue)
                 head, queue = None, deque()
-                for doc in unsent:
-                    yield self._failed(doc.entry, error)
+                pending.extend(self._failed(doc.entry, error) for doc in unsent)
+                while pending:
+                    yield pending.popleft()
                 finished = True
         finally:
+            closed = list(pending)
             if pool is not None:
                 if pool.running:
-                    self._closed = tuple(self._end(pool, "interrupted"))
+                    closed += self._end(pool, "interrupted")
                 else:
                     pool.executor.shutdown(wait=True)
+            self._closed = tuple(closed)
             if not finished:
                 self.not_started = (head is not None) + len(queue) + len(docs) + len(self._entries) - planned
 

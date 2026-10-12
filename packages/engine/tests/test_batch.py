@@ -400,6 +400,30 @@ if __name__ == "__main__":
     assert result == [["WorkerCrashed"] * 6 + ["BatchAborted"] * 2, True, []]
 
 
+def test_close_while_aborted_results_are_being_yielded_returns_the_rest(tmp_path):
+    """BatchAborted 결과를 내는 도중 close()하면 아직 내지 않은 결과는 close()가 돌려준다(조용히 사라지지 않는다):
+    낸 결과 + close() 결과 = 펼친 항목 수, 겹침 없음."""
+    for i in range(8):
+        write(tmp_path / "in" / f"d{i}.md", f"# 지어낸 제목 {i}\n")
+    result = scenario(tmp_path, r'''
+import json, multiprocessing
+from hanji.batch import ingest_many
+
+if __name__ == "__main__":
+    run = ingest_many(["in"], db="s.db", ocr=False, layout=False, workers=2)
+    seen = []
+    for r in run:
+        seen.append(r)
+        if r.error is not None and r.error.type == "BatchAborted":
+            break
+    rest = run.close()
+    indexes = [r.index for r in seen + list(rest)]
+    print(json.dumps([len(seen), [r.error.type for r in rest], sorted(indexes) == list(range(8)),
+                      multiprocessing.active_children()]))
+''', env={"HANJI_TEST_WORKER_EXIT": "*:before_commit"})
+    assert result == [7, ["BatchAborted"], True, []]
+
+
 def test_a_generation_with_a_confirmed_result_resets_the_failure_count_even_if_it_breaks(tmp_path):
     """확정 결과를 하나라도 낸 세대는 깨져도 연속 실패로 세지 않는다(컨트롤러 판정): 작업 1개, 세 번째 문서마다 커밋 앞에서
     죽으면 그 문서만 worker_crashed이고 나머지는 created, 배치는 멈추지 않는다."""
