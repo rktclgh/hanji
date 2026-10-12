@@ -211,6 +211,7 @@ def _init(settings: Settings, name: str) -> LocalEngine:
     True면 여기서 세션을 만든다(설치·모델 확인)."""
     if multiprocessing.parent_process() is not None:  # 작업 프로세스만: Ctrl+C는 부모가 받아 세대를 끝낸다(잡음 없이)
         signal.signal(signal.SIGINT, signal.SIG_IGN)
+        resources.SPIN = False  # 세션을 만들기 전에: 여러 작업 프로세스가 쉬는 스레드로 서로의 코어를 붙잡지 않게
     _test_hook(name, "init")
     if settings.threads is not None and resources.ort_threads_env() is None:  # 없음·빈 값·공백뿐은 같은 "없음"
         os.environ[resources.ORT_THREADS_ENV] = str(settings.threads)

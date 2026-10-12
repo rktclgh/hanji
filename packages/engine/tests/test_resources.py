@@ -51,6 +51,18 @@ def test_set_ort_threads_changes_session_options_only_when_asked(monkeypatch):
     assert (options.intra_op_num_threads, options.inter_op_num_threads) == (2, 1)
 
 
+def test_set_ort_threads_turns_spinning_off_only_when_spin_is_false(monkeypatch):
+    """작업 프로세스(SPIN=False)만 intra·inter 스레드 풀 spin을 끈다. 기본(SPIN=True)은 세션 설정을 더하지 않는다."""
+    monkeypatch.delenv("HANJI_ORT_THREADS", raising=False)
+    entries: dict[str, str] = {}
+    options = SimpleNamespace(add_session_config_entry=entries.__setitem__)
+    resources.set_ort_threads(options)
+    assert entries == {}
+    monkeypatch.setattr(resources, "SPIN", False)
+    resources.set_ort_threads(options)
+    assert entries == {"session.intra_op.allow_spinning": "0", "session.inter_op.allow_spinning": "0"}
+
+
 def test_ocr_and_layout_sessions_follow_hanji_ort_threads(monkeypatch):
     """HANJI_ORT_THREADS=2면 OCR·레이아웃 세션이 intra 2·inter 1, 없으면 onnxruntime 기본값(0)."""
     pytest.importorskip("onnxruntime")
