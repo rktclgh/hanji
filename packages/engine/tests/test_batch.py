@@ -946,3 +946,32 @@ if __name__ == "__main__":
     print(json.dumps(asyncio.run(main())))
 ''', timeout=60)
     assert result == ["synthetic admit failure", False, []]
+
+
+def test_async_a_run_left_without_aclose_is_cleaned_up_when_the_loop_closes(tmp_path):
+    """aclose() 없이 버려진 실행(큐가 찼고 긴 문서 하나가 도는 중): asyncio.run이 루프를 닫으면 생산자가 기다리기를
+    멈추고 run.close()로 세대를 끝낸다. 생산자 스레드가 끝나고 남은 자식 0, 스크립트는 끝난다(시간 상한은 시나리오
+    바깥 timeout)."""
+    write(tmp_path / "in" / "a-slow.md", "# 지어낸 긴 제목\n\n" + "지어낸 문단\n\n" * 20000)
+    for i in range(20):
+        write(tmp_path / "in" / f"d{i:02}.md", f"# 지어낸 제목 {i}\n")
+    result = scenario(tmp_path, ASYNC + r'''
+import os
+
+
+async def main():
+    run = await aingest_many(["in"], db="s.db", workers=2, ocr=False, layout=False)
+    while not (run._queue.full() and os.path.exists("a-slow.md.started")):
+        await asyncio.sleep(0.05)
+    await run.__anext__()
+    return run  # aclose()·async with 없이 루프를 닫는다
+
+if __name__ == "__main__":
+    run = asyncio.run(main())
+    for _ in range(600):  # 생산자 스레드가 끝날 때까지(최대 30초)
+        if not run._thread.is_alive():
+            break
+        time.sleep(0.05)
+    print(json.dumps([run._thread.is_alive(), [p.pid for p in multiprocessing.active_children()]]))
+''', timeout=60, env={"HANJI_TEST_WORKER_EXIT": "a-slow.md:hang"})
+    assert result == [False, []]

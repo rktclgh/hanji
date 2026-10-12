@@ -571,7 +571,7 @@ class AsyncIngestRun(AsyncIterator[IngestResult]):
     def _put(self, item: Any) -> bool:
         """큐에 자리가 날 때까지 기다린다(0.1초마다 멈춤 표시를 본다). 멈췄거나 이벤트 루프가 닫혔으면 결과를 _unsent에
         두고 False(aclose()가 돌려준다)."""
-        while not self._stop.is_set():
+        while not self._stop.is_set() and not self._loop.is_closed():  # 루프가 닫히면(aclose 없이 버려짐) 그만
             if self._room.acquire(timeout=0.1):
                 try:
                     self._loop.call_soon_threadsafe(self._queue.put_nowait, item)
