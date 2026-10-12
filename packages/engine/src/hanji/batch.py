@@ -546,40 +546,41 @@ def ingest_many(paths: Iterable[str | os.PathLike[str]], *, db: str | os.PathLik
 
 QUEUE_SIZE = 8  # aingest_many가 소비자를 앞서 쌓아 두는 결과 수(역압력)
 _DONE = object()
+CLOSED_BY_CANCEL = "ingest run was closed by cancellation; see aclose() results"
 
 
 class AsyncIngestRun(AsyncIterator[IngestResult]):
     """aingest_many의 결과. 스레드 하나가 IngestRun을 돌리고 결과를 크기 8 큐에 넣는다(소비자가 느리면 생산자가 기다린다).
-    async with로 쓰거나 끝나면 aclose()를 부른다. aclose()·작업 취소는 돌던 문서를 기다리지 않고 세대를 끝낸다."""
+    async with로 쓰거나 끝나면 aclose()를 부른다. aclose()·작업 취소는 돌던 문서를 기다리지 않고 세대를 끝낸다.
+    __anext__를 기다리다 취소되면(wait_for·timeout 포함) 실행을 닫고, 그 뒤 반복은 RuntimeError(결과는 aclose())."""
 
     def __init__(self, run: IngestRun, loop: asyncio.AbstractEventLoop) -> None:
         self.run = run  # workers·ort_threads·budget·warnings 등 요약 정보
         self._loop = loop
         self._queue: asyncio.Queue[Any] = asyncio.Queue(QUEUE_SIZE)
+        self._room = threading.Semaphore(QUEUE_SIZE)  # 큐의 빈 자리: 생산자 스레드가 잡고 소비자가 돌려준다
         self._stop = threading.Event()
+        self._unsent: list[IngestResult] = []  # 멈춰서 큐에 넣지 못한 결과(생산자 스레드가 쓰고 join 뒤에 읽는다)
         self._error: BaseException | None = None
         self._finished = False
+        self._cancelled = False  # __anext__를 기다리다 취소돼 닫았다
+        self._closed: tuple[IngestResult, ...] | None = None
         self._thread = threading.Thread(target=self._produce, name="hanji-ingest", daemon=True)
         self._thread.start()
 
-    def _put(self, item: object) -> bool:
-        """큐에 넣을 때까지 기다린다(0.1초마다 멈춤 표시를 본다). 멈췄으면 False."""
-        if self._stop.is_set():
-            return False
-        try:
-            future = asyncio.run_coroutine_threadsafe(self._queue.put(item), self._loop)
-        except RuntimeError:  # 이벤트 루프가 닫혔다
-            return False
-        while True:
-            try:
-                future.result(timeout=0.1)
-                return True
-            except cf.TimeoutError:
-                if self._stop.is_set():
-                    future.cancel()
-                    return False
-            except cf.CancelledError:
-                return False
+    def _put(self, item: Any) -> bool:
+        """큐에 자리가 날 때까지 기다린다(0.1초마다 멈춤 표시를 본다). 멈췄거나 이벤트 루프가 닫혔으면 결과를 _unsent에
+        두고 False(aclose()가 돌려준다)."""
+        while not self._stop.is_set():
+            if self._room.acquire(timeout=0.1):
+                try:
+                    self._loop.call_soon_threadsafe(self._queue.put_nowait, item)
+                    return True
+                except RuntimeError:  # 이벤트 루프가 닫혔다
+                    break
+        if item is not _DONE:
+            self._unsent.append(item)
+        return False
 
     def _produce(self) -> None:
         try:
@@ -596,31 +597,47 @@ class AsyncIngestRun(AsyncIterator[IngestResult]):
         return self
 
     async def __anext__(self) -> IngestResult:
+        if self._cancelled:
+            raise RuntimeError(CLOSED_BY_CANCEL)
         if self._finished:
             raise StopAsyncIteration
         try:
             item = await self._queue.get()
         except asyncio.CancelledError:  # async with 없이 쓰다 취소돼도 생산자와 작업 프로세스를 거둔다
+            self._cancelled = True  # 뒤 반복이 정상 끝으로 보이지 않게
             await self.aclose()
             raise
         if item is _DONE:
             self._finished = True
+            if self._cancelled:
+                raise RuntimeError(CLOSED_BY_CANCEL)
             if self._error is not None:
                 raise self._error
             raise StopAsyncIteration
+        self._room.release()
         return item
 
     async def aclose(self) -> tuple[IngestResult, ...]:
         """멈춤 표시를 세우고 생산자 스레드가 끝나기를 이벤트 루프를 막지 않고 기다린다(틱 0.2초 + 세대 끝내기).
-        받지 못한 문서의 결과(돌던 문서는 interrupted)를 돌려준다. 큐에 쌓였거나 넣으려던 결과는 반복자에서 버린다:
-        그 문서들은 이미 저장됐다(상태 파일에 보인다). 보내지 않은 문서는 run.not_started로 센다."""
+        건네지 않은 결과(큐에 쌓인 것, 큐 순서로, 그다음 넣으려던 것)와 받지 못한 문서의 결과(돌던 문서는 interrupted)를
+        돌려준다: 실패 결과도 잃지 않는다. 그 뒤 반복은 끝난다. 보내지 않은 문서는 run.not_started로 센다. 여러 번 불러도
+        같다."""
+        if self._closed is not None:
+            return self._closed
         self._stop.set()
         self.run._stop.set()
-        await asyncio.to_thread(self._thread.join)
+        await asyncio.to_thread(self._thread.join)  # 스레드가 예약한 put_nowait는 이 await가 깨기 전에 돈다
+        if self._closed is not None:  # 같이 부른 다른 aclose()가 먼저 끝냈다
+            return self._closed
+        buffered = []
+        while not self._queue.empty():
+            item = self._queue.get_nowait()
+            if item is not _DONE:
+                buffered.append(item)
+        self._closed = (*buffered, *self._unsent, *self.run.close())
         self._finished = True
-        with contextlib.suppress(asyncio.QueueFull):  # 다른 작업이 __anext__에서 기다리고 있으면 깨운다
-            self._queue.put_nowait(_DONE)
-        return self.run.close()
+        self._queue.put_nowait(_DONE)  # 다른 작업이 __anext__에서 기다리고 있으면 깨운다
+        return self._closed
 
     async def __aenter__(self) -> "AsyncIngestRun":
         return self

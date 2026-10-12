@@ -850,34 +850,99 @@ if __name__ == "__main__":
     assert result == [False, [["interrupted", "Interrupted"]], []]
 
 
-def test_async_aclose_drops_buffered_results_but_their_documents_are_stored(tmp_path):
-    """aclose()는 아직 건네지 않은 결과(큐에 쌓인 것, 넣으려던 것)를 반복자에서 버리고 그 뒤 반복은 끝난다. 버린 결과의
-    문서는 저장돼 있다: 모든 입력은 상태 파일에 있거나, aclose()가 돌려준 interrupted이거나, 보내지 않은 문서
-    (run.not_started)다."""
+def test_async_aclose_returns_buffered_results_so_failures_are_not_lost(tmp_path):
+    """aclose()는 아직 건네지 않은 결과(큐에 쌓인 것을 큐 순서로, 그다음 넣으려던 것)와 돌던 문서의 interrupted를 돌려주고
+    그 뒤 반복은 끝난다. 실패 결과도 잃지 않는다: 모든 입력은 aclose()가 돌려준 결과이거나 보내지 않은 문서
+    (run.not_started)다. 돌려준 created 문서는 저장돼 있다. 여러 번 불러도 같다."""
     for i in range(20):
         write(tmp_path / "in" / f"d{i:02}.md", f"# 지어낸 제목 {i}\n")
+    (tmp_path / "in" / "broken.pdf").write_bytes(b"%PDF-1.4 not really")
     result = scenario(tmp_path, ASYNC + r'''
-import hashlib, os, sqlite3
+import sqlite3
 
 
 async def main():
-    run = await aingest_many(["in"], db="s.db", workers=2, ocr=False, layout=False)
-    seen = [await run.__anext__()]
-    while not run._queue.full():
+    run = await aingest_many(["missing.md", "in"], db="s.db", workers=2, ocr=False, layout=False)
+    while not run._queue.full():  # 아무것도 받지 않는다: 첫 결과(없는 파일의 실패)도 큐에 있다
         await asyncio.sleep(0.05)
     closed = await run.aclose()
+    again = await run.aclose()
     after = [r async for r in run]
     conn = sqlite3.connect("s.db")
     stored = {row[0] for row in conn.execute("SELECT document_id FROM documents")}
     conn.close()
-    ids = {"doc_" + hashlib.sha256(open(os.path.join("in", n), "rb").read()).hexdigest()[:24]
-           for n in os.listdir("in")}
-    interrupted = {r.document_id for r in closed if r.status == "interrupted"}
-    unknown = ids - stored - interrupted
-    return [len(seen), after, len(stored) > len(seen), len(unknown) == run.run.not_started,
-            {r.document_id for r in seen} <= stored, multiprocessing.active_children()]
+    indices = [r.index for r in closed]
+    created = {r.document_id for r in closed if r.status == "created"}
+    first = closed[0]
+    return [[first.index, first.status, first.error.type], len(closed) >= 8, again == closed, after,
+            len(set(indices)) == len(indices), len(closed) + run.run.not_started == 22,
+            bool(created) and created <= stored, run._thread.is_alive(), multiprocessing.active_children()]
 
 if __name__ == "__main__":
     print(json.dumps(asyncio.run(main())))
 ''', timeout=60)
-    assert result == [1, [], True, True, True, []]
+    assert result == [[0, "failed", "FileNotFoundError"], True, True, [], True, True, True, False, []]
+
+
+def test_async_cancelled_next_closes_the_run_and_later_iteration_raises(tmp_path):
+    """__anext__를 기다리다 취소되면(wait_for 시간 초과) 실행을 닫는다. 그 뒤 반복은 정상 끝(StopAsyncIteration)이 아니라
+    RuntimeError, aclose()는 결과를 돌려준다: 모든 입력은 그 결과이거나 보내지 않은 문서다. 남은 자식 0."""
+    for i in range(20):
+        write(tmp_path / "in" / f"d{i:02}.md", f"# 지어낸 제목 {i}\n")
+    result = scenario(tmp_path, ASYNC + r'''
+async def main():
+    run = await aingest_many(["in"], db="s.db", workers=2, ocr=False, layout=False)
+    try:
+        await asyncio.wait_for(run.__anext__(), 0.001)
+        timed_out = False
+    except TimeoutError:
+        timed_out = True
+    try:
+        await run.__anext__()
+        later = "result"
+    except StopAsyncIteration:
+        later = "stopped"
+    except RuntimeError as exc:
+        later = str(exc)
+    closed = await run.aclose()
+    indices = [r.index for r in closed]
+    return [timed_out, later, await run.aclose() == closed, sorted({r.status for r in closed} - {"created"}),
+            len(set(indices)) == len(indices), len(closed) + run.run.not_started == 20, run._thread.is_alive(),
+            multiprocessing.active_children()]
+
+if __name__ == "__main__":
+    print(json.dumps(asyncio.run(main())))
+''', timeout=60)
+    timed_out, later, same, statuses, unique, accounted, alive, children = result
+    assert [timed_out, later, same, unique, accounted, alive, children] == [
+        True, "ingest run was closed by cancellation; see aclose() results", True, True, True, False, []]
+    assert set(statuses) <= {"interrupted"}
+
+
+def test_async_an_exception_in_the_producer_reaches_the_consumer(tmp_path):
+    """생산자 스레드(IngestRun)에서 난 예외는 소비자의 async for에서 그대로 나온다. 생산자 스레드는 끝나고 남은 자식 0."""
+    write(tmp_path / "in" / "a.md")
+    result = scenario(tmp_path, ASYNC + r'''
+from hanji import resources
+
+
+def admit(*args, **kwargs):
+    raise ValueError("synthetic admit failure")
+
+
+async def main():
+    resources.admit = admit
+    run = await aingest_many(["in"], db="s.db", workers=1, ocr=False, layout=False)
+    try:
+        async for _ in run:
+            pass
+        got = None
+    except ValueError as exc:
+        got = str(exc)
+    await run.aclose()
+    return [got, run._thread.is_alive(), multiprocessing.active_children()]
+
+if __name__ == "__main__":
+    print(json.dumps(asyncio.run(main())))
+''', timeout=60)
+    assert result == ["synthetic admit failure", False, []]
