@@ -4,6 +4,7 @@
 작업 프로세스에 보내고, 문서마다 작은 결과만 받는다. 작업 프로세스(_work)는 LocalEngine 수집 경로를 처음부터 끝까지 돌리고 자기
 연결로 상태 파일에 커밋한다. 한 ProcessPoolExecutor가 사는 동안이 한 세대다. 부모는 onnxruntime을 import하지 않는다."""
 
+import asyncio
 import concurrent.futures as cf
 import contextlib
 import fnmatch
@@ -16,7 +17,7 @@ import threading
 import time
 import unicodedata
 from collections import deque
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterable, Iterator
 from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 from pathlib import Path
@@ -541,3 +542,98 @@ def ingest_many(paths: Iterable[str | os.PathLike[str]], *, db: str | os.PathLik
     settings = Settings(os.fspath(db_path), ocr, layout, force, threads)
     return IngestRun(entries, skipped, settings, cost, budget, count, user_threads or threads, warnings + more,
                      _recycle_every or resources.RECYCLE_PER_WORKER * count, _after_plan)
+
+
+QUEUE_SIZE = 8  # aingest_many가 소비자를 앞서 쌓아 두는 결과 수(역압력)
+_DONE = object()
+
+
+class AsyncIngestRun(AsyncIterator[IngestResult]):
+    """aingest_many의 결과. 스레드 하나가 IngestRun을 돌리고 결과를 크기 8 큐에 넣는다(소비자가 느리면 생산자가 기다린다).
+    async with로 쓰거나 끝나면 aclose()를 부른다. aclose()·작업 취소는 돌던 문서를 기다리지 않고 세대를 끝낸다."""
+
+    def __init__(self, run: IngestRun, loop: asyncio.AbstractEventLoop) -> None:
+        self.run = run  # workers·ort_threads·budget·warnings 등 요약 정보
+        self._loop = loop
+        self._queue: asyncio.Queue[Any] = asyncio.Queue(QUEUE_SIZE)
+        self._stop = threading.Event()
+        self._error: BaseException | None = None
+        self._finished = False
+        self._thread = threading.Thread(target=self._produce, name="hanji-ingest", daemon=True)
+        self._thread.start()
+
+    def _put(self, item: object) -> bool:
+        """큐에 넣을 때까지 기다린다(0.1초마다 멈춤 표시를 본다). 멈췄으면 False."""
+        if self._stop.is_set():
+            return False
+        try:
+            future = asyncio.run_coroutine_threadsafe(self._queue.put(item), self._loop)
+        except RuntimeError:  # 이벤트 루프가 닫혔다
+            return False
+        while True:
+            try:
+                future.result(timeout=0.1)
+                return True
+            except cf.TimeoutError:
+                if self._stop.is_set():
+                    future.cancel()
+                    return False
+            except cf.CancelledError:
+                return False
+
+    def _produce(self) -> None:
+        try:
+            for result in self.run:
+                if not self._put(result):
+                    return
+        except BaseException as exc:
+            self._error = exc
+        finally:
+            self.run.close()
+            self._put(_DONE)
+
+    def __aiter__(self) -> "AsyncIngestRun":
+        return self
+
+    async def __anext__(self) -> IngestResult:
+        if self._finished:
+            raise StopAsyncIteration
+        try:
+            item = await self._queue.get()
+        except asyncio.CancelledError:  # async with 없이 쓰다 취소돼도 생산자와 작업 프로세스를 거둔다
+            await self.aclose()
+            raise
+        if item is _DONE:
+            self._finished = True
+            if self._error is not None:
+                raise self._error
+            raise StopAsyncIteration
+        return item
+
+    async def aclose(self) -> tuple[IngestResult, ...]:
+        """멈춤 표시를 세우고 생산자 스레드가 끝나기를 이벤트 루프를 막지 않고 기다린다(틱 0.2초 + 세대 끝내기).
+        받지 못한 문서의 결과(돌던 문서는 interrupted)를 돌려준다. 큐에 쌓였거나 넣으려던 결과는 반복자에서 버린다:
+        그 문서들은 이미 저장됐다(상태 파일에 보인다). 보내지 않은 문서는 run.not_started로 센다."""
+        self._stop.set()
+        self.run._stop.set()
+        await asyncio.to_thread(self._thread.join)
+        self._finished = True
+        with contextlib.suppress(asyncio.QueueFull):  # 다른 작업이 __anext__에서 기다리고 있으면 깨운다
+            self._queue.put_nowait(_DONE)
+        return self.run.close()
+
+    async def __aenter__(self) -> "AsyncIngestRun":
+        return self
+
+    async def __aexit__(self, exc_type: type[BaseException] | None, exc: BaseException | None,
+                        tb: TracebackType | None) -> None:
+        await self.aclose()
+
+
+async def aingest_many(paths: Iterable[str | os.PathLike[str]], *, db: str | os.PathLike[str] | None = None,
+                       workers: int | None = None, max_memory: int | str | None = None, ocr: bool | None = None,
+                       layout: bool | None = None, force: bool = False, recursive: bool = False) -> AsyncIngestRun:
+    """ingest_many의 비동기판(같은 인자). 시작 확인은 스레드에서 해 이벤트 루프를 막지 않는다."""
+    run = await asyncio.to_thread(ingest_many, paths, db=db, workers=workers, max_memory=max_memory, ocr=ocr,
+                                  layout=layout, force=force, recursive=recursive)
+    return AsyncIngestRun(run, asyncio.get_running_loop())

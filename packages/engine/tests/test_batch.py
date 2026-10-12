@@ -731,3 +731,153 @@ def test_start_failures_raise_before_any_document_is_sent(tmp_path, monkeypatch)
             batch.ingest_many(paths, db=tmp_path / "s.db", **bad)
     with pytest.raises(TypeError):
         batch.ingest_many(str(paths[0]), db=tmp_path / "s.db")
+
+
+ASYNC = r'''
+import asyncio, json, multiprocessing, sys, threading, time
+from hanji.batch import aingest_many
+
+
+async def ticker(ticks):
+    while True:
+        await asyncio.sleep(0.01)
+        ticks.append(1)
+'''
+
+
+def test_async_slow_consumer_holds_the_producer_at_eight_results(tmp_path):
+    """소비자가 느리면 큐가 8개에서 차고 생산자가 기다린다(실제 역압력). 나중에 모두 받는다."""
+    for i in range(20):
+        write(tmp_path / "in" / f"d{i:02}.md", f"# 지어낸 제목 {i}\n")
+    result = scenario(tmp_path, ASYNC + r'''
+async def main():
+    run = await aingest_many(["in"], db="s.db", workers=2, ocr=False, layout=False)
+    seen = [await run.__anext__()]
+    for _ in range(200):  # 큐가 찰 때까지(최대 20초)
+        if run._queue.full():
+            break
+        await asyncio.sleep(0.1)
+    await asyncio.sleep(0.5)
+    held = [run._queue.qsize(), run._thread.is_alive()]
+    async for result in run:
+        seen.append(result)
+    await run.aclose()
+    return [held, len(seen), sorted({r.status for r in seen}), run._thread.is_alive(),
+            multiprocessing.active_children()]
+
+if __name__ == "__main__":
+    print(json.dumps(asyncio.run(main())))
+''')
+    assert result == [[8, True], 20, ["created"], False, []]
+
+
+def test_async_cancel_with_a_full_queue_ends_the_producer_without_blocking_the_loop(tmp_path):
+    """큐가 찬 상태에서 소비 작업을 취소하면 생산자 스레드가 끝나고 남은 자식 0, 그동안 이벤트 루프는 막히지 않는다
+    (시간 상한은 시나리오 바깥 timeout)."""
+    for i in range(20):
+        write(tmp_path / "in" / f"d{i:02}.md", f"# 지어낸 제목 {i}\n")
+    result = scenario(tmp_path, ASYNC + r'''
+async def main():
+    full = asyncio.Event()
+    holder = {}
+
+    async def consume():
+        async with await aingest_many(["in"], db="s.db", workers=2, ocr=False, layout=False) as run:
+            holder["run"] = run
+            async for _ in run:
+                while not run._queue.full():
+                    await asyncio.sleep(0.05)
+                full.set()
+                await asyncio.sleep(3600)
+
+    task = asyncio.create_task(consume())
+    await asyncio.wait_for(full.wait(), 60)
+    ticks = []
+    tick = asyncio.create_task(ticker(ticks))
+    start = time.monotonic()
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    took = time.monotonic() - start
+    tick.cancel()
+    run = holder["run"]
+    return [run._thread.is_alive(), multiprocessing.active_children(), len(ticks) >= int(took / 0.1)]
+
+if __name__ == "__main__":
+    print(json.dumps(asyncio.run(main())))
+''', timeout=60)
+    assert result == [False, [], True]
+
+
+@pytest.mark.parametrize("how", ["aclose", "cancel"])
+def test_async_stop_while_the_only_document_is_still_running(tmp_path, how):
+    """결과가 아직 없는 동안(긴 문서 하나가 돌기 시작한 뒤) aclose()나 async with 없는 소비 작업 취소: 생산자 스레드가
+    끝나고 그 문서는 interrupted, 남은 자식 0(시간 상한은 시나리오 바깥 timeout)."""
+    write(tmp_path / "in" / "slow.md")
+    result = scenario(tmp_path, ASYNC + r'''
+import os
+
+
+async def main(how):
+    run = await aingest_many(["in"], db="s.db", workers=1, ocr=False, layout=False)
+    while not os.path.exists("slow.md.started"):  # 느린 문서가 작업 프로세스에서 돌기 시작했다
+        await asyncio.sleep(0.05)
+    if how == "aclose":
+        closed = await run.aclose()
+    else:
+        waiting = asyncio.Event()
+
+        async def consume():  # async with 없이: 취소가 __anext__에서 aclose()를 부른다
+            waiting.set()
+            async for _ in run:
+                pass
+
+        task = asyncio.create_task(consume())
+        await waiting.wait()  # consume은 이벤트를 세운 뒤 queue.get()에서 멈춰 있다
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        closed = run.run.close()
+    return [run._thread.is_alive(), [(r.status, r.error.type) for r in closed], multiprocessing.active_children()]
+
+if __name__ == "__main__":
+    print(json.dumps(asyncio.run(main(sys.argv[1]))))
+''', how, timeout=60, env={"HANJI_TEST_WORKER_EXIT": "slow.md:hang"})
+    assert result == [False, [["interrupted", "Interrupted"]], []]
+
+
+def test_async_aclose_drops_buffered_results_but_their_documents_are_stored(tmp_path):
+    """aclose()는 아직 건네지 않은 결과(큐에 쌓인 것, 넣으려던 것)를 반복자에서 버리고 그 뒤 반복은 끝난다. 버린 결과의
+    문서는 저장돼 있다: 모든 입력은 상태 파일에 있거나, aclose()가 돌려준 interrupted이거나, 보내지 않은 문서
+    (run.not_started)다."""
+    for i in range(20):
+        write(tmp_path / "in" / f"d{i:02}.md", f"# 지어낸 제목 {i}\n")
+    result = scenario(tmp_path, ASYNC + r'''
+import hashlib, os, sqlite3
+
+
+async def main():
+    run = await aingest_many(["in"], db="s.db", workers=2, ocr=False, layout=False)
+    seen = [await run.__anext__()]
+    while not run._queue.full():
+        await asyncio.sleep(0.05)
+    closed = await run.aclose()
+    after = [r async for r in run]
+    conn = sqlite3.connect("s.db")
+    stored = {row[0] for row in conn.execute("SELECT document_id FROM documents")}
+    conn.close()
+    ids = {"doc_" + hashlib.sha256(open(os.path.join("in", n), "rb").read()).hexdigest()[:24]
+           for n in os.listdir("in")}
+    interrupted = {r.document_id for r in closed if r.status == "interrupted"}
+    unknown = ids - stored - interrupted
+    return [len(seen), after, len(stored) > len(seen), len(unknown) == run.run.not_started,
+            {r.document_id for r in seen} <= stored, multiprocessing.active_children()]
+
+if __name__ == "__main__":
+    print(json.dumps(asyncio.run(main())))
+''', timeout=60)
+    assert result == [1, [], True, True, True, []]
