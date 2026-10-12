@@ -10,6 +10,7 @@ import fnmatch
 import hashlib
 import multiprocessing
 import os
+import signal
 import sys
 import threading
 import time
@@ -207,6 +208,8 @@ def _test_hook(name: str, stage: str) -> None:
 def _init(settings: Settings, name: str) -> LocalEngine:
     """첫 호출에서 게으르게: 풀이 정한 ORT 스레드 수(사용자 값이 없을 때만), 자기 상태 파일 연결, 기본 파서. 명시적
     True면 여기서 세션을 만든다(설치·모델 확인)."""
+    if multiprocessing.parent_process() is not None:  # 작업 프로세스만: Ctrl+C는 부모가 받아 세대를 끝낸다(잡음 없이)
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
     _test_hook(name, "init")
     if settings.threads is not None and resources.ort_threads_env() is None:  # 없음·빈 값·공백뿐은 같은 "없음"
         os.environ[resources.ORT_THREADS_ENV] = str(settings.threads)
@@ -278,6 +281,7 @@ class _Pool:
         self.sent = 0
         self.running: dict[cf.Future[dict[str, Any]], _Doc] = {}
         self.failed = ""  # 실패 이유(WorkerInitFailed 결과가 왔다). 비면 실패하지 않은 세대
+        self.progress = False  # 확정 결과(created·unchanged·제 오류의 failed)를 하나라도 받았다: 연속 실패로 세지 않는다
 
 
 class IngestRun(Iterator[IngestResult], contextlib.AbstractContextManager["IngestRun"]):
@@ -357,7 +361,9 @@ class IngestRun(Iterator[IngestResult], contextlib.AbstractContextManager["Inges
         results = []
         for future, doc in pool.running.items():
             if future.done() and not future.cancelled() and future.exception() is None:
-                results.append(self._received(doc, future.result()))
+                reply = future.result()
+                pool.progress = pool.progress or not reply.get("init_failed")
+                results.append(self._received(doc, reply))
             else:
                 results.append(self._lost(doc, status))
         pool.running.clear()
@@ -372,11 +378,11 @@ class IngestRun(Iterator[IngestResult], contextlib.AbstractContextManager["Inges
         failures, reason, finished = 0, "", False
         warned = False  # 혼자여도 예산을 넘는다는 경고를 냈다(배치에 한 번)
 
-        def retire() -> None:  # 보통 닫기(돌던 문서가 없다). 실패한 세대면 연속 실패 수를 올리고 아니면 0으로
+        def retire() -> None:  # 보통 닫기(돌던 문서가 없다). 확정 결과 없이 실패한 세대면 연속 실패 수를 올리고 아니면 0으로
             nonlocal pool, failures, reason
             assert pool is not None and not pool.running
             pool.executor.shutdown(wait=True)
-            failures, reason = (failures + 1, pool.failed) if pool.failed else (0, reason)
+            failures, reason = (failures + 1, pool.failed) if pool.failed and not pool.progress else (0, reason)
             pool = None
 
         try:
@@ -461,11 +467,16 @@ class IngestRun(Iterator[IngestResult], contextlib.AbstractContextManager["Inges
                         continue
                     if reply.get("init_failed"):
                         pool.failed = reply["error"][2]
+                    else:
+                        pool.progress = True
                     yield self._received(doc, reply)
                 if broken:  # 세대 끝내기: 받지 못한 문서는 worker_crashed
                     for result in self._end(pool, "worker_crashed"):
                         yield result
-                    failures, reason, pool = failures + 1, "worker process died", None
+                    if pool.progress:  # 확정 결과를 낸 세대는 깨져도 연속 실패를 끊는다
+                        failures, pool = 0, None
+                    else:
+                        failures, reason, pool = failures + 1, "worker process died", None
             if failures >= MAX_FAILED_GENERATIONS:  # 보내지 않은 문서만 BatchAborted(계획 단계 오류는 이미 제 오류로 냈다)
                 self.aborted = True
                 error = IngestError(1, "BatchAborted", _text(

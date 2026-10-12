@@ -400,6 +400,21 @@ if __name__ == "__main__":
     assert result == [["WorkerCrashed"] * 6 + ["BatchAborted"] * 2, True, []]
 
 
+def test_a_generation_with_a_confirmed_result_resets_the_failure_count_even_if_it_breaks(tmp_path):
+    """확정 결과를 하나라도 낸 세대는 깨져도 연속 실패로 세지 않는다(컨트롤러 판정): 작업 1개, 세 번째 문서마다 커밋 앞에서
+    죽으면 그 문서만 worker_crashed이고 나머지는 created, 배치는 멈추지 않는다."""
+    names = [f"d{i}-x.md" if i % 3 == 2 else f"d{i}.md" for i in range(10)]  # 폴더 순서 그대로, 크기가 같다
+    for i, name in enumerate(names):
+        write(tmp_path / "in" / name, f"# 지어낸 제목 {i}\n")
+    result = scenario(tmp_path, CRASH + r'''
+if __name__ == "__main__":
+    run, results = run_once(workers=1)
+    print(json.dumps([[r.status if r.error is None else r.error.type for r in results], run.aborted,
+                      multiprocessing.active_children()]))
+''', env={"HANJI_TEST_WORKER_EXIT": "*-x.md:before_commit"})
+    assert result == [["created", "created", "WorkerCrashed"] * 3 + ["created"], False, []]
+
+
 def test_init_failures_count_per_generation_and_a_good_generation_resets_the_count(tmp_path):
     """작업 프로세스 초기화 실패는 그 문서의 WorkerInitFailed이고 그 세대를 실패로 센다. 세대마다 1건(갈아 끼우기 1)으로
     실패·실패·성공·실패·실패·성공이면 성공한 세대에서 연속 수가 0으로 돌아가 멈추지 않는다. 매번 실패하면 3세대 뒤 멈춘다.
