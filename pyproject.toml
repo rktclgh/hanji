@@ -27,5 +27,6 @@ dev = ["pytest>=8.3", "jsonschema>=4.23,<5", "reportlab>=5,<6"]
 
 [tool.pytest.ini_options]
 testpaths = ["packages/contracts/tests", "packages/engine/tests", "packages/fonts/tests"]
-addopts = "--import-mode=importlib"
+addopts = "--import-mode=importlib -m 'not stress'"
+markers = ["stress: 오래 도는 동시성 반복(CI 기본 밖, `pytest -m stress`로 돌린다)"]
 filterwarnings = ["error::EncodingWarning", "ignore::EncodingWarning:pypdfium2_raw"]

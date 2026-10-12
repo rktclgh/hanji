@@ -46,6 +46,7 @@ hanji models fetch [ocr|layout|all] [--to DIR]
 ## 개발
 
 - 골든 예제 재생성·확인: `uv run python packages/engine/tests/build_fixtures.py [--check]`
+- 동시성 반복 테스트(CI 기본 밖, 시작 경쟁·동시 커밋·죽음과 갈아 끼우기 200건): `uv run pytest -m stress`
 - PDF 골든 예제 재생성·확인: `uv run python packages/engine/tests/build_pdf_fixtures.py [--check]`(reportlab, 개발 의존성). 골든 예제는 OCR을 끄고 만든다
 - OCR 예제: `fixtures/ocr/scanned.pdf`는 `build_ocr_fixture.py`로 한 번 만들어 커밋한 고정 입력이다(미임베드 글꼴을 OS 글꼴로 그려 OS마다 바이트가 달라 `--check` 대상이 아니다). OCR 테스트는 글자 정확·상자 ±0.01로 본다
 - 레이아웃 예제: `fixtures/layout/figures.pdf`는 `build_layout_fixture.py`로 한 번 만들어 커밋한 고정 입력이다(PDF 바이트는 결정적이지만 미임베드 한글 글꼴을 OS 글꼴로 그려 모델 입력이 OS마다 조금 다르다). 레이아웃 테스트는 그림 상자 IoU ≥ 0.8·캡션 글자로 본다. 골든 예제는 OCR·레이아웃을 끄고 만든다
