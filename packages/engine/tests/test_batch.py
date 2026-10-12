@@ -975,3 +975,10 @@ if __name__ == "__main__":
     print(json.dumps([run._thread.is_alive(), [p.pid for p in multiprocessing.active_children()]]))
 ''', timeout=60, env={"HANJI_TEST_WORKER_EXIT": "a-slow.md:hang"})
     assert result == [False, []]
+
+
+def test_package_exports_the_batch_api():
+    import hanji
+
+    names = ("ingest_many", "aingest_many", "IngestRun", "IngestResult", "IngestError")
+    assert all(getattr(hanji, n) is getattr(batch, n) and n in hanji.__all__ for n in names)

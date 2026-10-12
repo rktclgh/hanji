@@ -22,6 +22,7 @@ hanji 결정론 엔진. 형식별 파서가 원문을 전사하고, core가 계�
 
 ```
 hanji parse 문서.md [--id ID] [--force] [--no-ocr] [--no-layout] [--format json|md] [--out PATH]
+hanji ingest PATH... [--recursive] [--workers N] [--max-memory SIZE] [--force] [--no-ocr] [--no-layout]
 hanji export DOC_ID [--version N] [--format json|md] [--out PATH] [--assets DIR]
 hanji documents
 hanji changes [--cursor N] [--limit N]
@@ -30,6 +31,9 @@ hanji view 문서.pdf [--id ID] [--out PATH] [--dpi N] [--no-ocr] [--no-layout]
 hanji models fetch [ocr|layout|all] [--to DIR]
 ```
 
+- `ingest`: 여러 파일·폴더를 문서 단위 작업 프로세스(spawn) 여럿으로 병렬 수집한다. 문서마다 저장 결과는 같은 설정·같은 ORT 스레드 수(요약 줄의 `ORT threads`)로 `parse`를 입력 순서대로 돌린 것과 같다. 파일 인자는 확장자와 상관없이 넣고, 폴더에서는 지원 확장자(`.md`·`.markdown`·`.pdf`, 대소문자 무시)만 이름 순으로 고른다(`--recursive`면 하위 폴더까지, `.`으로 시작하는 이름과 심볼릭 링크 폴더는 건너뛴다). 표준 출력은 문서마다 JSON 한 줄(끝난 순서, `index`가 입력 순번): `status`는 `created`(새 버전)·`unchanged`·`failed`(저장 안 함, `error.code`는 `parse`와 같은 3·4·5·1)·`worker_crashed`(작업 프로세스가 죽음)·`interrupted`(Ctrl+C)이고, 뒤 둘은 **저장됐는지 모른다**(`document_id`로 `hanji history`를 보거나 같은 명령을 다시 돌리면 끝난 문서는 `unchanged`로 지나간다. 자동 재시도는 없다). 표준 오류에는 경고와 요약 한 줄. 종료 코드 0(모두 `created`·`unchanged`), 6(`failed`·`worker_crashed`가 있음), 7(작업 프로세스 풀이 연속 3번 깨지거나 초기화에 실패해 보내지 않은 문서를 `BatchAborted`로 냄), 130(Ctrl+C), 1(시작 실패: 상태 파일·`HANJI_ORT_THREADS`), 2(사용법)
+- `ingest` 메모리: 예산은 `--max-memory`(8G·512M·1.5GiB·바이트 수), 없으면 알아낸 사용 가능 메모리(리눅스 cgroup v2·v1 한도에서 쓰고 있는 양을 뺀 것, 없으면 물리 메모리)의 80%다. 작업 수는 그 예산에 문서 추정 비용(작업 프로세스마다 상주 몫 + 돌고 있는 문서의 쪽·바이트 몫)이 들어가는 만큼(CPU 수 이하, `--workers`는 상한)이고, 여유보다 큰 문서는 다른 문서가 끝나기를 기다려 혼자 돈다. 혼자여도 추정이 예산을 넘는 문서는 경고하고 그대로 돌린다(유일한 예외). 추정은 잰 문서들을 덮는 값이지 상한이 아니라서 메모리 부족 강제 종료가 없다고 약속하지 않는다: 일어나면 그 문서들은 `worker_crashed`다. OCR을 켜면 작업 프로세스 하나에 약 2.4GiB(상주 몫 약 1.8GiB + 50쪽 자리)를 잡아 4GiB 컨테이너는 작업 1개, 8GiB는 2개다. 메모리 한도를 알 수 없는 Windows와 물리 메모리 기준인 데스크톱(다른 프로그램의 사용량을 모른다)에서는 `--max-memory`나 `--workers`를 준다(Windows 기본 작업 1개). 작업 프로세스는 20 × 작업 수 건마다 새로 띄운다. 작업이 2개 이상이면 `HANJI_ORT_THREADS`가 없을 때 `CPU 수 // 작업 수`를 쓴다. 상태 파일은 로컬 디스크에 둔다(SQLite WAL은 네트워크 파일 시스템을 지원하지 않는다)
+- Python API: `hanji.ingest_many(paths, db=None, workers=None, max_memory=None, ocr=None, layout=None, force=False, recursive=False)`는 `IngestResult`(위 JSON 줄과 같은 필드)를 끝난 순서로 내는 반복자다. `with hanji.ingest_many(...) as run: for result in run: ...`로 쓰거나 다 쓴 뒤 `run.close()`를 부른다. `close()` 없이 `break`하면 작업 프로세스는 `close()`가 불리거나 GC가 거둘 때까지 남는다. `close()`는 돌던 문서를 기다리지 않고 이 실행의 작업 프로세스만 끝내며 그 문서들의 `interrupted` 결과를 돌려준다. `await hanji.aingest_many(...)`는 `async for`·`async with`·`aclose()`를 쓰는 판이고 소비자가 느리면 결과를 8개까지만 쌓는다. `aclose()`는 쌓여 있던 결과까지 돌려주고, 작업 취소로 닫힌 실행을 다시 읽으면 `RuntimeError`다(결과는 `aclose()`로 받는다). 작업 프로세스는 spawn으로 뜨므로 Windows·macOS에서 스크립트가 부를 때는 `if __name__ == "__main__":` 아래에서 부른다(아니면 작업 프로세스가 스크립트를 다시 돌리다 죽어 `worker_crashed`가 된다). 상태 파일은 `db` > `HANJI_DB` > 사용자 데이터 폴더 순이다
 - `view`: 수집(원본이 같으면 저장된 버전) 후 인터넷 없이 열리는 HTML 한 장(원본이 그대로면 저장된 버전과 그때 저장한 파일 이름을 보여 준다). 쪽 이미지(JPEG, 기본 110 DPI) 위 블록 영역, 블록 목록(표 블록은 병합 칸까지 격자로), 쪽 판정 근거(스캔 쪽은 OCR 블록이 있으면 "OCR로 읽음(검증 전)", 없으면 "OCR 필요(보이는 글자만 블록)", 글자 깨짐 쪽은 처리 이력대로 OCR로 다시 읽었으면 "글자층이 깨져 OCR로 다시 읽음(검증 전)", 글자층으로 블록을 만들었으면 "글자층이 깨져 블록 글자를 믿기 어렵다" 안내와 근거), 이전 버전 대비 변경. 기본 출력은 현재 폴더의 `<파일 이름(확장자 제외)>.view.html`. `--dpi`는 기본 110(1~600), 300 이상이면 쪽 수가 많은 문서의 HTML이 수십~수백 MB가 된다(60쪽 110 DPI 약 8MB).
 - `export --assets DIR`: 그림 블록의 이미지(PNG)를 `DIR/<sha256 앞 16자>.png`로 쓴다. `--format md`면 이미지가 있는 그림 블록이 `![캡션](DIR/이름.png)`과 그 아래 그림 글자가 된다(캡션이 없으면 대체 글자가 비고, 이미지가 없는 그림 블록은 글자만). `--assets` 없이 `--format md`로 내보내면 그림 블록은 글자만 쓰고, 글자가 없는 그림 블록은 건너뛴다. 링크의 `DIR`은 `--out` 파일 폴더 기준 상대 경로(표준 출력이면 현재 폴더 기준 입력 그대로)를 `/`로 잇고 퍼센트 인코딩한 것이다(Windows에서 드라이브가 달라 상대 경로가 없으면 `file://` 주소). 이미지는 상태 파일에 내용 해시로 한 번만 저장된다
 - `models fetch`: 모델 파일(OCR 검출·인식 모델과 인식 설정 약 18MB, 레이아웃 PP-DocLayout_plus-L 공식 ONNX·설정 약 130MB)을 업스트림이 공개한 고정 주소(Hugging Face 커밋이 든 URL, `hanji/models/models.toml`)에서 받아 크기·SHA-256을 확인한 뒤 사용자 캐시(`HANJI_CACHE_DIR`로 바꿀 수 있다) 또는 `--to` 폴더에 둔다. 표준 라이브러리 urllib만 쓰고, 이미 맞는 파일은 다시 받지 않는다. 받은 경로를 한 줄씩 출력한다(상태 파일을 열지 않는다). 엔진은 `HANJI_MODEL_DIR` → 사용자 캐시 순서로 찾고(두 곳 모두 `ocr/det.onnx`처럼 같은 상대 경로), 실행 중에는 아무것도 내려받지 않는다. 폐쇄망은 연결된 기계에서 `hanji models fetch --to 폴더`로 받아 그 폴더를 옮기고 `HANJI_MODEL_DIR`로 가리킨다
@@ -37,7 +41,7 @@ hanji models fetch [ocr|layout|all] [--to DIR]
 - OCR·레이아웃 스레드: 환경변수 `HANJI_ORT_THREADS=N`(1 이상 2147483647 이하 정수)이면 onnxruntime 세션이 연산 안 스레드 N개·연산 사이 1개를 쓴다. 없으면 onnxruntime 기본값(CPU 수만큼). 잘못된 값은 종료 코드 1. 스레드 수가 다르면 부동소수 합 순서가 달라 판정 기준값 근처 점수가 뒤집힐 수 있다: 같은 결과를 다시 만들려면 같은 값으로 돌린다. 값은 onnxruntime 세션을 만들 때 한 번 읽으므로 프로세스를 시작하기 전에 정한다
 - 계약 0.4(쪽 글자 장부 `coverage`)로 올라가며 이전 상태 파일은 지우고 다시 수집해야 한다(상태 파일 형식 4)
 - 출력은 UTF-8, JSON은 계약 모델 그대로
-- 종료 코드: 0 성공, 1 그 밖의 오류(OCR 등 추가 설치나 모델 파일이 깨졌거나 모델 받기에 실패한 경우 포함), 2 사용법, 3 지원하지 않는 형식, 4 파싱 실패, 5 문서·버전·그림 이미지 없음
+- 종료 코드: 0 성공, 1 그 밖의 오류(OCR 등 추가 설치나 모델 파일이 깨졌거나 모델 받기에 실패한 경우 포함), 2 사용법, 3 지원하지 않는 형식, 4 파싱 실패, 5 문서·버전·그림 이미지 없음. `ingest`는 6·7·130도 쓴다(위)
 
 ## 개발
 
