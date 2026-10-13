@@ -12,8 +12,14 @@ import time
 from pathlib import Path
 
 import pytest
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+from reportlab.pdfgen.canvas import Canvas
 
+from hanji import LocalEngine, SqliteStore, batch
 from hanji.cli import main
+from hanji.formats.detect import default_parsers
+from hanji.formats.pdf import layout as layout_runtime
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 CLI = "import sys; from hanji.cli import main; sys.exit(main(sys.argv[1:]))"
@@ -216,3 +222,136 @@ def test_no_documents_is_exit_0_with_a_summary(capsys, tmp_path):
     out, err = capsys.readouterr()
     assert out == "" and SUMMARY.match(err.splitlines()[-1])
     assert err.splitlines()[-1].startswith("hanji: 0 documents; 1 files skipped (unsupported extension); ")
+
+
+FONT = "HYGothic-Medium"
+pdfmetrics.registerFont(UnicodeCIDFont(FONT))
+SPLIT_CLI = ("import sys; import hanji.batch as b; b.SPLIT_MIN_PAGES = 1; b.CHUNK_PAGES = 1; "
+             "from hanji.cli import main; sys.exit(main(sys.argv[1:]))")  # 기준을 1쪽·묶음 1쪽으로 낮춘 CLI
+SPLIT_LINE = re.compile(r"^hanji: split into page chunks; workers (\d+), ORT threads (\d+|default), "
+                        r"memory budget (\d+\.\dGiB|\d+MiB|unknown)$", re.MULTILINE)
+
+
+def text_pdf(path: Path, pages: int, broken: tuple[int, ...] = ()) -> Path:
+    """쪽마다 지어낸 글자 한 줄인 PDF. 쪽 순번 broken은 CropBox가 MediaBox 밖이라 그 쪽을 읽으면 ParseError."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    c = Canvas(str(path), pagesize=(595.0, 842.0), invariant=1, pageCompression=0)
+    for i in range(pages):
+        c.setCropBox((700, 700, 800, 800) if i in broken else (0, 0, 595, 842))
+        c.setFont(FONT, 11)
+        c.drawString(72, 770, f"지어낸 {i}쪽 문단이다.")
+        c.showPage()
+    c.save()
+    return path
+
+
+def require_layout() -> None:
+    """쪼개기는 모델을 쓸 때만이다(여기서는 레이아웃 자동). 없으면 건너뛰고 HANJI_CI_REQUIRE_MODELS=1이면 실패한다."""
+    if not layout_runtime.available():
+        if os.environ.get("HANJI_CI_REQUIRE_MODELS") == "1":
+            pytest.fail("layout runtime not available; run `hanji models fetch`")
+        pytest.skip("layout runtime not available")
+
+
+def parse_cli(tmp_path: Path, *args: object, code: str = SPLIT_CLI, env: dict[str, str] | None = None):
+    done = run_group([sys.executable, "-c", code, "parse", *map(str, args)], tmp_path, 300, env)
+    return done.returncode, done.stdout, done.stderr
+
+
+def test_parse_of_small_or_stored_files_keeps_todays_path_without_workers(tmp_path, monkeypatch, capsys):
+    """쪼개지 않을 파일(MD, 기준보다 적은 쪽, 작업 수 1)과 이미 저장된 같은 원본은 스케줄러를 만들지 않고 지금 경로로
+    이 프로세스에서 처리한다: 잘못된 HANJI_ORT_THREADS가 있어도 모델을 쓰지 않는 문서는 지금처럼 성공하고 자식이 없다."""
+    require_layout()
+    monkeypatch.setenv("HANJI_ORT_THREADS", "x")
+    monkeypatch.setattr(batch, "SPLIT_MIN_PAGES", 3)
+    monkeypatch.setattr(batch.IngestRun, "__init__", lambda *a, **k: pytest.fail("스케줄러를 만들지 않는다"))
+    db = str(tmp_path / "s.db")
+    small, big = text_pdf(tmp_path / "small.pdf", 2), text_pdf(tmp_path / "big.pdf", 3)
+    with SqliteStore(db) as store:
+        LocalEngine(store, default_parsers(ocr=False)).ingest(str(big))
+    md = write(tmp_path / "a.md")
+    other = text_pdf(tmp_path / "c.pdf", 4)  # 쪼갤 쪽 수지만 작업 1개
+    for args in ([md], [small, "--workers", "4"], [big, "--workers", "4"], [other, "--workers", "1"]):
+        assert main(["parse", *map(str, args), "--db", db, "--no-ocr"]) == 0
+        assert json.loads(capsys.readouterr().out)["source"]["name"] == Path(args[0]).name
+    assert __import__("multiprocessing").active_children() == []
+
+
+def test_parse_splits_a_big_pdf_with_workers_capped_to_chunks_and_prints_the_same_tree(tmp_path):
+    """기준을 낮춘 CLI: 2쪽 figures.pdf는 묶음 2개라 --workers 4도 작업 2개다. 표준 오류에 요약 한 줄, 출력 트리는 같은 ORT
+    스레드 수로 쪼개지 않고 parse한 것과 같다. --id·--force도 쪼갠 실행에 그대로 쓴다(같은 원본은 force 없이 쪼개지
+    않는다)."""
+    require_layout()
+    figures = FIXTURES / "layout" / "figures.pdf"
+    code, out, err = parse_cli(tmp_path, figures, "--workers", "4", "--db", "s.db", "--id", "doc-x")
+    match = SPLIT_LINE.search(err)
+    assert code == 0 and match and match.group(1) == "2", err
+    threads = match.group(2)
+    env = {} if threads == "default" else {"HANJI_ORT_THREADS": threads}
+    _, serial, _ = parse_cli(tmp_path, figures, "--db", "t.db", "--id", "doc-x", code=CLI, env=env)
+    assert json.loads(out) == json.loads(serial) and json.loads(out)["document_id"] == "doc-x"
+    code, again, err = parse_cli(tmp_path, figures, "--workers", "4", "--db", "s.db", "--id", "doc-x")
+    assert code == 0 and not SPLIT_LINE.search(err) and json.loads(again) == json.loads(out)
+    code, forced, err = parse_cli(tmp_path, figures, "--workers", "4", "--db", "s.db", "--id", "doc-x", "--force")
+    assert code == 0 and SPLIT_LINE.search(err) and json.loads(forced)["version"] == 1
+
+
+def test_split_parse_exit_codes_match_parse(tmp_path):
+    """쪼갠 parse의 종료 코드·오류 줄은 지금 parse와 같다: 파싱 실패는 4와 같은 문구, 작업 프로세스가 죽으면 1."""
+    require_layout()
+    bad = text_pdf(tmp_path / "bad.pdf", 3, (1,))
+    code, out, err = parse_cli(tmp_path, bad, "--workers", "2", "--db", "s.db")
+    serial = parse_cli(tmp_path, bad, "--workers", "1", "--db", "t.db")
+    assert (code, out) == (4, "") and SPLIT_LINE.search(err) and serial[0] == 4
+    assert err.splitlines()[-1] == serial[2].splitlines()[-1] == "hanji: PDF page has an empty box (bad.pdf:2)"
+    good = text_pdf(tmp_path / "good.pdf", 3)
+    code, out, err = parse_cli(tmp_path, good, "--workers", "2", "--db", "s.db",
+                               env={"HANJI_TEST_WORKER_EXIT": "good.pdf:chunk"})
+    assert (code, out) == (1, "") and err.splitlines()[-1].startswith("hanji: WorkerCrashed: worker process died")
+
+
+SPLIT_CTRL_C = r"""
+import json, os, signal, subprocess, sys, time
+
+CLI = ("import sys; import hanji.batch as b; b.SPLIT_MIN_PAGES = 1; b.CHUNK_PAGES = 1; "
+       "from hanji.cli import main; sys.exit(main(sys.argv[1:]))")
+
+
+def stop(signum, frame):  # 바깥 실행기가 시간 초과로 SIGTERM을 보내도 아래 finally가 CLI 그룹을 끝내게
+    sys.exit(1)
+
+
+if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, stop)
+    proc = subprocess.Popen([sys.executable, "-c", CLI, "parse", "big.pdf", "--workers", "2", "--no-ocr",
+                             "--db", "s.db"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                            encoding="utf-8", env={**os.environ, "HANJI_TEST_WORKER_EXIT": "big.pdf:hang"},
+                            start_new_session=True)  # CLI와 작업 프로세스는 자기 그룹: 실패하면 그룹째 끝낸다
+    try:
+        while proc.poll() is None and not os.path.exists("big.pdf.started"):  # 묶음이 돌기 시작했다
+            time.sleep(0.05)
+        proc.send_signal(signal.SIGINT)  # CLI pid에만 보낸다
+        out, err = proc.communicate(timeout=60)
+        time.sleep(0.5)
+        left = subprocess.run(["pgrep", "-g", str(proc.pid)], capture_output=True, text=True).stdout.split()
+    finally:
+        if proc.poll() is None:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+            proc.communicate()
+    print(json.dumps([proc.returncode, out, left]))
+"""
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="SIGINT는 POSIX에서 본다(Windows CTRL_BREAK_EVENT는 다르다)")
+def test_ctrl_c_during_a_split_parse_exits_130_and_leaves_no_workers(tmp_path):
+    """쪼갠 parse의 묶음이 도는 중 Ctrl+C(CLI pid에 SIGINT): 종료 코드 130, 트리 출력 없음, CLI 그룹에 남은 작업
+    프로세스 없음. 시나리오 전체는 바깥 run_group이 시간 상한으로 감싼다."""
+    require_layout()
+    text_pdf(tmp_path / "big.pdf", 3)
+    (tmp_path / "split_ctrl_c.py").write_text(SPLIT_CTRL_C, encoding="utf-8")
+    done = run_group([sys.executable, str(tmp_path / "split_ctrl_c.py")], tmp_path, 120)
+    assert done.returncode == 0, done.stderr
+    assert json.loads(done.stdout.strip().splitlines()[-1]) == [130, "", []]

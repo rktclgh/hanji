@@ -764,6 +764,44 @@ def ingest_many(paths: Iterable[str | os.PathLike[str]], *, db: str | os.PathLik
                      _chunk_pages or CHUNK_PAGES)
 
 
+def parse_run(path: str | os.PathLike[str], *, db: str | os.PathLike[str] | None = None,
+              document_id: str | None = None, force: bool = False, ocr: bool | None = None,
+              layout: bool | None = None, workers: int | None = None, max_memory: int | None = None,
+              _split_min_pages: int | None = None, _chunk_pages: int | None = None) -> IngestRun | None:
+    """hanji parse의 갈림길. 스케줄러 사전 확인(HANJI_ORT_THREADS 등)보다 먼저 정한다: 쪼갤 PDF면 그 문서 하나를 쪽
+    묶음으로 도는 IngestRun, 아니면 None(부르는 쪽이 지금 경로로 이 프로세스에서 처리한다). 쪼개지 않는 것: PDF가
+    아님(확장자)·쪽 수 < SPLIT_MIN_PAGES·모델을 쓰지 않음·이미 저장된 같은 원본(force 아님)·작업 수를 묶음 수 이하로
+    줄였더니 1. 작업 수는 예산·코어로 정한 값(workers는 상한)을 묶음 수 이하로 줄인 뒤 ORT 스레드를 나눈다."""
+    path = os.fspath(path)
+    minimum, step = _split_min_pages or SPLIT_MIN_PAGES, _chunk_pages or CHUNK_PAGES
+    if os.path.splitext(path)[1].lower() != ".pdf" or _pdf_pages(path) < minimum:  # 열지 못하는 PDF는 1쪽
+        return None
+    use_ocr, use_layout = _use(ocr, ocr_runtime, OcrUnavailable), _use(layout, layout_runtime, LayoutUnavailable)
+    if not (use_ocr or use_layout):
+        return None
+    cost = resources.COSTS[resources.config_of(use_ocr, use_layout)]
+    entry = _Entry(0, path, _shown(path))
+    try:
+        doc = _plan(entry, cost)
+    except OSError:  # 지금 경로가 같은 오류를 낸다
+        return None
+    db_path = resolve_db(db)
+    if not force and _stored(db_path, document_id or "doc_" + doc.sha[:24], doc.sha):
+        return None
+    budget, warnings = resources.budget(max_memory, resources.available_memory())
+    cores = resources.cpu_count()
+    count, more = resources.plan_workers(budget, cost, cores, workers, sys.platform == "win32")
+    count = min(count, math.ceil(doc.pages / step))
+    if count < 2:
+        return None
+    user_threads = resources.ort_threads_env()  # 여기부터 스케줄러 사전 확인(잘못된 값은 HanjiError, 종료 코드 1)
+    SqliteStore(db_path).close()  # 표·WAL·형식을 여기서 한 번(작업 프로세스끼리 만들기 다툼이 없다)
+    threads = resources.pool_threads(count, cores, os.cpu_count() or 1)
+    settings = Settings(os.fspath(db_path), ocr, layout, force, threads, document_id)
+    return IngestRun([entry], 0, settings, cost, budget, count, user_threads or threads, warnings + more,
+                     resources.RECYCLE_PER_WORKER * count, None, minimum, step)
+
+
 QUEUE_SIZE = 8  # aingest_many가 소비자를 앞서 쌓아 두는 결과 수(역압력)
 _DONE = object()
 CLOSED_BY_CANCEL = "ingest run was closed by cancellation; see aclose() results"
