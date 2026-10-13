@@ -4,7 +4,10 @@
 블록(개요 수준 → 제목, 번호·글머리 → 목록 항목, 그 밖 문단)을 낸다. 위치는 FlowLocator(제목 경로, 최상위 문단 순번).
 글자 장부(ledger.py)가 모든 hp:t·글맵시 글자를 세고, 한 번도 넣지 않은 글자는 구역 끝 구조 문단(신뢰도 0.3)으로
 살린다(처리 이력 unassigned_text). 장부가 맞지 않으면 처리 이력 coverage_mismatch(파싱은 실패하지 않는다).
-개요 수준을 쓰지 않는 문서는 PDF와 같은 글꼴 크기 규칙으로 제목을 고른다(_finish)."""
+개요 수준을 쓰지 않는 문서는 PDF와 같은 글꼴 크기 규칙으로 제목을 고른다(_finish).
+
+문단에 박힌 개체는 문단 글자 블록 뒤에 나타난 순서대로 블록이 된다(스펙 §5.2): 그림과 캡션(PNG 자산), 묶음 속 개체,
+글맵시, OLE 등은 이미지 없는 그림. 개체 조립은 개체 중첩만큼만 재귀한다(XML 깊이 상한 256이 묶는다)."""
 
 import bisect
 import xml.etree.ElementTree as ET
@@ -14,18 +17,28 @@ from typing import Any
 
 from hanji_contracts import Attempt, FlowLocator, GateCheck, GateResult, RegionRecord
 
+from ...errors import ParseError
 from ..base import ParsedSource
+from ..pdf.figures import AssetBudget
 from ..pdf.group import (
     BOLD_HEADING_RATIO, CONFIDENCE, HEADING_MAX_LINES, HEADING_RATIO, MAX_LEVEL, RESCUED_CONFIDENCE, step,
 )
 from ..pdf.parser import COVERAGE_MISMATCH, UNASSIGNED_TEXT
-from .container import HH, HP, HS, MIME, Package
+from . import images
+from .container import HC, HH, HP, HS, MIME, OverBudget, Package, TooLarge
 from .header import CharShape, Styles, read_styles
 from .ledger import INLINE, T, Bundle, Counts, Ledger, ink, source_chars
 
 P, RUN, SUBLIST = f"{HP}p", f"{HP}run", f"{HP}subList"
 LINESEGS, LINESEG, LINE_BREAK = f"{HP}linesegarray", f"{HP}lineseg", f"{HP}lineBreak"
 TEXTART, HIDDEN = f"{HP}textart", f"{HP}hiddenComment"
+PIC, IMG, CUR_SZ, CAPTION, CONTAINER = f"{HP}pic", f"{HC}img", f"{HP}curSz", f"{HP}caption", f"{HP}container"
+EMBEDDED = frozenset(f"{HP}{n}" for n in ("ole", "chart", "video"))  # 그림 성격 개체(이미지 없는 그림)
+FIGURE_LINKED = "figure_image_linked"  # isEmbeded="0"(외부 연결 그림: 경로를 따라가지 않는다)
+FIGURE_MISSING = "figure_image_missing"  # id가 manifest에 없거나 href 멤버가 zip에 없다
+FIGURE_BUDGET = "figure_image_budget"  # MAX_BINARY_TOTAL 또는 문서 그림 바이트 상한을 넘었다
+EMBEDDED_OBJECT = "embedded_object"
+SHAPE_TEXT = "shape_text"  # 글상자·도형·글맵시 글자를 문단으로 냈다(v1 범위 밖)
 UNKNOWN_INLINE = "unknown_inline_element"  # hp:t 안 모르는 자식 요소의 글자를 그 자리에 넣었다
 HIDDEN_COMMENT = "hidden_comment"  # 숨은 설명(인쇄되지 않음): 블록에 넣지 않았다
 MASTERPAGE_TEXT = "masterpage_text_skipped"  # 마스터 쪽 글자(v1은 읽지 않는다)
@@ -51,6 +64,9 @@ class _Doc:
 
     name: str
     styles: Styles
+    package: Package
+    budget: AssetBudget = field(default_factory=AssetBudget)
+    pictures: dict[str, images.Png | str] = field(default_factory=dict)  # href → PNG 또는 이미지 없음 사유
     specs: list[dict[str, Any]] = field(default_factory=list)
     regions: list[_Region] = field(default_factory=list)
     counts: list[Counts] = field(default_factory=list)
@@ -147,7 +163,8 @@ class _Section:
         return True
 
     def paragraph(self, p: ET.Element, anchor: int) -> None:
-        """최상위 문단: 개요 수준 → 제목, 번호·글머리 → 목록 항목, 그 밖 문단(크기 규칙 후보)."""
+        """최상위·1×1 상자 문단: 개요 수준 → 제목, 번호·글머리 → 목록 항목, 그 밖 문단(크기 규칙 후보). 그 뒤 박힌
+        개체."""
         bundles = self.bundles(p, anchor)
         kind, level = self.doc.styles.headings.get(p.get("paraPrIDRef", ""), ("NONE", 0))
         if kind == "OUTLINE":
@@ -165,6 +182,92 @@ class _Section:
             size = max(by_size, key=lambda s: (by_size[s], s)) if by_size else None
             self.emit("paragraph", bundles, anchor, _sizes=sizes, _size=size, _bold=bold * 2 > total,
                       _lines=_lines(p))
+        self.objects(p, anchor)
+
+    def objects(self, p: ET.Element, anchor: int) -> None:
+        """문단에 박힌 개체를 나타난 순서대로 블록으로."""
+        for run in p.iterfind(RUN):
+            for child in run:
+                self.obj(child, anchor)
+
+    def obj(self, element: ET.Element, anchor: int) -> None:
+        tag = element.tag
+        if tag == PIC:
+            self.picture(element, anchor)
+        elif tag == CONTAINER:
+            for child in element:
+                self.obj(child, anchor)
+        elif tag == TEXTART:
+            if self.emit("paragraph", [(self.ledger.source_of(element), element.get("text", ""))], anchor):
+                self.region("shape", "paragraph", SHAPE_TEXT, anchor)
+        elif tag in EMBEDDED:
+            self.figure(None, anchor)
+            self.region("object", "figure", EMBEDDED_OBJECT, anchor)
+
+    def figure(self, figure: dict[str, Any] | None, anchor: int) -> dict[str, Any]:
+        """그림 블록(글자 없음). figure가 None이면 이미지 없는 그림."""
+        spec: dict[str, Any] = {"kind": "figure", "text": "", "confidence": 1.0, "state": "det",
+                                "text_source": "native", "_anchor": anchor, "_late": self.late}
+        if figure is not None:
+            spec["figure"] = figure
+        self.doc.specs.append(spec)
+        return spec
+
+    def caption(self, caption: ET.Element, anchor: int) -> dict[str, Any] | None:
+        """캡션 subList 문단 글자를 \\n으로 이은 caption 블록(낸 명세, 공백뿐이면 None)."""
+        sub = caption.find(SUBLIST)
+        bundles: list[Bundle] = []
+        for i, p in enumerate(sub.iterfind(P) if sub is not None else ()):
+            if i:
+                bundles.append((None, "\n"))
+            bundles += self.bundles(p, anchor)
+        return self.doc.specs[-1] if self.emit("caption", bundles, anchor) else None
+
+    def picture(self, pic: ET.Element, anchor: int) -> None:
+        """그림 블록과 캡션(TOP이면 앞, 아니면 뒤). 이미지가 있을 때만 caption_ref로 잇는다(스펙 §7.4)."""
+        caption = pic.find(CAPTION)
+        top = caption is not None and caption.get("side") == "TOP"
+        found = self.caption(caption, anchor) if caption is not None and top else None
+        image = self.image(pic, anchor)
+        spec = self.figure(image, anchor)
+        if caption is not None and not top:
+            found = self.caption(caption, anchor)
+        if image is not None and found is not None:
+            spec["_caption"] = found
+
+    def image(self, pic: ET.Element, anchor: int) -> dict[str, Any] | None:
+        """hc:img → manifest → 멤버 → PNG 자산. 못 담으면 처리 이력을 남기고 None."""
+        img = pic.find(IMG)
+        item = self.doc.package.items.get(img.get("binaryItemIDRef", "") if img is not None else "")
+        reason: str
+        if item is not None and not item.embedded:
+            reason = FIGURE_LINKED
+        elif item is None or not self.doc.package.has(item.href):
+            reason = FIGURE_MISSING
+        else:
+            result = self.doc.pictures.get(item.href)
+            if result is None:
+                try:
+                    result = images.to_png(self.doc.package.binary(item.href))
+                except OverBudget:
+                    result = FIGURE_BUDGET
+                except TooLarge:
+                    result = images.TOO_LARGE
+                except ParseError:  # 그림 멤버의 zip 오류(CRC 등): 그 그림만 잃는다
+                    result = images.UNREADABLE
+                self.doc.pictures[item.href] = result
+            if isinstance(result, images.Png):
+                key = self.doc.budget.add(result.data)
+                if key is not None:
+                    size = pic.find(CUR_SZ)
+                    return {"asset": key, "mime": "image/png", "width_px": result.width, "height_px": result.height,
+                            "dpi": images.dpi(result.width, size.get("width") if size is not None else None),
+                            "category": "image"}
+                reason = FIGURE_BUDGET
+            else:
+                reason = result
+        self.region("figure", "figure", reason, anchor)
+        return None
 
     def sizes(self, p: ET.Element) -> Counter[tuple[float, bool]]:
         """문단 런들의 (0.5pt 단위 크기, 굵기)별 공백 아닌 글자 수."""
@@ -257,6 +360,7 @@ def _finish(doc: _Doc) -> tuple[tuple[dict[str, Any], ...], tuple[RegionRecord, 
     """제목을 정하고 제목 경로를 채운다. 구역 끝 블록(_late)과 처리 이력은 닻 문단 자리의 제목 경로를 쓴다."""
     if not doc.outline:
         _headings_by_size(doc.specs)
+    index = {id(spec): k for k, spec in enumerate(doc.specs)}
     stack: list[tuple[int, str]] = []
     marks: list[tuple[int, tuple[str, ...]]] = []  # (닻, 그 닻까지 처리한 뒤 제목 경로)
     blocks: list[dict[str, Any]] = []
@@ -273,6 +377,8 @@ def _finish(doc: _Doc) -> tuple[tuple[dict[str, Any], ...], tuple[RegionRecord, 
                 stack.append((spec["level"], spec["text"]))
             marks.append((anchor, tuple(text for _, text in stack)))
         block = {k: v for k, v in spec.items() if not k.startswith("_")}
+        if "_caption" in spec:  # 짝 캡션 명세의 순번(core/build.py가 caption_block_id로 바꾼다)
+            block["figure"] = {**block["figure"], "caption_ref": index[id(spec["_caption"])]}
         block["section_path"] = path
         block["locator"] = FlowLocator(section_path=path, paragraph_index=anchor)
         blocks.append(block)
@@ -307,7 +413,7 @@ class HwpxParser:
     def _parse(self, data: bytes, name: str) -> tuple[ParsedSource, tuple[Counts, ...]]:
         """ParsedSource와 구역별 장부 숫자(테스트가 본다)."""
         package = Package(data, name)
-        doc = _Doc(name, read_styles(package.xml("Contents/header.xml", f"{HH}head")))
+        doc = _Doc(name, read_styles(package.xml("Contents/header.xml", f"{HH}head")), package)
         base = 0
         for index, member in enumerate(package.sections):
             root = package.xml(member, f"{HS}sec")
@@ -321,4 +427,5 @@ class HwpxParser:
                 doc.regions.append(_Region("masterpage-text", "paragraph", MASTERPAGE_TEXT, 0, 0,
                                            _gate("chars", chars, None), f"masterpage-{k}"))
         blocks, regions = _finish(doc)
-        return ParsedSource(mime=MIME, blocks=blocks, regions=regions), tuple(doc.counts)
+        return (ParsedSource(mime=MIME, blocks=blocks, assets=doc.budget.assets, regions=regions),
+                tuple(doc.counts))

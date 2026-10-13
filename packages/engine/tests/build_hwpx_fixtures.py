@@ -17,6 +17,8 @@ from io import BytesIO
 from pathlib import Path
 from xml.sax.saxutils import escape, quoteattr
 
+from PIL import Image
+
 from hanji.core import build_tree
 from hanji.formats.hwpx import HwpxParser
 from hanji_contracts import DocumentTree, ProcessingHistory, SourceInfo
@@ -107,6 +109,29 @@ def content(sections: int, items: Sequence[tuple[str, str, str, bool]] = (), spi
             + "".join(f'<opf:itemref idref="{ref}"/>' for ref in refs) + "</opf:spine></opf:package>")
 
 
+def pic(ref: str, caption: str = "", width: int = 7200) -> str:
+    """hp:pic(표시 너비 width HWPUNIT, 7200 = 1인치). shapeComment는 한컴이 자동으로 쓰는 개체 설명 자리다."""
+    return (f'<hp:pic id="1"><hp:curSz width="{width}" height="3600"/>{caption}'
+            f'<hc:img binaryItemIDRef="{ref}" bright="0" contrast="0" effect="REAL_PIC" alpha="0"/>'
+            f"<hp:shapeComment>그림입니다.</hp:shapeComment></hp:pic>")
+
+
+def caption(*paras: str, side: str = "BOTTOM") -> str:
+    return f'<hp:caption side="{side}"><hp:subList>{"".join(paras)}</hp:subList></hp:caption>'
+
+
+def container(*objects: str) -> str:
+    return f'<hp:container id="2">{"".join(objects)}</hp:container>'
+
+
+def textart(text: str) -> str:
+    return f'<hp:textart id="6"{attrs(text=text)}/>'
+
+
+def ole() -> str:
+    return '<hp:ole id="7" binaryItemIDRef="ole1"/>'
+
+
 def package(*sections: str, head: str | None = None, items: Sequence[tuple[str, str, str, bool]] = (),
             binaries: Mapping[str, bytes] = (), extra: Mapping[str, bytes] = (), spine: Sequence[str] | None = None,
             mimetype: bytes = MIME) -> bytes:
@@ -162,10 +187,59 @@ HEADINGS = (
         para(run(t(LONG)), lines=2),
     ),
 )
+
+# 그림 원본: Pillow로 한 번 만든 바이트를 고정한다(4×4 반투명 RGBA PNG, 8×8 CMYK JPEG, 4×2 BMP, 4100×2 회색 PNG,
+# 6×6 회색 PNG). 가짜 WMF는 placeable WMF 머리만 있다(Pillow 허용 형식이 아니다)
+RGBA_PNG = bytes.fromhex(
+    "89504e470d0a1a0a0000000d4948445200000004000000040806000000a9f19e7e000000154944415478da633c2127d7c080049818d0"
+    "006101006506018c5f1704320000000049454e44ae426082")
+CMYK_JPEG = bytes.fromhex(
+    "ffd8ffee000e41646f626500640000000000ffdb004300080606070605080707070909080a0c140d0c0b0b0c1912130f141d1a1f1e1d"
+    "1a1c1c20242e2720222c231c1c2837292c30313434341f27393d38323c2e333432ffc000140800080008044311004d11005911004b11"
+    "00ffc4001f0000010501010101010100000000000000000102030405060708090a0bffc400b510000201030302040305050404000001"
+    "7d01020300041105122131410613516107227114328191a1082342b1c11552d1f02433627282090a161718191a25262728292a343536"
+    "3738393a434445464748494a535455565758595a636465666768696a737475767778797a838485868788898a92939495969798999aa2"
+    "a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae1e2e3e4e5e6e7e8e9eaf1f2f3f4f5f6f7f8f9"
+    "faffda000e0443004d0059004b00003f00f7fa4af9febdfebfffd9")
+BMP = bytes.fromhex(
+    "424d4e0000000000000036000000280000000400000002000000010018000000000018000000c40e0000c40e00000000000000000000"
+    "dc7814dc7814dc7814dc7814dc7814dc7814dc7814dc7814")
+WIDE_PNG = bytes.fromhex(
+    "89504e470d0a1a0a0000000d4948445200001004000000020800000000f435e674000000234944415478daedd0010100000802a06ab9"
+    "d31b224c6033000000408353000000001d1e658e008461bdcbc80000000049454e44ae426082")
+GRAY_PNG = bytes.fromhex(
+    "89504e470d0a1a0a0000000d4948445200000006000000060800000000c5a7b094000000134944415478da638c626060606060622048"
+    "01000f900066ffa59b760000000049454e44ae426082")
+FAKE_WMF = bytes.fromhex("d7cdc69a") + bytes(40)
+FIGURE_ITEMS = [("image1", "BinData/image1.png", "image/png", True),
+                ("image2", "BinData/image2.jpg", "image/jpg", True),
+                ("image3", "BinData/image3.bmp", "image/bmp", True),
+                ("image4", "BinData/image4.png", "image/png", True),
+                ("image5", "BinData/image5.wmf", "image/x-wmf", True),
+                ("image6", "BinData/image6.png", "image/png", False)]
+FIGURE_BINARIES = {"BinData/image1.png": RGBA_PNG, "BinData/image2.jpg": CMYK_JPEG, "BinData/image3.bmp": BMP,
+                   "BinData/image4.png": WIDE_PNG, "BinData/image5.wmf": FAKE_WMF}
+FIGURES = section(
+    para(run(t("그림 예제 문단이다."))),
+    para(run(pic("image1"))),
+    para(run(pic("image2", width=14400))),
+    para(run(pic("image3"))),
+    para(run(pic("image4", width=72000))),
+    para(run(pic("image1"))),
+    para(run(pic("image5"))),
+    para(run(pic("image6"))),
+    para(run(pic("image9"))),
+    para(run(pic("image3", caption(para(run(t("그림 1. 지어낸 막대 그림")))), width=0))),
+    para(run(pic("image5", caption(para(run(t("그림 2. 이미지 없는 그림의 캡션"))))))),
+    para(run(pic("image2", caption(para(run(t("그림 3. 위에 둔 캡션"))), side="TOP")))),
+    para(run(container(pic("image3"), pic("image1")))),
+    para(run(t("글맵시 앞"), textart("지어낸 글맵시"))),
+)
 SAMPLES: dict[str, bytes] = {
     "basic.hwpx": package(*BASIC, head=BASIC_HEAD),
     "headings.hwpx": package(*HEADINGS, head=HEAD_SIZES),
     "empty.hwpx": package(section(para())),
+    "figures.hwpx": package(FIGURES, items=FIGURE_ITEMS, binaries=FIGURE_BINARIES),
 }
 ROOT = Path(__file__).resolve().parent / "fixtures" / "hwpx"
 
@@ -174,12 +248,52 @@ def document_id(name: str) -> str:
     return "fx-hwpx-" + Path(name).stem
 
 
-def golden(name: str, data: bytes) -> tuple[DocumentTree, ProcessingHistory]:
-    """엔진 ingest와 같은 SourceInfo(쪽 없음 → page_count None)."""
+def golden(name: str, data: bytes) -> tuple[DocumentTree, ProcessingHistory, list[dict[str, object]]]:
+    """엔진 ingest와 같은 SourceInfo(쪽 없음 → page_count None). 셋째는 그림 자산의 화소 정보(처음 나온 차례)."""
     parsed = HwpxParser().parse(data, name)
     source = SourceInfo(name=name, mime=parsed.mime, content_hash="sha256:" + hashlib.sha256(data).hexdigest())
     tree = build_tree(parsed, document_id(name), 1, source)
-    return tree, ProcessingHistory(document_id=tree.document_id, version=1, regions=parsed.regions)
+    order = list(dict.fromkeys(b.figure.asset for b in tree.blocks if b.figure is not None))
+    return (tree, ProcessingHistory(document_id=tree.document_id, version=1, regions=parsed.regions),
+            [pixels(parsed.assets[key]) for key in order])
+
+
+def pixels(png: bytes) -> dict[str, object]:
+    """PNG를 디코드한 화소 정보(압축 바이트와 상관없다): 모드, 크기, 원시 화소의 sha256."""
+    with Image.open(BytesIO(png)) as image:
+        return {"mode": image.mode, "size": list(image.size), "sha256": hashlib.sha256(image.tobytes()).hexdigest()}
+
+
+def portable(tree: dict) -> dict:
+    """그림 자산 키를 처음 나온 차례의 자리표(asset-1, …)로 바꾸고 그 키에서 나온 값(그림 블록의 figure.asset·
+    content_hash·block_id와 그 값을 가리키는 곳)을 가린 트리. OS마다 PNG 압축 바이트가 달라도 같다."""
+    masks: dict[str, str] = {}
+    for block in tree["blocks"]:
+        figure = block.get("figure")
+        if figure is None:
+            continue
+        mark = masks.setdefault(figure["asset"], f"asset-{sum(m.startswith('asset-') for m in masks.values()) + 1}")
+        masks[block["content_hash"]] = f"hash-of-{mark}"
+        masks[block["block_id"]] = f"block-{block['order']}"
+
+    def walk(value: object) -> object:
+        if isinstance(value, dict):
+            return {k: walk(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [walk(v) for v in value]
+        return masks.get(value, value) if isinstance(value, str) else value
+
+    return walk(tree)  # type: ignore[return-value]
+
+
+def same(rel: str, built: bytes, path: Path) -> bool:
+    """골든 비교: 트리는 portable로(그림 자산 키에서 나온 값만 가린다), 입력·처리 이력·화소 정보는 바이트 그대로."""
+    if not path.exists():
+        return False
+    old = path.read_bytes()
+    if rel.startswith("expected/") and not rel.endswith((".history.json", ".pixels.json")):
+        return portable(json.loads(old)) == portable(json.loads(built))
+    return old == built
 
 
 def _json(model: DocumentTree | ProcessingHistory) -> bytes:
@@ -189,10 +303,11 @@ def _json(model: DocumentTree | ProcessingHistory) -> bytes:
 def build_all() -> dict[str, bytes]:
     out: dict[str, bytes] = {}
     for name, data in SAMPLES.items():
-        tree, history = golden(name, data)
+        tree, history, shown = golden(name, data)
         out[f"inputs/{name}"] = data
         out[f"expected/{Path(name).stem}.json"] = _json(tree)
         out[f"expected/{Path(name).stem}.history.json"] = _json(history)
+        out[f"expected/{Path(name).stem}.pixels.json"] = (json.dumps(shown, indent=2) + "\n").encode("utf-8")
     return out
 
 
@@ -204,7 +319,7 @@ def main(argv: list[str] | None = None) -> int:
     for rel, data in build_all().items():
         path = ROOT / rel
         if args.check:
-            if not path.exists() or path.read_bytes() != data:
+            if not same(rel, data, path):
                 stale.append(rel)
         else:
             path.parent.mkdir(parents=True, exist_ok=True)

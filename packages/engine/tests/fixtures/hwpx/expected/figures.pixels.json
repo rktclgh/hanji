@@ -1,0 +1,34 @@
+[
+  {
+    "mode": "RGB",
+    "size": [
+      4,
+      4
+    ],
+    "sha256": "dfaeb7513f6627c21f434a9bbd57f1a442ee19dec693cf161d10e8ec2571cc7a"
+  },
+  {
+    "mode": "RGB",
+    "size": [
+      8,
+      8
+    ],
+    "sha256": "0941fdf118121098db81cd255568cf92db7ef05b9851fe42c1e77850cc495173"
+  },
+  {
+    "mode": "RGB",
+    "size": [
+      4,
+      2
+    ],
+    "sha256": "6513b1022efe900e716723c05b309abffc52063a1101eae6f752c05844080ca2"
+  },
+  {
+    "mode": "RGB",
+    "size": [
+      4000,
+      2
+    ],
+    "sha256": "445192125252749316ae13f4dc0d94b3e7654c79a8a3811e98ff2a30362b235a"
+  }
+]
