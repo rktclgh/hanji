@@ -5,6 +5,7 @@ from pathlib import PurePath
 
 from ..errors import UnsupportedFormat
 from .base import Parser
+from .hwpx import HwpxParser
 from .markdown import MarkdownParser
 from .pdf import PdfParser
 
@@ -12,7 +13,7 @@ from .pdf import PdfParser
 def default_parsers(ocr: bool | None = None, layout: bool | None = None) -> tuple[Parser, ...]:
     """기본 파서 묶음. 형식이 붙을 때마다 여기에 더한다. ocr·layout은 PdfParser의 스캔 쪽 OCR·레이아웃 모델 설정
     (None = 설치돼 있으면 켬)."""
-    return (MarkdownParser(), PdfParser(ocr=ocr, layout=layout))
+    return (MarkdownParser(), PdfParser(ocr=ocr, layout=layout), HwpxParser())
 
 
 def detect_parser(name: str, parsers: Sequence[Parser]) -> Parser:

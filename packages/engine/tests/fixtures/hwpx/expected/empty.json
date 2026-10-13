@@ -1,0 +1,14 @@
+{
+  "schema_version": "0.4",
+  "document_id": "fx-hwpx-empty",
+  "version": 1,
+  "layer_state": "det",
+  "source": {
+    "name": "empty.hwpx",
+    "mime": "application/hwp+zip",
+    "content_hash": "sha256:7130e27acc915d69dc3caab9f01c99ddaa681cfb976d511d453233b4cb522f9a",
+    "page_count": null
+  },
+  "pages": [],
+  "blocks": []
+}
