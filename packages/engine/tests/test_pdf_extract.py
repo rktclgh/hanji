@@ -495,3 +495,56 @@ def test_chars_carry_their_index_on_the_page_as_id():
     page = only_page(make_pdf(draw))
     assert "".join(c.text for c in page.chars) == "가나 다마"
     assert [c.id for c in page.chars] == list(range(5))
+
+
+def pages_pdf(*draws) -> bytes:
+    """draws: Canvas를 받아 한 쪽을 그리는 함수들(쪽마다 하나)."""
+    buf = io.BytesIO()
+    c = Canvas(buf, pagesize=(595.0, 842.0), invariant=1, pageCompression=0)
+    for draw in draws:
+        draw(c)
+        c.showPage()
+    c.save()
+    return buf.getvalue()
+
+
+OTHER_KOREAN_FONT = "HYSMyeongJo-Medium"  # 이름이 한국어 글꼴인 다른 미임베드 CID 글꼴
+pdfmetrics.registerFont(UnicodeCIDFont(OTHER_KOREAN_FONT))
+
+
+def test_partial_extraction_reads_only_those_pages_with_the_same_page_numbers_and_ids():
+    """쪽 일부 추출은 요청한 원본 쪽만 그 순서로 읽고, 쪽 번호·Char.id(쪽 안 순번, 값 비교에는 빠진다)가 전체 추출과
+    같다. 없는 쪽 순번은 그 위치의 ParseError."""
+    data = pages_pdf(*(lambda c, i=i: put(c, 72, 770, 11, f"지어낸 {i}쪽 문단이다.") for i in range(3)))
+    full = extract_pages(data, "p.pdf")
+    part = extract_pages(data, "p.pdf", [2, 0])
+    assert part == (full[2], full[0]) and [p.page for p in part] == [3, 1]
+    assert [[c.id for c in p.chars] for p in part] == [[c.id for c in full[k].chars] for k in (2, 0)]
+    with pytest.raises(ParseError, match="no such page") as info:
+        extract_pages(data, "p.pdf", [3])
+    assert info.value.location == "p.pdf:4"
+
+
+def test_partial_extraction_skips_the_hangul_check_that_the_page_alone_would_fail(monkeypatch):
+    """한글 손실 검사는 문서 전체를 누적해 본다. 1쪽만인 문서(1쪽 한글 글꼴이 '가'를 못 그리고 빠진 객체가 있다)는
+    실패하지만, 2쪽 한글 글꼴이 '가'를 그리는 두 쪽 문서는 전체 추출이 통과한다. 그 문서의 1쪽만 뽑는 쪽 일부 추출은
+    검사하지 않는다."""
+    host(monkeypatch, lambda name: name.startswith(OTHER_KOREAN_FONT))
+    with pytest.raises(ParseError, match="no Hangul glyphs"):
+        extract_pages(pages_pdf(mixed_korean_document), "h.pdf")
+    data = pages_pdf(mixed_korean_document, lambda c: put(c, 72, 770, 11, "다라", font=OTHER_KOREAN_FONT))
+    assert len(extract_pages(data, "h.pdf")) == 2
+    assert [p.page for p in extract_pages(data, "h.pdf", [0])] == [1]
+
+
+def test_partial_extraction_passes_where_the_whole_document_fails_the_hangul_check(monkeypatch):
+    """1쪽(라틴 글자 + 빠진 공백 객체)도 2쪽('가'를 못 그리는 글꼴의 한글)도 따로 뽑으면 통과하지만, 전체 추출은 지금처럼
+    1쪽 위치로 실패한다(조립의 전체 추출이 검사한다)."""
+    host(monkeypatch, lambda name: False)
+    data = pages_pdf(lambda c: (put(c, 72, 770, 11, "AB", font="Helvetica"), put(c, 72, 750, 11, " ", font=OTHER_CID_FONT)),
+                     lambda c: put(c, 72, 770, 11, "가나"))
+    assert [p.page for p in extract_pages(data, "h.pdf", [0])] == [1]
+    assert [p.page for p in extract_pages(data, "h.pdf", [1])] == [2]
+    with pytest.raises(ParseError, match="no Hangul glyphs") as info:
+        extract_pages(data, "h.pdf")
+    assert info.value.location == "h.pdf:1"
