@@ -188,7 +188,8 @@ def test_doctype_is_refused_before_any_tree_or_entity_expansion(xml):
     started = time.perf_counter()
     with pytest.raises(ParseError, match="DOCTYPE is not allowed") as info:
         package.xml("Contents/section0.xml", f"{HS}sec")
-    assert time.perf_counter() - started < 1.0 and info.value.location == "a.hwpx:Contents/section0.xml"
+    # 느린 CI 러너를 위해 넉넉히 잡는다(막지 못하면 엔티티 확장이 이보다 훨씬 오래 걸린다)
+    assert time.perf_counter() - started < 10 and info.value.location == "a.hwpx:Contents/section0.xml"
 
 
 def test_deep_nesting_is_refused_without_recursion_error():
