@@ -111,6 +111,9 @@ class Package:
                 raise ParseError("duplicate zip member name", f"{name}:{info.filename}")
             if info.flag_bits & 1:
                 raise ParseError("encrypted zip member", f"{name}:{info.filename}")
+            if info.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+                # BZIP2·LZMA는 읽기 상한 없이 풀리므로 거부한다(한컴은 무압축·deflate만 쓴다)
+                raise ParseError("unsupported zip compression method", f"{name}:{info.filename}")
             self._infos[info.filename] = info
         self._mimetype()
         self.items, spine = self._content()
@@ -173,6 +176,8 @@ class Package:
         """그림 멤버 바이트. 하나가 MAX_BINARY_BYTES·압축률을 넘으면 TooLarge, 합이 MAX_BINARY_TOTAL을 넘으면 OverBudget.
         읽기는 min(MAX_BINARY_BYTES, 합 상한의 남은 몫) + 1바이트까지만 하고, 합 상한을 다 쓴 뒤에는 멤버를 열지 않는다
         (실제로 읽은 합 ≤ MAX_BINARY_TOTAL + 1)."""
+        if member not in self._infos:
+            raise ParseError("missing zip member", f"{self.name}:{member}")
         left = MAX_BINARY_TOTAL - self.binary_read
         if left <= 0:
             raise OverBudget(f"picture members larger than {MAX_BINARY_TOTAL} bytes in total")

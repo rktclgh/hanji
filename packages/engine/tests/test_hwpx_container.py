@@ -242,3 +242,26 @@ def test_binary_members_over_the_limits_are_too_large_or_over_budget_not_parse_e
     with pytest.raises(container.OverBudget):
         package.binary("BinData/2.bin")  # 다 쓴 뒤에는 열지 않는다
     assert opened == ["BinData/0.bin", "BinData/1.bin"] and package.binary_read == 151
+
+
+@pytest.mark.parametrize("method", [zipfile.ZIP_BZIP2, zipfile.ZIP_LZMA])
+def test_members_with_unbounded_decompressors_are_refused(method):
+    """BZIP2·LZMA 멤버는 읽기 상한이 먹지 않으므로 이름을 대고 거부한다(작은 입력)."""
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as z:
+        for name, data in members(B.package(SECTION)):
+            z.writestr(zipfile.ZipInfo(name, B.WHEN), data)
+        z.writestr(zipfile.ZipInfo("BinData/x.bin", B.WHEN), b"tiny", compress_type=method)
+    error = refused(buf.getvalue(), "unsupported zip compression method")
+    assert error.location == "a.hwpx:BinData/x.bin"
+    # mimetype 멤버 자체가 그 방식이어도 같다
+    rest = [m for m in members(B.package(SECTION)) if m[0] != "mimetype"]
+    packed = raw_zip([("mimetype", B.MIME)] + rest, method)
+    assert refused(packed, "unsupported zip compression method").location == "a.hwpx:mimetype"
+
+
+def test_binary_of_a_missing_member_is_a_parse_error_with_location():
+    package = Package(B.package(SECTION), "a.hwpx")
+    with pytest.raises(ParseError, match="missing zip member") as info:
+        package.binary("BinData/none.png")
+    assert info.value.location == "a.hwpx:BinData/none.png"
