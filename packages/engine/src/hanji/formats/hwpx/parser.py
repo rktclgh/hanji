@@ -3,7 +3,8 @@
 구역(spine 순서)마다 트리를 만들고 블록 명세로 바꾼 뒤 버린다. 최상위 문단(hs:sec 바로 아래 hp:p)마다 문단 글자
 블록(개요 수준 → 제목, 번호·글머리 → 목록 항목, 그 밖 문단)을 낸다. 위치는 FlowLocator(제목 경로, 최상위 문단 순번).
 글자 장부(ledger.py)가 모든 hp:t·글맵시 글자를 세고, 한 번도 넣지 않은 글자는 구역 끝 구조 문단(신뢰도 0.3)으로
-살린다(처리 이력 unassigned_text). 장부가 맞지 않으면 처리 이력 coverage_mismatch(파싱은 실패하지 않는다)."""
+살린다(처리 이력 unassigned_text). 장부가 맞지 않으면 처리 이력 coverage_mismatch(파싱은 실패하지 않는다).
+개요 수준을 쓰지 않는 문서는 PDF와 같은 글꼴 크기 규칙으로 제목을 고른다(_finish)."""
 
 import bisect
 import xml.etree.ElementTree as ET
@@ -14,17 +15,21 @@ from typing import Any
 from hanji_contracts import Attempt, FlowLocator, GateCheck, GateResult, RegionRecord
 
 from ..base import ParsedSource
-from ..pdf.group import MAX_LEVEL, RESCUED_CONFIDENCE
+from ..pdf.group import (
+    BOLD_HEADING_RATIO, CONFIDENCE, HEADING_MAX_LINES, HEADING_RATIO, MAX_LEVEL, RESCUED_CONFIDENCE, step,
+)
 from ..pdf.parser import COVERAGE_MISMATCH, UNASSIGNED_TEXT
 from .container import HH, HP, HS, MIME, Package
-from .header import Styles, read_styles
+from .header import CharShape, Styles, read_styles
 from .ledger import INLINE, T, Bundle, Counts, Ledger, ink, source_chars
 
 P, RUN, SUBLIST = f"{HP}p", f"{HP}run", f"{HP}subList"
+LINESEGS, LINESEG, LINE_BREAK = f"{HP}linesegarray", f"{HP}lineseg", f"{HP}lineBreak"
 TEXTART, HIDDEN = f"{HP}textart", f"{HP}hiddenComment"
 UNKNOWN_INLINE = "unknown_inline_element"  # hp:t 안 모르는 자식 요소의 글자를 그 자리에 넣었다
 HIDDEN_COMMENT = "hidden_comment"  # 숨은 설명(인쇄되지 않음): 블록에 넣지 않았다
 MASTERPAGE_TEXT = "masterpage_text_skipped"  # 마스터 쪽 글자(v1은 읽지 않는다)
+NO_SHAPE = CharShape(10.0, False)  # 모르는 charPrIDRef
 
 
 @dataclass(slots=True)
@@ -49,6 +54,7 @@ class _Doc:
     specs: list[dict[str, Any]] = field(default_factory=list)
     regions: list[_Region] = field(default_factory=list)
     counts: list[Counts] = field(default_factory=list)
+    outline: bool = False  # 개요 수준 제목을 하나라도 썼나(그러면 크기 규칙을 쓰지 않는다)
 
 
 def _t_text(t: ET.Element) -> tuple[str, bool]:
@@ -62,6 +68,14 @@ def _t_text(t: ET.Element) -> tuple[str, bool]:
         unknown = unknown or bool(inner.strip())
         parts.append(child.tail or "")
     return "".join(parts), unknown
+
+
+def _lines(p: ET.Element) -> int:
+    """저장된 표시 줄 수(linesegarray의 lineseg 수), 없으면 줄바꿈 수 + 1."""
+    segs = p.find(LINESEGS)
+    if segs is not None:
+        return len(segs.findall(LINESEG))
+    return sum(1 for run in p.iterfind(RUN) for t in run.iterfind(T) for _ in t.iterfind(LINE_BREAK)) + 1
 
 
 def _join(bundles: list[Bundle]) -> str:
@@ -133,15 +147,35 @@ class _Section:
         return True
 
     def paragraph(self, p: ET.Element, anchor: int) -> None:
-        """최상위 문단: 개요 수준 → 제목, 번호·글머리 → 목록 항목, 그 밖 문단."""
+        """최상위 문단: 개요 수준 → 제목, 번호·글머리 → 목록 항목, 그 밖 문단(크기 규칙 후보)."""
         bundles = self.bundles(p, anchor)
         kind, level = self.doc.styles.headings.get(p.get("paraPrIDRef", ""), ("NONE", 0))
         if kind == "OUTLINE":
-            self.emit("heading", bundles, anchor, level=max(1, min(level + 1, MAX_LEVEL)))  # 음수 수준도 1~6 안으로
+            # 음수 수준도 1~6 안으로
+            if self.emit("heading", bundles, anchor, level=max(1, min(level + 1, MAX_LEVEL))):
+                self.doc.outline = True
         elif kind in ("NUMBER", "BULLET"):
-            self.emit("list_item", bundles, anchor)
+            self.emit("list_item", bundles, anchor, _sizes=self.sizes(p))
         else:
-            self.emit("paragraph", bundles, anchor)
+            sizes = self.sizes(p)
+            bold = sum(n for (_, b), n in sizes.items() if b)
+            total = sum(sizes.values())
+            by_size = Counter[float]()
+            for (size, _), n in sizes.items():
+                by_size[size] += n
+            size = max(by_size, key=lambda s: (by_size[s], s)) if by_size else None
+            self.emit("paragraph", bundles, anchor, _sizes=sizes, _size=size, _bold=bold * 2 > total,
+                      _lines=_lines(p))
+
+    def sizes(self, p: ET.Element) -> Counter[tuple[float, bool]]:
+        """문단 런들의 (0.5pt 단위 크기, 굵기)별 공백 아닌 글자 수."""
+        out = Counter[tuple[float, bool]]()
+        for run in p.iterfind(RUN):
+            shape = self.doc.styles.chars.get(run.get("charPrIDRef", ""), NO_SHAPE)
+            n = sum(ink(_t_text(t)[0]) for t in run.iterfind(T))
+            if n:
+                out[(step(shape.size), shape.bold)] += n
+        return out
 
     def build(self) -> None:
         anchor = self.base - 1
@@ -199,8 +233,28 @@ def _ledger_gate(counts: Counts) -> GateResult:
     return GateResult(passed=all(c.passed for c in checks), checks=checks)
 
 
+def _headings_by_size(specs: list[dict[str, Any]]) -> None:
+    """개요 수준이 없는 문서: PDF와 같은 상수로 제목을 고른다. 본문 크기 = 대상 문단 글자 수로 센 크기 최빈값(같으면
+    작은 쪽), 제목 = 대표 크기 ≥ 본문 × 1.15(굵으면 × 1.05)이고 표시 줄 ≤ 2. 단계는 큰 크기부터 1, 2, …(6에서 접음)."""
+    counts = Counter[float]()
+    for spec in specs:
+        for (size, _), n in spec.get("_sizes", Counter()).items():
+            counts[size] += n
+    if not counts:
+        return
+    body = max(counts, key=lambda s: (counts[s], -s))
+    chosen = [spec for spec in specs if spec.get("_size") is not None and spec["_lines"] <= HEADING_MAX_LINES
+              and spec["_size"] >= body * (BOLD_HEADING_RATIO if spec["_bold"] else HEADING_RATIO)]
+    ranks = sorted({spec["_size"] for spec in chosen}, reverse=True)
+    for spec in chosen:
+        spec.update(kind="heading", level=min(ranks.index(spec["_size"]) + 1, MAX_LEVEL),
+                    confidence=CONFIDENCE["heading"])
+
+
 def _finish(doc: _Doc) -> tuple[tuple[dict[str, Any], ...], tuple[RegionRecord, ...]]:
-    """제목 경로를 채운다. 구역 끝 블록(_late)과 처리 이력은 닻 문단 자리의 제목 경로를 쓴다."""
+    """제목을 정하고 제목 경로를 채운다. 구역 끝 블록(_late)과 처리 이력은 닻 문단 자리의 제목 경로를 쓴다."""
+    if not doc.outline:
+        _headings_by_size(doc.specs)
     stack: list[tuple[int, str]] = []
     marks: list[tuple[int, tuple[str, ...]]] = []  # (닻, 그 닻까지 처리한 뒤 제목 경로)
     blocks: list[dict[str, Any]] = []
