@@ -286,3 +286,19 @@ def test_heading_levels_fold_at_six():
                   *(B.para(B.run(B.t(f"제목 {k}"), char=k), lines=1) for k in range(7, 0, -1)))
     parsed, _ = parse(s, head=B.header(chars=sizes))
     assert [b.get("level") for b in parsed.blocks] == [None, 1, 2, 3, 4, 5, 6, 6]
+
+
+def test_huge_header_integers_are_clamped_and_never_overflow():
+    huge = int("1" + "0" * 400)
+    s = B.section(B.para(B.run(B.t(BODY * 3))), B.para(B.run(B.t("제목"), char=1), lines=1))
+    for head in (B.header(chars={1: (huge, False)}), B.header(headings={1: ("OUTLINE", huge)}),
+                 B.header(chars={1: (1600, False)}).replace('hangul="100"', 'hangul="' + "9" * 400 + '"')):
+        parsed, counts = parse(s, head=head)
+        assert [b["kind"] for b in parsed.blocks] and all(c.ok for c in counts)
+
+
+def test_a_body_size_of_zero_or_less_skips_the_size_rule():
+    s = B.section(B.para(B.run(B.t(BODY * 3))), B.para(B.run(B.t("짧은 문단")), lines=1))
+    for height in (0, -1000):
+        parsed, _ = parse(s, head=B.header(chars={0: (height, False)}))
+        assert [b["kind"] for b in parsed.blocks] == ["paragraph", "paragraph"]

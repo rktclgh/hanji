@@ -23,9 +23,12 @@ class Styles:
     fills: dict[str, bool] = field(default_factory=dict)
 
 
+BOUND = 10**6  # 속성 정수를 이 범위로 묶는다(아주 큰 수가 실수 계산·반올림에서 OverflowError가 되지 않게)
+
+
 def _int(value: str | None, default: int) -> int:
     try:
-        return int(value) if value is not None else default
+        return max(-BOUND, min(BOUND, int(value))) if value is not None else default
     except ValueError:
         return default
 

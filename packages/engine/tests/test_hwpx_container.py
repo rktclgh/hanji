@@ -1,6 +1,7 @@
 """HWPX 컨테이너 안전 읽기(스펙 §4): 모든 거부 경로가 ParseError(원인, 위치)이고 재귀·엔티티 확장·파일 쓰기가 없다."""
 
 import importlib.util
+import os
 import struct
 import time
 import warnings
@@ -266,3 +267,18 @@ def test_binary_of_a_missing_member_is_a_parse_error_with_location():
     with pytest.raises(ParseError, match="missing zip member") as info:
         package.binary("BinData/none.png")
     assert info.value.location == "a.hwpx:BinData/none.png"
+
+
+@pytest.mark.parametrize("encoding", ["EUC-KR", "cp949", "UTF-32", "foo-bar"])
+def test_an_unsupported_xml_encoding_declaration_is_a_parse_error_with_location(encoding):
+    xml = f'<?xml version="1.0" encoding="{encoding}"?>' + SECTION.split("?>", 1)[1]
+    package = Package(B.package(xml), "a.hwpx")
+    with pytest.raises(ParseError, match="unsupported XML encoding") as info:
+        package.xml("Contents/section0.xml", f"{HS}sec")
+    assert info.value.location == "a.hwpx:Contents/section0.xml"
+
+
+@pytest.mark.skipif(os.sep == "\\", reason="윈도의 zipfile은 이름의 \\를 /로 바꿔 읽는다")
+def test_a_member_name_with_a_backslash_is_refused():
+    data = raw_zip([*members(B.package(SECTION)), ("Contents\\extra.xml", b"<a/>")])
+    assert refused(data, "backslash in zip member name").location == "a.hwpx:Contents\\extra.xml"

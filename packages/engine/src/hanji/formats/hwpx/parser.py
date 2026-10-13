@@ -242,6 +242,8 @@ def _headings_by_size(specs: list[dict[str, Any]]) -> None:
     if not counts:
         return
     body = max(counts, key=lambda s: (counts[s], -s))
+    if body <= 0:  # 크기가 0 이하인 문서는 크기 규칙을 쓰지 않는다(모든 문단이 제목이 되지 않게)
+        return
     chosen = [spec for spec in specs if spec.get("_size") is not None and spec["_lines"] <= HEADING_MAX_LINES
               and spec["_size"] >= body * (BOLD_HEADING_RATIO if spec["_bold"] else HEADING_RATIO)]
     ranks = sorted({spec["_size"] for spec in chosen}, reverse=True)

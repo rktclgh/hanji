@@ -87,6 +87,8 @@ def _scan(data: bytes, location: str) -> None:
         raise ParseError(stop.reason, location) from None
     except expat.ExpatError as exc:
         raise ParseError(f"invalid XML: {expat.ErrorString(exc.code)}", f"{location}:{exc.lineno}") from None
+    except (ValueError, LookupError) as exc:  # 다중바이트·모르는 인코딩 선언은 expat가 이 예외를 낸다
+        raise ParseError(f"unsupported XML encoding: {exc}", location) from None
 
 
 class Package:
@@ -109,6 +111,8 @@ class Package:
         for info in infos:
             if info.filename in self._infos:
                 raise ParseError("duplicate zip member name", f"{name}:{info.filename}")
+            if "\\" in info.filename:  # 윈도와 다른 OS가 \를 다르게 읽으므로 모두 거부한다
+                raise ParseError("backslash in zip member name", f"{name}:{info.filename}")
             if info.flag_bits & 1:
                 raise ParseError("encrypted zip member", f"{name}:{info.filename}")
             if info.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
@@ -168,6 +172,8 @@ class Package:
             tree = ET.fromstring(data)
         except ET.ParseError as exc:
             raise ParseError(f"invalid XML: {exc}", f"{location}:{exc.position[0]}") from None
+        except (ValueError, LookupError) as exc:
+            raise ParseError(f"unsupported XML encoding: {exc}", location) from None
         if root is not None and tree.tag != root:
             raise ParseError(f"unexpected root element {tree.tag}", location)
         return tree
