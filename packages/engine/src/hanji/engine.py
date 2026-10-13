@@ -2,7 +2,7 @@
 
 import hashlib
 import unicodedata
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import NamedTuple
 
@@ -14,6 +14,7 @@ from .core import build_tree, check_assets, diff_trees
 from .errors import StoreConflict, VlmUnavailable
 from .formats.base import Parser
 from .formats.detect import default_parsers, detect_parser
+from .formats.pdf.parser import PageModels, PdfParser
 from .store.base import Store
 
 
@@ -47,24 +48,33 @@ class LocalEngine:
         """ingest와 같되 원본 바이트와 파일 이름을 직접 받는다(이름은 NFC로 저장)."""
         return self._ingest_outcome(data, name, document_id, force).ref
 
-    def _ingest_outcome(self, data: bytes, name: str, document_id: str | None = None,
-                        force: bool = False) -> Outcome:
-        """ingest_bytes와 같은 경로. 새 버전을 저장했는지와 쪽 수를 함께 돌려준다(ingest_many 작업 프로세스가 쓴다)."""
+    def _ingest_outcome(self, data: bytes, name: str, document_id: str | None = None, force: bool = False,
+                        models: Mapping[int, PageModels] | None = None) -> Outcome:
+        """ingest_bytes와 같은 경로. 새 버전을 저장했는지와 쪽 수를 함께 돌려준다(ingest_many 작업 프로세스가 쓴다).
+        models는 다른 프로세스가 계산한 PDF 쪽 모델(page_models)이고 PDF 파서의 조립에만 넘긴다(PDF가 아니면
+        TypeError). 결과는 models 없이 돈 것과 같다."""
         name = unicodedata.normalize("NFC", name)
         digest = hashlib.sha256(data).hexdigest()
         doc_id = "doc_" + digest[:24] if document_id is None else document_id
         if not doc_id:
             raise ValueError("document_id must not be empty")
         try:
-            return self._ingest_once(data, name, doc_id, "sha256:" + digest, force)
+            return self._ingest_once(data, name, doc_id, "sha256:" + digest, force, models)
         except StoreConflict:  # 다른 쓰기와 겹쳤다: 최신 버전을 다시 읽고 한 번만 재시도
-            return self._ingest_once(data, name, doc_id, "sha256:" + digest, force)
+            return self._ingest_once(data, name, doc_id, "sha256:" + digest, force, models)
 
-    def _ingest_once(self, data: bytes, name: str, doc_id: str, content_hash: str, force: bool) -> Outcome:
+    def _ingest_once(self, data: bytes, name: str, doc_id: str, content_hash: str, force: bool,
+                     models: Mapping[int, PageModels] | None = None) -> Outcome:
         latest = self._store.latest(doc_id)
         if latest is not None and latest.source.content_hash == content_hash and not force:
             return _kept(latest)
-        parsed = detect_parser(name, self._parsers).parse(data, name)  # 형식 판별은 원본이 달라진 뒤에만
+        parser = detect_parser(name, self._parsers)  # 형식 판별은 원본이 달라진 뒤에만
+        if models is None:
+            parsed = parser.parse(data, name)
+        elif isinstance(parser, PdfParser):
+            parsed = parser.parse(data, name, models=models)
+        else:
+            raise TypeError(f"page models apply to PDF only, not to {name}")
         source = SourceInfo(name=name, mime=parsed.mime, content_hash=content_hash,
                             page_count=len(parsed.pages) or None)
         tree = build_tree(parsed, doc_id, 1 if latest is None else latest.version + 1, source)

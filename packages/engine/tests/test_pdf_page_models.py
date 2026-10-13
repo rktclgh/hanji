@@ -273,3 +273,20 @@ def test_models_for_a_page_the_document_does_not_have_are_refused():
     data = pdf(text_page)
     with pytest.raises(ValueError, match="does not have"):
         PdfParser(ocr=False, layout=False).parse(data, "x.pdf", models={1: PageModels("layer", None, None, None, None)})
+
+
+def test_ingest_outcome_passes_models_to_the_pdf_parser_only():
+    """LocalEngine._ingest_outcome(models=…)는 PDF 파서의 조립에만 넘긴다: 저장된 트리·처리 이력·그림이 models 없이
+    수집한 것과 같다. PDF가 아닌 문서에 models를 주면 TypeError."""
+    data = (FIXTURES / "layout" / "figures.pdf").read_bytes()
+    plain, split = LocalEngine(MemoryStore()), LocalEngine(MemoryStore())
+    first = plain._ingest_outcome(data, "figures.pdf")
+    second = split._ingest_outcome(data, "figures.pdf", models=chunked(data, "figures.pdf", 1))
+    assert first == second and first.created
+    doc = first.ref.document_id
+    assert plain.get_tree(doc).model_dump_json() == split.get_tree(doc).model_dump_json()
+    assert plain.history(doc).model_dump_json() == split.history(doc).model_dump_json()
+    assets = [b.figure.asset for b in plain.get_tree(doc).blocks if b.figure is not None and b.figure.asset]
+    assert assets and [plain.get_asset(a) for a in assets] == [split.get_asset(a) for a in assets]
+    with pytest.raises(TypeError, match="PDF only"):
+        split._ingest_outcome("# 지어낸 제목\n".encode(), "a.md", models={})
