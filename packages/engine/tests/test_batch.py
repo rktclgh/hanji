@@ -16,9 +16,14 @@ import unicodedata
 from pathlib import Path
 
 import pytest
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+from reportlab.pdfgen.canvas import Canvas
 
 from hanji import batch, resources
 from hanji.formats.detect import default_parsers
+from hanji.formats.pdf import layout as layout_runtime
+from hanji.formats.pdf import ocr as ocr_runtime
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 EXTENSIONS = frozenset(e for p in default_parsers(ocr=False, layout=False) for e in p.extensions)
@@ -1006,3 +1011,359 @@ def test_package_exports_the_batch_api():
 
     names = ("ingest_many", "aingest_many", "IngestRun", "IngestResult", "IngestError")
     assert all(getattr(hanji, n) is getattr(batch, n) and n in hanji.__all__ for n in names)
+
+
+
+FONT = "HYGothic-Medium"
+pdfmetrics.registerFont(UnicodeCIDFont(FONT))
+
+
+def text_pdf(path: Path, pages: int, broken: tuple[int, ...] = ()) -> Path:
+    """쪽마다 지어낸 글자 한 줄인 PDF. 쪽 순번 broken은 CropBox가 MediaBox 밖이라 그 쪽을 읽으면 ParseError(빈 쪽 상자)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    c = Canvas(str(path), pagesize=(595.0, 842.0), invariant=1, pageCompression=0)
+    for i in range(pages):
+        c.setCropBox((700, 700, 800, 800) if i in broken else (0, 0, 595, 842))
+        c.setFont(FONT, 11)
+        c.drawString(72, 770, f"지어낸 {i}쪽 문단이다.")
+        c.showPage()
+    c.save()
+    return path
+
+
+def require_split(ocr: bool = False) -> None:
+    """쪼개기는 모델을 쓸 때만이다(여기서는 레이아웃 자동, ocr이면 OCR도). 설치·모델 파일이 없으면 건너뛰고,
+    HANJI_CI_REQUIRE_MODELS=1이면 실패한다. 글자만 있는 쪽은 레이아웃을 켜도 모델을 돌리지 않는다."""
+    missing = [name for name, runtime in (("layout", layout_runtime), ("ocr", ocr_runtime))
+               if (name == "layout" or ocr) and not runtime.available()]
+    if missing:
+        if os.environ.get("HANJI_CI_REQUIRE_MODELS") == "1":
+            pytest.fail(f"model runtimes not available: {missing}; run `hanji models fetch`")
+        pytest.skip(f"model runtimes not available: {missing}")
+
+
+STRICT_ASSEMBLY = r"""
+from hanji.formats.pdf import parser as _parser
+
+_real_parse = _parser.PdfParser.parse
+
+
+def _forbidden(*args, **kwargs):
+    raise AssertionError("assembly computed a page model instead of using the chunk results")
+
+
+def _strict_parse(self, data, name, models=None):
+    # 조립(models 있음)이면 받은 쪽 모델이 모든 쪽이어야 하고, 조립 중 쪽 모델을 계산하면 실패한다. 이 줄들은
+    # 스크립트 맨 위라 spawn 작업 프로세스(스크립트를 __mp_main__으로 다시 import한다)에서도 돈다
+    if models is None:
+        return _real_parse(self, data, name)
+    import pypdfium2
+    document = pypdfium2.PdfDocument(data)
+    count = len(document)
+    document.close()
+    assert sorted(models) == list(range(count)), (sorted(models), count)
+    real, _parser._models = _parser._models, _forbidden
+    try:
+        return _real_parse(self, data, name, models)
+    finally:
+        _parser._models = real
+
+
+_parser.PdfParser.parse = _strict_parse
+"""
+
+
+def test_split_ingest_matches_a_serial_run_byte_for_byte(tmp_path):
+    """기준을 1쪽·묶음 1쪽으로 낮추고 작업 2개로 OCR·그림 예제와 여러 쪽 골든을 문서마다 쪼개 수집한 상태 파일(B), 그리고
+    같은 것을 갈아 끼우기 1(일마다 새 풀)로 수집한 상태 파일(C)이 같은 ORT 스레드 수로 차례로 LocalEngine.ingest한 것과
+    문서별로 바이트까지 같다. 쪼갠 문서는 쪽마다 묶음 하나, 그 뒤 조립 하나이고, 조립은 받은 쪽 모델(모든 쪽)만 쓴다
+    (STRICT_ASSEMBLY: 조립 중 쪽 모델을 계산하면 그 문서가 failed가 된다)."""
+    require_split(ocr=True)
+    inputs = [FIXTURES / "layout" / "figures.pdf", FIXTURES / "ocr" / "scanned.pdf",
+              FIXTURES / "pdf" / "inputs" / "report.pdf", FIXTURES / "pdf" / "inputs" / "header_footer.pdf"]
+    result = scenario(tmp_path, STRICT_ASSEMBLY + DUMP + r"""
+import json, os, sys
+from hanji import LocalEngine, SqliteStore
+from hanji.batch import ingest_many
+
+if __name__ == "__main__":
+    paths = json.loads(sys.argv[1])
+    logs, threads = [], None
+    for db, recycle in (("B.db", None), ("C.db", 1)):
+        for path in paths:  # 문서마다 따로: 쪼갠 문서는 한 번에 하나라서
+            with ingest_many([path], db=db, workers=2, _recycle_every=recycle, _split_min_pages=1,
+                             _chunk_pages=1) as run:
+                logs.append([[r.status for r in run], run._log])
+            threads = run.ort_threads
+    if threads is not None:
+        os.environ["HANJI_ORT_THREADS"] = str(threads)
+    from hanji.formats.detect import default_parsers
+    with SqliteStore("A.db") as store:
+        engine = LocalEngine(store, default_parsers())
+        for path in paths:
+            engine.ingest(path)
+    print(json.dumps([logs, dump("A.db") == dump("B.db") == dump("C.db")]))
+""", json.dumps([str(p) for p in inputs]), timeout=600)
+    logs, same = result
+    assert [statuses for statuses, _ in logs] == [["created"]] * 8 and same
+    assert [log for _, log in logs] == [[["chunk", 0]] * pages + [["assemble", 0]] for pages in (2, 1, 2, 3)] * 2
+
+
+def test_chunks_come_before_the_assembly_one_result_per_document_and_one_split_at_a_time(tmp_path):
+    """큰 문서(a.pdf 4쪽)는 묶음 넷 뒤에 조립 하나, 결과는 문서마다 하나다. a가 쪼개진 동안 줄 맨 앞에 온 b.pdf(3쪽)는
+    기다리지 않고 쪼개지 않은 보통 작업으로 간다."""
+    require_split()
+    text_pdf(tmp_path / "in" / "a.pdf", 4)
+    text_pdf(tmp_path / "in" / "b.pdf", 3)
+    write(tmp_path / "in" / "c.md")
+    result = scenario(tmp_path, r"""
+import json
+from hanji.batch import ingest_many
+
+if __name__ == "__main__":
+    with ingest_many(["in"], db="s.db", workers=2, ocr=False, _split_min_pages=1, _chunk_pages=1) as run:
+        results = sorted(run, key=lambda r: r.index)
+    print(json.dumps([[r.status for r in results], [r.index for r in results], run._log]))
+""")
+    statuses, indexes, log = result
+    assert statuses == ["created"] * 3 and indexes == [0, 1, 2]
+    assert [kind for kind, index in log if index == 0] == ["chunk"] * 4 + ["assemble"]
+    assert [kind for kind, index in log if index == 1] == ["doc"]
+
+
+def test_close_while_the_assembly_waits_reports_the_split_document_interrupted(tmp_path):
+    """예산을 작업 2개·여유 100쪽 몫으로 잡으면 120쪽 PDF는 문서로는 여유보다 크지만 60쪽 묶음은 들어간다. 묶음 둘이
+    끝난 뒤 조립(문서 몫)은 돌던 일(느린 문서)이 끝나기를 기다린다. 그때 close()하면 쪼갠 문서와 느린 문서가 각각
+    interrupted 하나이고 남은 자식은 없다."""
+    require_split()
+    text_pdf(tmp_path / "in" / "big.pdf", 120)
+    write(tmp_path / "in" / "slow.md", "# 느린 지어낸 제목\n")
+    result = scenario(tmp_path, r"""
+import json, multiprocessing, os, threading, time
+from hanji import resources
+from hanji.batch import ingest_many
+
+if __name__ == "__main__":
+    cost = resources.COSTS["layout"]
+    budget = resources.PARENT_RESERVE + 2 * (cost.base + resources.SLOT_PAGES * cost.per_page)
+    run = ingest_many(["in"], db="s.db", workers=2, max_memory=budget, ocr=False, _chunk_pages=60)
+    got = []
+    worker = threading.Thread(target=lambda: got.extend(run), daemon=True)
+    worker.start()
+
+    def waiting():
+        split = run._split
+        return split is not None and len(split.models) == 120 and os.path.exists("slow.md.started")
+
+    deadline = time.monotonic() + 120
+    while time.monotonic() < deadline and not waiting():
+        time.sleep(0.05)
+    seen = waiting()
+    rest = run.close()
+    worker.join(30)
+    print(json.dumps([seen, run._log, got, sorted((r.index, r.status) for r in rest),
+                      multiprocessing.active_children()]))
+""", env={"HANJI_TEST_WORKER_EXIT": "slow.md:hang"})
+    assert result == [True, [["chunk", 0], ["chunk", 0], ["doc", 1]], [], [[0, "interrupted"], [1, "interrupted"]], []]
+
+
+def test_close_while_chunks_run_is_one_interrupted_result_and_no_children(tmp_path):
+    """묶음이 도는 중 close()하면 쪼갠 문서의 결과는 interrupted 하나(기본 ID 함께)이고 남은 자식은 없다."""
+    require_split()
+    text_pdf(tmp_path / "in" / "big.pdf", 3)
+    result = scenario(tmp_path, r"""
+import json, multiprocessing, os, threading, time
+from hanji.batch import ingest_many
+
+if __name__ == "__main__":
+    run = ingest_many(["in"], db="s.db", workers=2, ocr=False, _split_min_pages=1, _chunk_pages=1)
+    threading.Thread(target=lambda: list(run), daemon=True).start()
+    deadline = time.monotonic() + 120
+    while time.monotonic() < deadline and not os.path.exists("big.pdf.started"):
+        time.sleep(0.05)
+    rest = run.close()
+    print(json.dumps([[(r.index, r.status, r.document_id is not None) for r in rest], run._log,
+                      multiprocessing.active_children()]))
+""", env={"HANJI_TEST_WORKER_EXIT": "big.pdf:hang"})
+    assert result == [[[0, "interrupted", True]], [["chunk", 0], ["chunk", 0]], []]
+
+
+@pytest.mark.parametrize("broken", [(1,), (0, 1)], ids=["one", "two-siblings"])
+def test_a_failing_chunk_reruns_the_document_once_and_fails_like_a_serial_run(tmp_path, broken):
+    """묶음이 ParseError로 실패하면 보내지 않은 묶음은 버리고, 돌던 형제 묶음이 모두 끝난 뒤 문서를 쪼개지 않은 보통
+    작업으로 한 번만 다시 보낸다: 결과는 차례 실행과 같은 오류(코드·문구) 하나다. 함께 돌던 두 묶음이 모두 실패해도
+    다시 보내기는 한 번이다."""
+    require_split()
+    text_pdf(tmp_path / "in" / "bad.pdf", 3, broken)
+    result = scenario(tmp_path, r"""
+import json
+from hanji import LocalEngine, SqliteStore
+from hanji.batch import ingest_many
+from hanji.errors import ParseError
+from hanji.formats.detect import default_parsers
+
+if __name__ == "__main__":
+    with ingest_many(["in"], db="s.db", workers=2, ocr=False, _split_min_pages=1, _chunk_pages=1) as run:
+        (r,) = list(run)
+    with SqliteStore("a.db") as store:
+        try:
+            LocalEngine(store, default_parsers(ocr=False)).ingest("in/bad.pdf")
+            serial = None
+        except ParseError as exc:
+            serial = str(exc)
+    print(json.dumps([r.status, r.error.code, r.error.type, r.error.message == serial, run._log]))
+""")
+    status, code, kind, same, log = result
+    assert (status, code, kind, same) == ("failed", 4, "ParseError", True)
+    assert log.count(["again", 0]) == 1 and ["assemble", 0] not in log
+    if broken == (0, 1):
+        assert log == [["chunk", 0], ["chunk", 0], ["again", 0]]
+
+
+def test_a_dying_chunk_is_one_crashed_result_without_a_rerun(tmp_path):
+    """묶음 중 작업 프로세스가 죽으면 그 문서의 결과는 worker_crashed 하나다(다시 보내지 않고 저장되지 않는다). 다음
+    세대에서 다른 문서는 돈다."""
+    require_split()
+    text_pdf(tmp_path / "in" / "big.pdf", 3)
+    write(tmp_path / "in" / "other.md")
+    result = scenario(tmp_path, CRASH + r"""
+if __name__ == "__main__":
+    with ingest_many(["in"], db="s.db", workers=2, ocr=False, _split_min_pages=1, _chunk_pages=1) as run:
+        results = sorted(run, key=lambda r: r.index)
+    print(json.dumps([[(r.status, r.error and r.error.type) for r in results], run._log, stored(results[0].document_id),
+                      run.aborted, multiprocessing.active_children()]))
+""", env={"HANJI_TEST_WORKER_EXIT": "big.pdf:chunk"})
+    assert result == [[["worker_crashed", "WorkerCrashed"], ["created", None]],
+                      [["chunk", 0], ["chunk", 0], ["doc", 1]], 0, False, []]
+
+
+def test_a_file_changed_after_planning_fails_its_chunks_without_a_rerun(tmp_path):
+    require_split()
+    text_pdf(tmp_path / "in" / "big.pdf", 3)
+    result = scenario(tmp_path, r"""
+import json
+from hanji.batch import ingest_many
+
+
+def change(path):
+    with open(path, "ab") as f:
+        f.write(b"%% appended")
+
+
+if __name__ == "__main__":
+    with ingest_many(["in"], db="s.db", workers=2, ocr=False, _split_min_pages=1, _chunk_pages=1,
+                     _after_plan=change) as run:
+        (r,) = list(run)
+    print(json.dumps([r.status, r.error.type, run._log]))
+""")
+    assert result == ["failed", "ChangedDuringRun", [["chunk", 0], ["chunk", 0]]]
+
+
+def test_an_already_stored_document_is_not_split_unless_forced(tmp_path):
+    """같은 문서 ID에 같은 원본이 이미 저장돼 있으면 쪼개지 않고 보통 작업으로 unchanged다. force면 다시 쪼갠다."""
+    require_split()
+    text_pdf(tmp_path / "in" / "big.pdf", 3)
+    result = scenario(tmp_path, r"""
+import json
+from hanji.batch import ingest_many
+
+if __name__ == "__main__":
+    out = []
+    for force in (False, False, True):
+        with ingest_many(["in"], db="s.db", workers=2, ocr=False, force=force, _split_min_pages=1,
+                         _chunk_pages=1) as run:
+            out.append([[r.status for r in run], [kind for kind, _ in run._log]])
+    print(json.dumps(out))
+""")
+    assert result == [[["created"], ["chunk"] * 3 + ["assemble"]], [["unchanged"], ["doc"]],
+                      [["unchanged"], ["chunk"] * 3 + ["assemble"]]]
+
+
+def test_a_copy_with_the_same_bytes_waits_for_the_split_document_and_keeps_the_first_name(tmp_path):
+    """같은 바이트의 두 파일: 앞 파일이 쪼개진 동안 뒤 파일은 같은 sha라 기다리고(쪼갠 문서가 sha를 갖는다), 앞 파일이
+    저장된 뒤 쪼개지 않은 보통 작업으로 unchanged다. 저장된 이름은 차례 실행처럼 앞 파일이다."""
+    require_split()
+    text_pdf(tmp_path / "in" / "a.pdf", 3)
+    shutil.copy(tmp_path / "in" / "a.pdf", tmp_path / "in" / "b.pdf")
+    result = scenario(tmp_path, r"""
+import json
+from hanji import SqliteStore
+from hanji.batch import ingest_many
+
+if __name__ == "__main__":
+    with ingest_many(["in"], db="s.db", workers=2, ocr=False, _split_min_pages=1, _chunk_pages=1) as run:
+        results = sorted(run, key=lambda r: r.index)
+    with SqliteStore("s.db") as store:
+        name = store.get_tree(results[0].document_id).source.name
+    print(json.dumps([[r.status for r in results], run._log, name]))
+""")
+    assert result == [["created", "unchanged"], [["chunk", 0]] * 3 + [["assemble", 0], ["doc", 1]], "a.pdf"]
+
+
+
+def test_the_stored_check_only_reads_and_gives_up_on_a_lock_within_about_a_second(tmp_path):
+    """이미 저장됐나는 읽기 전용 연결로 최신 원본 해시 하나만 읽는다: 없는 상태 파일을 만들지 않고, 다른 연결이 쓰기
+    잠금을 쥐고 있어도(WAL) 바로 읽는다. 읽을 수 없으면(표 없음, 배타 잠금 STORED_TIMEOUT 넘김) 저장되지 않은 것으로
+    본다(쪼개도 조립이 unchanged를 낸다)."""
+    import sqlite3
+
+    from hanji import LocalEngine, SqliteStore
+
+    pdf = text_pdf(tmp_path / "a.pdf", 3)
+    sha = hashlib.sha256(pdf.read_bytes()).hexdigest()
+    db, doc = tmp_path / "s.db", "doc_" + sha[:24]
+    assert not batch._stored(db, doc, sha) and not db.exists()
+    with SqliteStore(db) as store:
+        LocalEngine(store, default_parsers(ocr=False, layout=False)).ingest(str(pdf))
+    writer = sqlite3.connect(db)
+    writer.execute("BEGIN IMMEDIATE")  # 작업 프로세스가 커밋 중인 것처럼
+    try:
+        start = time.monotonic()
+        assert batch._stored(db, doc, sha) and not batch._stored(db, doc, "0" * 64)
+        assert not batch._stored(db, "doc_other", sha)
+        assert time.monotonic() - start < 2
+    finally:
+        writer.rollback()
+        writer.close()
+    other = tmp_path / "other.db"  # 표가 없는 롤백 저널 파일을 배타 잠금
+    holder = sqlite3.connect(other, isolation_level=None)
+    holder.execute("CREATE TABLE t (x)")
+    holder.execute("BEGIN EXCLUSIVE")
+    try:
+        start = time.monotonic()
+        assert not batch._stored(other, doc, sha)
+        assert time.monotonic() - start < batch.STORED_TIMEOUT + 1
+    finally:
+        holder.execute("ROLLBACK")
+        holder.close()
+
+
+def test_a_failed_generation_with_a_final_document_result_does_not_count_toward_the_abort(tmp_path):
+    """작업 2개, 2건마다 새 풀. 초기화가 실패하는 큰 MD 다섯과 계획 뒤 바뀐 PDF(쪼갬), 끝에 보통 MD 하나. 셋째 세대는
+    초기화 실패(실패 세대)와 바뀐 PDF 묶음의 최종 문서 결과(ChangedDuringRun)를 함께 낸다: 문서의 확정 결과가 있으니
+    연속 실패로 세지 않아 배치는 멈추지 않고 끝 문서가 created다(묶음 결과만 낸 실패 세대는 세지 않는다)."""
+    require_split()
+    for i in range(1, 6):
+        write(tmp_path / "in" / f"{i}-bad.md", f"# 지어낸 제목 {i}\n\n" + "지어낸 문단이다. " * 40000)  # 추정이 PDF보다 크다
+    text_pdf(tmp_path / "in" / "big.pdf", 3)
+    write(tmp_path / "in" / "ok.md")
+    result = scenario(tmp_path, r"""
+import json
+from hanji.batch import ingest_many
+
+
+def change(path):
+    if path.endswith("big.pdf"):
+        with open(path, "ab") as f:
+            f.write(b"%% appended")
+
+
+if __name__ == "__main__":
+    with ingest_many(["in"], db="s.db", workers=2, ocr=False, _recycle_every=2, _split_min_pages=1, _chunk_pages=1,
+                     _after_plan=change) as run:
+        results = sorted(run, key=lambda r: r.index)
+    print(json.dumps([[r.status if r.error is None else r.error.type for r in results], run.aborted, run._log]))
+""", env={"HANJI_TEST_WORKER_EXIT": "*-bad.md:init"})
+    statuses, aborted, log = result
+    assert statuses == ["WorkerInitFailed"] * 5 + ["ChangedDuringRun", "created"] and not aborted
+    assert log[:6] == [["doc", 0], ["doc", 1], ["doc", 2], ["doc", 3], ["doc", 4], ["chunk", 5]]
