@@ -109,7 +109,8 @@ def _join(bundles: list[Bundle]) -> str:
 
 
 def _box(tbl: ET.Element) -> ET.Element | None:
-    """정말 1×1인 표(rowCnt·colCnt 1, 칸 하나, 주소 (0,0), span (1,1))의 칸 subList. 아니면 None(보통 표 검증으로)."""
+    """정말 1×1인 표(rowCnt·colCnt 1, 칸 하나, 주소 (0,0), span (1,1))의 칸 subList(없으면 빈 subList: 낼 글자가 없다).
+    아니면 None(보통 표 검증으로)."""
     if number(tbl.get("rowCnt")) != 1 or number(tbl.get("colCnt")) != 1:
         return None
     cells = tbl.findall(f"{TR}/{TC}")
@@ -118,7 +119,10 @@ def _box(tbl: ET.Element) -> ET.Element | None:
     addr, span = cells[0].find(CELL_ADDR), cells[0].find(CELL_SPAN)
     where = (number(addr.get("rowAddr")), number(addr.get("colAddr"))) if addr is not None else (None, None)
     size = (number(span.get("rowSpan"), 1), number(span.get("colSpan"), 1)) if span is not None else (1, 1)
-    return cells[0].find(SUBLIST) if where == (0, 0) and size == (1, 1) else None
+    if where != (0, 0) or size != (1, 1):
+        return None
+    sub = cells[0].find(SUBLIST)
+    return ET.Element(SUBLIST) if sub is None else sub
 
 
 class _Section:

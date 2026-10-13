@@ -103,6 +103,14 @@ def test_only_a_true_one_by_one_table_is_unwrapped_as_a_box():
     assert [r.fallback_reason for r in parsed.regions] == ["table_invalid"] * 3 and count.ok
 
 
+def test_a_true_one_by_one_table_without_a_sublist_emits_nothing():
+    """칸에 subList가 없는 1×1(낼 글자 없음)은 빈 1×1 표 블록이 아니라 아무것도 내지 않는다(칸 안이어도 기록 없음)."""
+    bare = ('<hp:tc header="0" borderFillIDRef="1"><hp:cellAddr colAddr="0" rowAddr="0"/>'
+            '<hp:cellSpan colSpan="1" rowSpan="1"/></hp:tc>')
+    parsed, (count,) = parse(B.para(B.run(B.tbl(1, 1, [bare]))),
+                             B.para(B.run(B.tbl(1, 2, [cell(0, 0, "가"), B.tc(0, 1, B.para(B.run(B.tbl(1, 1, [bare]))))]))))
+    assert [b["kind"] for b in parsed.blocks] == ["table"] and not parsed.regions and count.ok
+
 def test_tables_nested_in_cells_up_to_the_depth_cap_do_not_hit_the_recursion_limit():
     """칸 안 표 조립은 중첩만큼 재귀한다: XML 깊이 상한(256) 안의 가장 깊은 중첩(40겹)은 돌고, 넘으면 ParseError."""
     def nest(levels: int) -> str:

@@ -119,6 +119,15 @@ def test_decoding_refuses_header_only_bombs_damaged_and_unsupported_images():
     assert [b["kind"] for b in parsed.blocks] == ["figure"] and "figure" not in parsed.blocks[0]
 
 
+def test_pictures_just_over_the_pixel_cap_become_figures_without_an_image():
+    """6400만 화소 상한은 Pillow 폭탄 경고(약 8950만)보다 낮아 이 검사가 먼저 걸린다. 상한과 같으면 지나간다(헤더만 있어 깨짐)."""
+    assert images.MAX_IMAGE_PIXELS == 64_000_000 < Image.MAX_IMAGE_PIXELS
+    assert images.to_png(_png_header(8_001, 8_000)) == images.TOO_LARGE
+    assert images.to_png(_png_header(8_000, 8_000)) == images.UNREADABLE
+    parsed, counts = one_picture(_png_header(8_001, 8_000))
+    assert reasons(parsed) == ["figure_image_too_large"] and parsed.assets == {} and counts[0].ok
+    assert [b["kind"] for b in parsed.blocks] == ["figure"] and "figure" not in parsed.blocks[0]
+
 def test_binary_size_limits_and_the_asset_budget_leave_the_figure_without_an_image(monkeypatch):
     monkeypatch.setattr(container, "MAX_BINARY_BYTES", len(B.GRAY_PNG) - 1)
     assert reasons(one_picture(B.GRAY_PNG)[0]) == ["figure_image_too_large"]

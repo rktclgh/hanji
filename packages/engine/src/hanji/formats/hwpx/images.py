@@ -11,7 +11,8 @@ from PIL import Image, UnidentifiedImageError
 from ..pdf.figures import PNG_LEVEL
 
 FORMATS = ("PNG", "JPEG", "BMP", "GIF", "TIFF")  # 허용 디코더(WMF·EMF 등은 지원하지 않는 형식)
-MAX_IMAGE_PIXELS = 100_000_000
+# 화소 상한. Pillow 폭탄 경고(약 8950만)보다 낮아 이 검사가 먼저 걸린다. lab 실문서 가장 큰 그림 5940만 화소는 남는다
+MAX_IMAGE_PIXELS = 64_000_000
 UNSUPPORTED = "figure_image_unsupported"
 TOO_LARGE = "figure_image_too_large"
 UNREADABLE = "figure_image_unreadable"
