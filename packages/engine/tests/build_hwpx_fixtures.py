@@ -132,6 +132,20 @@ def ole() -> str:
     return '<hp:ole id="7" binaryItemIDRef="ole1"/>'
 
 
+def tc(row: int, col: int, *paras: str, span: tuple[int, int] = (1, 1), header: bool = False, fill: int = 1) -> str:
+    """표 칸. span = (rowSpan, colSpan)."""
+    return (f'<hp:tc header="{int(header)}" borderFillIDRef="{fill}"><hp:subList>{"".join(paras)}</hp:subList>'
+            f'<hp:cellAddr colAddr="{col}" rowAddr="{row}"/><hp:cellSpan colSpan="{span[1]}" rowSpan="{span[0]}"/>'
+            f"</hp:tc>")
+
+
+def tbl(rows: int, cols: int, *trs: Sequence[str], caption: str = "", inline: bool = False) -> str:
+    """hp:tbl. trs는 행(hp:tr)마다 칸 목록. inline이면 글자처럼 다루는 개체(treatAsChar)."""
+    return (f'<hp:tbl rowCnt="{rows}" colCnt="{cols}" repeatHeader="1"><hp:sz width="1000" height="1000"/>'
+            f'<hp:pos treatAsChar="{int(inline)}"/>{caption}'
+            + "".join(f"<hp:tr>{''.join(cells)}</hp:tr>" for cells in trs) + "</hp:tbl>")
+
+
 def package(*sections: str, head: str | None = None, items: Sequence[tuple[str, str, str, bool]] = (),
             binaries: Mapping[str, bytes] = (), extra: Mapping[str, bytes] = (), spine: Sequence[str] | None = None,
             mimetype: bytes = MIME) -> bytes:
@@ -235,11 +249,37 @@ FIGURES = section(
     para(run(container(pic("image3"), pic("image1")))),
     para(run(t("글맵시 앞"), textart("지어낸 글맵시"))),
 )
+TABLE_HEAD = header(headings={1: ("OUTLINE", 0)}, fills={2: "#D9D9D9"})
+TABLE = section(
+    para(run(t("표 예제 앞 문단이다."))),
+    para(run(tbl(3, 3, [tc(0, 0, para(run(t("구분"))), header=True), tc(0, 1, para(run(t("상반기"))), header=True),
+                        tc(0, 2, para(run(t("하반기"))), header=True)],
+                 [tc(1, 0, para(run(t("인건비"))), span=(2, 1)), tc(1, 1, para(run(t("1,200")))),
+                  tc(1, 2, para(run(t("1,350"))))],
+                 [tc(2, 1, para(run(t("900")))), tc(2, 2, para(run(t("950"))))],
+                 caption=caption(para(run(t("표 1. 지어낸 예산(단위: 백만원)"))), side="TOP")))),
+    para(run(tbl(2, 2, [tc(0, 0, para(run(t("항목"))), fill=2), tc(0, 1, para(run(t("값"))), fill=2)],
+                 [tc(1, 0, para(run(t("면적")))), tc(1, 1, para(run(t("84㎡"))))],
+                 caption=caption(para(run(t("표 2. 채움으로 정한 머리 행"))))))),
+    para(run(tbl(1, 3, [tc(0, 0, para(run(t("가")))), tc(0, 1, para(run(t("나")))), tc(0, 2, para(run(t("다"))))]))),
+    para(run(tbl(1, 1, [tc(0, 0, para(run(t("상자 안 개요 제목")), pr=1), para(run(t("상자 안 문단이다."))),
+                           para(run(tbl(2, 2, [tc(0, 0, para(run(t("상자 표 머리")))), tc(0, 1, para(run(t("값"))))],
+                                        [tc(1, 0, para(run(t("상자 표 칸")))), tc(1, 1, para(run(t("7"))))]))))]))),
+    para(run(tbl(2, 2, [tc(0, 0, para(run(t("바깥 칸"))),
+                           para(run(tbl(2, 2, [tc(0, 0, para(run(t("안1")))), tc(0, 1, para(run(t("안2"))))],
+                                        [tc(1, 0, para(run(t("안3")))), tc(1, 1, para(run(t("안4"))))])))),
+                        tc(0, 1, para(run(t("상자 앞"), tbl(1, 1, [tc(0, 0, para(run(t("칸 속 상자"))))]))))],
+                 [tc(1, 0, para(run(t("그림 칸"), pic("image1")))), tc(1, 1, para(run(t("끝 칸"))))]))),
+    para(run(t("혼합 문단 앞 "), tbl(2, 2, [tc(0, 0, para(run(t("글자처럼")))), tc(0, 1, para(run(t("둔 표"))))],
+                                     [tc(1, 0, para(run(t("셋")))), tc(1, 1, para(run(t("넷"))))], inline=True),
+             t(" 혼합 문단 뒤"))),
+)
 SAMPLES: dict[str, bytes] = {
     "basic.hwpx": package(*BASIC, head=BASIC_HEAD),
     "headings.hwpx": package(*HEADINGS, head=HEAD_SIZES),
     "empty.hwpx": package(section(para())),
     "figures.hwpx": package(FIGURES, items=FIGURE_ITEMS, binaries=FIGURE_BINARIES),
+    "table.hwpx": package(TABLE, head=TABLE_HEAD, items=FIGURE_ITEMS[:1], binaries={"BinData/image1.png": GRAY_PNG}),
 }
 ROOT = Path(__file__).resolve().parent / "fixtures" / "hwpx"
 

@@ -1,0 +1,580 @@
+{
+  "schema_version": "0.4",
+  "document_id": "fx-hwpx-table",
+  "version": 1,
+  "layer_state": "det",
+  "source": {
+    "name": "table.hwpx",
+    "mime": "application/hwp+zip",
+    "content_hash": "sha256:45636cfc92d0b6aafcf68b8660d27e2aafc8cd5c20fb74b62617de13dc76da84",
+    "page_count": null
+  },
+  "pages": [],
+  "blocks": [
+    {
+      "block_id": "b_0eac1273730908e117ab706c",
+      "content_hash": "c_b77cd62b53dac23fb56b07689a640e38",
+      "order": 0,
+      "kind": "paragraph",
+      "text": "표 예제 앞 문단이다.",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 0
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_92a83eba2856b79f5f831592",
+      "content_hash": "c_07a157674560d3ea5d8a352d2d92699a",
+      "order": 1,
+      "kind": "caption",
+      "text": "표 1. 지어낸 예산(단위: 백만원)",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 1
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_82f3e2d26d28aae23670788c",
+      "content_hash": "c_98ba2c676640c83f1ddc5f0cfcf27e7c",
+      "order": 2,
+      "kind": "table",
+      "text": "구분\t상반기\t하반기\n인건비\t1,200\t1,350\n900\t950",
+      "table": {
+        "n_rows": 3,
+        "n_cols": 3,
+        "cells": [
+          {
+            "row": 0,
+            "col": 0,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "구분",
+            "header": "column",
+            "text_source": "native"
+          },
+          {
+            "row": 0,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "상반기",
+            "header": "column",
+            "text_source": "native"
+          },
+          {
+            "row": 0,
+            "col": 2,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "하반기",
+            "header": "column",
+            "text_source": "native"
+          },
+          {
+            "row": 1,
+            "col": 0,
+            "rowspan": 2,
+            "colspan": 1,
+            "text": "인건비",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 1,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "1,200",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 1,
+            "col": 2,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "1,350",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 2,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "900",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 2,
+            "col": 2,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "950",
+            "header": "none",
+            "text_source": "native"
+          }
+        ]
+      },
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 1
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_a127ccd8a243fda7a5ca6706",
+      "content_hash": "c_58e8df1c9e5df4735719f24c37d158cc",
+      "order": 3,
+      "kind": "table",
+      "text": "항목\t값\n면적\t84㎡",
+      "table": {
+        "n_rows": 2,
+        "n_cols": 2,
+        "cells": [
+          {
+            "row": 0,
+            "col": 0,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "항목",
+            "header": "column",
+            "text_source": "native"
+          },
+          {
+            "row": 0,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "값",
+            "header": "column",
+            "text_source": "native"
+          },
+          {
+            "row": 1,
+            "col": 0,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "면적",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 1,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "84㎡",
+            "header": "none",
+            "text_source": "native"
+          }
+        ]
+      },
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 2
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_3e9ac04a040acb0a116e2755",
+      "content_hash": "c_a382db149136dd7d83fecf82c5481812",
+      "order": 4,
+      "kind": "caption",
+      "text": "표 2. 채움으로 정한 머리 행",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 2
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_4a3e7510d277a059dfddfe2b",
+      "content_hash": "c_ce7836a12b544a3655aa95082826d590",
+      "order": 5,
+      "kind": "table",
+      "text": "가\t나\t다",
+      "table": {
+        "n_rows": 1,
+        "n_cols": 3,
+        "cells": [
+          {
+            "row": 0,
+            "col": 0,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "가",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 0,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "나",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 0,
+            "col": 2,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "다",
+            "header": "none",
+            "text_source": "native"
+          }
+        ]
+      },
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 3
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_b3f4a3c822379f2adaf4f408",
+      "content_hash": "c_691683917dcec0301669bf7a2a26243c",
+      "order": 6,
+      "kind": "heading",
+      "text": "상자 안 개요 제목",
+      "table": null,
+      "figure": null,
+      "level": 1,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 4
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_e1aa5f4300e7cb1ef963a83a",
+      "content_hash": "c_984af696842c3eeb56aa117b1431d062",
+      "order": 7,
+      "kind": "paragraph",
+      "text": "상자 안 문단이다.",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "상자 안 개요 제목"
+      ],
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "상자 안 개요 제목"
+        ],
+        "paragraph_index": 4
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_b765bb65cd452d9a3d8bc05e",
+      "content_hash": "c_b8c9c3ba44d17d9dedd684f151b2742b",
+      "order": 8,
+      "kind": "table",
+      "text": "상자 표 머리\t값\n상자 표 칸\t7",
+      "table": {
+        "n_rows": 2,
+        "n_cols": 2,
+        "cells": [
+          {
+            "row": 0,
+            "col": 0,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "상자 표 머리",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 0,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "값",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 1,
+            "col": 0,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "상자 표 칸",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 1,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "7",
+            "header": "none",
+            "text_source": "native"
+          }
+        ]
+      },
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "상자 안 개요 제목"
+      ],
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "상자 안 개요 제목"
+        ],
+        "paragraph_index": 4
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_4c626409226c899d9ee5ce1d",
+      "content_hash": "c_6939d0f0e22987dc6f177d771859adb5",
+      "order": 9,
+      "kind": "table",
+      "text": "바깥 칸\n\n안1\t안2\n안3\t안4\t상자 앞\n칸 속 상자\n그림 칸\t끝 칸",
+      "table": {
+        "n_rows": 2,
+        "n_cols": 2,
+        "cells": [
+          {
+            "row": 0,
+            "col": 0,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "바깥 칸\n\n안1\t안2\n안3\t안4",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 0,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "상자 앞\n칸 속 상자",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 1,
+            "col": 0,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "그림 칸",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 1,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "끝 칸",
+            "header": "none",
+            "text_source": "native"
+          }
+        ]
+      },
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "상자 안 개요 제목"
+      ],
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "상자 안 개요 제목"
+        ],
+        "paragraph_index": 5
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_92b02cdc109ef87b5564e23c",
+      "content_hash": "c_ee73e2aca982823d0d9547f46b565799",
+      "order": 10,
+      "kind": "figure",
+      "text": "",
+      "table": null,
+      "figure": {
+        "asset": "sha256:6b8d40db394e7dca197ea3ac1f2f7f276baf562693025be34e1d45cd5c7196b7",
+        "mime": "image/png",
+        "width_px": 6,
+        "height_px": 6,
+        "dpi": 6,
+        "category": "image",
+        "caption_block_id": null
+      },
+      "level": null,
+      "section_path": [
+        "상자 안 개요 제목"
+      ],
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "상자 안 개요 제목"
+        ],
+        "paragraph_index": 5
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_c4fd5a39b6f1c1b955caa5ab",
+      "content_hash": "c_300be6edad529e67c7aa78648889a9de",
+      "order": 11,
+      "kind": "paragraph",
+      "text": "혼합 문단 앞  혼합 문단 뒤",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "상자 안 개요 제목"
+      ],
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "상자 안 개요 제목"
+        ],
+        "paragraph_index": 6
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_07865ee5b587b92789b456a1",
+      "content_hash": "c_cc6da31045e912d44b82d2c63cfe8b1a",
+      "order": 12,
+      "kind": "table",
+      "text": "글자처럼\t둔 표\n셋\t넷",
+      "table": {
+        "n_rows": 2,
+        "n_cols": 2,
+        "cells": [
+          {
+            "row": 0,
+            "col": 0,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "글자처럼",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 0,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "둔 표",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 1,
+            "col": 0,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "셋",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 1,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "넷",
+            "header": "none",
+            "text_source": "native"
+          }
+        ]
+      },
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "상자 안 개요 제목"
+      ],
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "상자 안 개요 제목"
+        ],
+        "paragraph_index": 6
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    }
+  ]
+}

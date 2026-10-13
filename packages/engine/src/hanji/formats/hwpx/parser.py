@@ -6,8 +6,9 @@
 살린다(처리 이력 unassigned_text). 장부가 맞지 않으면 처리 이력 coverage_mismatch(파싱은 실패하지 않는다).
 개요 수준을 쓰지 않는 문서는 PDF와 같은 글꼴 크기 규칙으로 제목을 고른다(_finish).
 
-문단에 박힌 개체는 문단 글자 블록 뒤에 나타난 순서대로 블록이 된다(스펙 §5.2): 그림과 캡션(PNG 자산), 묶음 속 개체,
-글맵시, OLE 등은 이미지 없는 그림. 개체 조립은 개체 중첩만큼만 재귀한다(XML 깊이 상한 256이 묶는다)."""
+문단에 박힌 개체는 문단 글자 블록 뒤에 나타난 순서대로 블록이 된다(스펙 §5.2): 표(1×1은 상자라 풀고, 칸 안 개체는
+칸 글자로, 칸 안 그림은 표 뒤 그림 블록), 그림과 캡션(PNG 자산), 묶음 속 개체, 글맵시, OLE 등은 이미지 없는 그림.
+개체 조립은 개체 중첩만큼만 재귀한다(XML 깊이 상한 256이 묶는다)."""
 
 import bisect
 import xml.etree.ElementTree as ET
@@ -15,7 +16,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
-from hanji_contracts import Attempt, FlowLocator, GateCheck, GateResult, RegionRecord
+from hanji_contracts import Attempt, FlowLocator, GateCheck, GateResult, RegionRecord, Table
 
 from ...errors import ParseError
 from ..base import ParsedSource
@@ -24,20 +25,23 @@ from ..pdf.group import (
     BOLD_HEADING_RATIO, CONFIDENCE, HEADING_MAX_LINES, HEADING_RATIO, MAX_LEVEL, RESCUED_CONFIDENCE, step,
 )
 from ..pdf.parser import COVERAGE_MISMATCH, UNASSIGNED_TEXT
-from . import images
+from . import images, tables
 from .container import HC, HH, HP, HS, MIME, OverBudget, Package, TooLarge
 from .header import CharShape, Styles, read_styles
 from .ledger import INLINE, T, Bundle, Counts, Ledger, ink, source_chars
+from .tables import RawCell, number
 
 P, RUN, SUBLIST = f"{HP}p", f"{HP}run", f"{HP}subList"
 LINESEGS, LINESEG, LINE_BREAK = f"{HP}linesegarray", f"{HP}lineseg", f"{HP}lineBreak"
 TEXTART, HIDDEN = f"{HP}textart", f"{HP}hiddenComment"
+TBL, TR, TC, CELL_ADDR, CELL_SPAN = f"{HP}tbl", f"{HP}tr", f"{HP}tc", f"{HP}cellAddr", f"{HP}cellSpan"
 PIC, IMG, CUR_SZ, CAPTION, CONTAINER = f"{HP}pic", f"{HC}img", f"{HP}curSz", f"{HP}caption", f"{HP}container"
 EMBEDDED = frozenset(f"{HP}{n}" for n in ("ole", "chart", "video"))  # 그림 성격 개체(이미지 없는 그림)
 FIGURE_LINKED = "figure_image_linked"  # isEmbeded="0"(외부 연결 그림: 경로를 따라가지 않는다)
 FIGURE_MISSING = "figure_image_missing"  # id가 manifest에 없거나 href 멤버가 zip에 없다
 FIGURE_BUDGET = "figure_image_budget"  # MAX_BINARY_TOTAL 또는 문서 그림 바이트 상한을 넘었다
 EMBEDDED_OBJECT = "embedded_object"
+NESTED_TABLE = "nested_table_flattened"  # 칸 안 표를 칸 글자로 펼쳤다(계약에 중첩 표가 없다)
 SHAPE_TEXT = "shape_text"  # 글상자·도형·글맵시 글자를 문단으로 냈다(v1 범위 밖)
 UNKNOWN_INLINE = "unknown_inline_element"  # hp:t 안 모르는 자식 요소의 글자를 그 자리에 넣었다
 HIDDEN_COMMENT = "hidden_comment"  # 숨은 설명(인쇄되지 않음): 블록에 넣지 않았다
@@ -96,6 +100,19 @@ def _lines(p: ET.Element) -> int:
 
 def _join(bundles: list[Bundle]) -> str:
     return "".join(text for _, text in bundles)
+
+
+def _box(tbl: ET.Element) -> ET.Element | None:
+    """정말 1×1인 표(rowCnt·colCnt 1, 칸 하나, 주소 (0,0), span (1,1))의 칸 subList. 아니면 None(보통 표 검증으로)."""
+    if number(tbl.get("rowCnt")) != 1 or number(tbl.get("colCnt")) != 1:
+        return None
+    cells = tbl.findall(f"{TR}/{TC}")
+    if len(cells) != 1:
+        return None
+    addr, span = cells[0].find(CELL_ADDR), cells[0].find(CELL_SPAN)
+    where = (number(addr.get("rowAddr")), number(addr.get("colAddr"))) if addr is not None else (None, None)
+    size = (number(span.get("rowSpan"), 1), number(span.get("colSpan"), 1)) if span is not None else (1, 1)
+    return cells[0].find(SUBLIST) if where == (0, 0) and size == (1, 1) else None
 
 
 class _Section:
@@ -192,7 +209,9 @@ class _Section:
 
     def obj(self, element: ET.Element, anchor: int) -> None:
         tag = element.tag
-        if tag == PIC:
+        if tag == TBL:
+            self.table(element, anchor)
+        elif tag == PIC:
             self.picture(element, anchor)
         elif tag == CONTAINER:
             for child in element:
@@ -274,6 +293,113 @@ class _Section:
                 reason = result
         self.region("figure", "figure", reason, anchor)
         return None
+
+    def table(self, tbl: ET.Element, anchor: int) -> None:
+        """1×1은 상자: 칸 문단을 이 자리의 본문 문단처럼. 그 밖은 표 블록(칸 안 그림 등은 표 뒤). 캡션은 TOP·LEFT면 앞."""
+        caption = tbl.find(CAPTION)
+        before = caption is not None and caption.get("side") in ("TOP", "LEFT")
+        if caption is not None and before:
+            self.caption(caption, anchor)
+        sub = _box(tbl)
+        if sub is not None:
+            for p in sub.iterfind(P):
+                self.paragraph(p, anchor)
+        else:
+            self.grid(tbl, number(tbl.get("rowCnt")), number(tbl.get("colCnt")), anchor)
+        if caption is not None and not before:
+            self.caption(caption, anchor)
+
+    def grid(self, tbl: ET.Element, rows: int | None, cols: int | None, anchor: int) -> None:
+        after: list[ET.Element] = []
+        cells: list[RawCell] = []
+        parts: list[list[Bundle]] = []
+        for tc in tbl.iterfind(f"{TR}/{TC}"):
+            addr, span, sub = tc.find(CELL_ADDR), tc.find(CELL_SPAN), tc.find(SUBLIST)
+            bundles = self.cell(sub, anchor, after) if sub is not None else []
+            parts.append(bundles)
+            cells.append(RawCell(
+                row=number(addr.get("rowAddr") if addr is not None else None),
+                col=number(addr.get("colAddr") if addr is not None else None),
+                rowspan=number(span.get("rowSpan") if span is not None else None, 1),
+                colspan=number(span.get("colSpan") if span is not None else None, 1),
+                header=tc.get("header") == "1", filled=self.doc.styles.fills.get(tc.get("borderFillIDRef", ""), False),
+                text=_join(bundles).strip()))
+        table = tables.build(rows, cols, cells)
+        if isinstance(table, Table):
+            self.doc.specs.append({"kind": "table", "table": table, "text": table.plain_text(), "confidence": 1.0,
+                                   "state": "det", "text_source": "native", "_anchor": anchor, "_late": self.late})
+            for bundles in parts:
+                self.ledger.put(bundles)
+        else:
+            joined: list[Bundle] = []
+            for i, bundles in enumerate(parts):
+                joined += [(None, "\n")] * bool(i) + bundles
+            self.emit("paragraph", joined, anchor)
+            self.region("table", "table", table, anchor)
+        for element in after:
+            self.obj(element, anchor)
+
+    def cell(self, sub: ET.Element, anchor: int, after: list[ET.Element]) -> list[Bundle]:
+        """칸 글자: 문단을 \\n으로 잇고, 박힌 개체는 문서 순서대로 그 자리에 글자로(앞뒤 \\n). 그림·OLE는 after로(표 뒤
+        블록)."""
+        out: list[Bundle] = []
+        for i, p in enumerate(sub.iterfind(P)):
+            if i:
+                out.append((None, "\n"))
+            for run in p.iterfind(RUN):
+                for child in run:
+                    if child.tag == T:
+                        out.append(self.source_bundle(child, anchor, p))
+                    else:
+                        self.inline(child, anchor, after, out)
+        return out
+
+    def inline(self, element: ET.Element, anchor: int, after: list[ET.Element], out: list[Bundle]) -> None:
+        tag = element.tag
+        inner: list[Bundle] = []
+        if tag == TBL:
+            inner = self.flatten(element, anchor, after)
+        elif tag == CONTAINER:
+            for child in element:
+                self.inline(child, anchor, after, out)
+        elif tag == TEXTART:
+            if element.get("text", "").strip():
+                self.region("shape", "paragraph", SHAPE_TEXT, anchor)
+            inner = [(self.ledger.source_of(element), element.get("text", ""))]
+        elif tag == PIC or tag in EMBEDDED:
+            after.append(element)
+        if inner:
+            out += [(None, "\n"), *inner, (None, "\n")]
+
+    def flatten(self, tbl: ET.Element, anchor: int, after: list[ET.Element]) -> list[Bundle]:
+        """칸 안 표의 글자: 1×1은 그 문단 글자(기록 없음), 그 밖은 Table.plain_text()와 같은 모양(칸 \\t, 행 \\n)과
+        nested_table_flattened. 캡션 글자는 TOP·LEFT면 앞, 아니면 뒤."""
+        out: list[Bundle] = []
+        caption = tbl.find(CAPTION)
+        words = self.cell(caption.find(SUBLIST), anchor, after) if caption is not None and caption.find(
+            SUBLIST) is not None else []
+        before = caption is not None and caption.get("side") in ("TOP", "LEFT")
+        if before and words:
+            out += words + [(None, "\n")]
+        sub = _box(tbl)
+        if sub is not None:
+            out += self.cell(sub, anchor, after)
+        else:
+            self.region("nested-table", "table", NESTED_TABLE, anchor)
+            rows: dict[int, list[tuple[int, list[Bundle]]]] = {}
+            for tc in tbl.iterfind(f"{TR}/{TC}"):
+                addr, sub = tc.find(CELL_ADDR), tc.find(SUBLIST)
+                row = number(addr.get("rowAddr") if addr is not None else None) or 0
+                col = number(addr.get("colAddr") if addr is not None else None) or 0
+                rows.setdefault(row, []).append((col, self.cell(sub, anchor, after) if sub is not None else []))
+            for i, row in enumerate(sorted(rows)):
+                if i:
+                    out.append((None, "\n"))
+                for k, (_, bundles) in enumerate(sorted(rows[row], key=lambda item: item[0])):
+                    out += [(None, "\t")] * bool(k) + bundles
+        if not before and words:
+            out += [(None, "\n")] + words
+        return out
 
     def sizes(self, p: ET.Element) -> Counter[tuple[float, bool]]:
         """문단 런들의 (0.5pt 단위 크기, 굵기)별 공백 아닌 글자 수."""

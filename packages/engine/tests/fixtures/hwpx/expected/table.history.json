@@ -1,0 +1,32 @@
+{
+  "schema_version": "0.4",
+  "document_id": "fx-hwpx-table",
+  "version": 1,
+  "regions": [
+    {
+      "region_id": "s0-p5-nested-table-0",
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "상자 안 개요 제목"
+        ],
+        "paragraph_index": 5
+      },
+      "kind": "table",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "nested_table_flattened"
+    }
+  ]
+}
