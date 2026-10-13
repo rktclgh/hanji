@@ -3,6 +3,8 @@
 import importlib.util
 import json
 import re
+import zipfile
+from io import BytesIO
 from pathlib import Path
 
 import pytest
@@ -42,6 +44,12 @@ def test_fixtures_are_up_to_date():
     assert {p.relative_to(ROOT).as_posix() for p in ROOT.rglob("*") if p.is_file()} >= set(built)
     for rel, data in built.items():
         assert (ROOT / rel).read_bytes() == data, rel
+
+
+@pytest.mark.parametrize("name", NAMES)
+def test_golden_zip_members_pin_create_system_for_cross_os_bytes(name):
+    with zipfile.ZipFile(BytesIO(BUILDER.SAMPLES[name])) as z:
+        assert {info.create_system for info in z.infolist()} == {3}
 
 
 @pytest.mark.parametrize("name", NAMES)

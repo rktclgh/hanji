@@ -118,7 +118,9 @@ def package(*sections: str, head: str | None = None, items: Sequence[tuple[str, 
     buf = BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as z:
         for name, data in members:
-            z.writestr(zipfile.ZipInfo(name, WHEN), data)
+            info = zipfile.ZipInfo(name, WHEN)
+            info.create_system = 3  # 만든 OS 표시를 고정(Windows 기본 0이면 헤더 바이트가 달라진다)
+            z.writestr(info, data)
     return buf.getvalue()
 
 
