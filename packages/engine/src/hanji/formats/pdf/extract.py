@@ -14,7 +14,7 @@ import math
 import re
 import threading
 import warnings
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -123,22 +123,28 @@ def open_pdf(data: bytes, name: str) -> pdfium.PdfDocument:
         raise ParseError(f"invalid PDF: {exc}", name) from None
 
 
-def extract_pages(data: bytes, name: str) -> tuple[PageText, ...]:
-    """쪽이 없거나(PDFium은 대개 열기부터 실패) 쪽을 읽지 못하면 ParseError."""
+def extract_pages(data: bytes, name: str, indexes: Sequence[int] | None = None) -> tuple[PageText, ...]:
+    """쪽이 없거나(PDFium은 대개 열기부터 실패) 쪽을 읽지 못하면 ParseError. indexes가 있으면 그 원본 쪽(0부터)만 그
+    순서로 읽는다: 쪽 번호·Char.id는 전체 추출과 같다(없는 쪽 순번은 ParseError). 한글 손실 검사(_HangulCheck)는 문서
+    전체를 누적해 보는 검사라(다른 쪽의 렌더 가능한 한글이 결과를 바꾼다) indexes가 있으면 하지 않는다. 그 결과로
+    문서를 저장하는 조립(parse)의 전체 추출이 검사한다."""
     with PDFIUM_LOCK:
         pdf = open_pdf(data, name)
         try:
             if len(pdf) == 0:
                 raise ParseError("PDF has no pages", name)
             pages = []
-            check = _HangulCheck()
-            for index in range(len(pdf)):
+            check = _HangulCheck() if indexes is None else None
+            for index in range(len(pdf)) if indexes is None else indexes:
                 location = f"{name}:{index + 1}"
+                if not 0 <= index < len(pdf):
+                    raise ParseError("PDF has no such page", location)
                 try:
                     pages.append(_page(pdf, index, location, check))
                 except pdfium.PdfiumError as exc:
                     raise ParseError(f"invalid PDF page: {exc}", location) from None
-            check.raise_if_lost()
+            if check is not None:
+                check.raise_if_lost()
             return tuple(pages)
         finally:
             pdf.close()
@@ -204,7 +210,7 @@ def _address(handle: object) -> int:
     return ctypes.cast(handle, ctypes.c_void_p).value or 0
 
 
-def _page(pdf: pdfium.PdfDocument, index: int, location: str, check: "_HangulCheck") -> PageText:
+def _page(pdf: pdfium.PdfDocument, index: int, location: str, check: "_HangulCheck | None") -> PageText:
     page = pdf[index]
     try:
         width, height = page.get_size()
@@ -220,7 +226,8 @@ def _page(pdf: pdfium.PdfDocument, index: int, location: str, check: "_HangulChe
             chars = tuple(_chars(textpage, box, rotation, seen, hangul_fonts))
         finally:
             textpage.close()
-        check.add_page(pdf, page, seen, hangul_fonts, location)
+        if check is not None:
+            check.add_page(pdf, page, seen, hangul_fonts, location)
         boxes = list(_image_boxes(page))  # 한 번만 훑어 image_coverage·images가 같이 쓴다
         return PageText(page=index + 1, width_pt=width, height_pt=height, rotation=rotation, chars=chars,
                         image_coverage=tuple(_image_coverage(boxes, box)),
