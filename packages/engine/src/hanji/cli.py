@@ -16,9 +16,10 @@ from typing import Any
 
 from hanji_contracts import DocumentTree
 
+from . import errors
 from . import models as model_files
 from . import resources
-from .batch import IngestResult, IngestRun, ingest_many
+from .batch import IngestResult, IngestRun, ingest_many, parse_run
 from .engine import LocalEngine
 from .errors import HanjiError, exit_code
 from .export import asset_name, to_markdown
@@ -39,6 +40,9 @@ OCR_HELP = ("스캔 쪽과 글자층이 깨진(unreliable) 쪽의 OCR을 끈다.
 LAYOUT_HELP = ("레이아웃 모델(선·도형 그림·캡션)을 끈다. 사진(이미지 객체)은 그대로 그림 (기본: 레이아웃 추가 설치가 있으면 "
                "켠다. 원본이 같으면 저장된 버전을 쓰니 바꾸려면 parse --force)")
 FETCH_TO_HELP = "받을 폴더 (기본: 사용자 캐시). 폐쇄망은 이 폴더를 옮겨 HANJI_MODEL_DIR로 가리킨다"
+MEMORY_HELP = "메모리 예산(8G, 512M, 1.5GiB, 바이트 수) (기본: 알아낸 사용 가능 메모리의 80%%)"
+PARSE_WORKERS_HELP = ("큰 PDF(16쪽 이상, OCR·레이아웃을 쓸 때)를 쪽 묶음으로 나눠 돌릴 작업 프로세스 상한 (기본: 메모리 예산과 "
+                      "CPU 수로 정하고 묶음 수 이하로 줄인다. 1이면 나누지 않는다)")
 ASSETS_HELP = ("그림 이미지를 이 폴더에 <sha256 앞 16자>.png로 쓴다(--format md면 마크다운이 그 파일을 가리킨다. 링크는 "
                "--out 파일 폴더 기준 상대 경로, 표준 출력이면 현재 폴더 기준)")
 
@@ -103,6 +107,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parse.add_argument("--force", action="store_true", help="원본이 같아도 다시 파싱")
     parse.add_argument("--no-ocr", action="store_true", help=OCR_HELP)
     parse.add_argument("--no-layout", action="store_true", help=LAYOUT_HELP)
+    parse.add_argument("--workers", type=_positive, help=PARSE_WORKERS_HELP)
+    parse.add_argument("--max-memory", type=_size, metavar="SIZE", help=MEMORY_HELP)
     export = sub.add_parser("export", parents=[common, output], help="저장된 문서 트리를 출력")
     export.add_argument("document_id")
     export.add_argument("--version", type=_positive)
@@ -126,8 +132,7 @@ def _build_parser() -> argparse.ArgumentParser:
     ingest.add_argument("paths", nargs="+", metavar="PATH", help="파일(확장자와 상관없이) 또는 폴더(지원 확장자만)")
     ingest.add_argument("--recursive", action="store_true", help="폴더의 하위 폴더까지 고른다")
     ingest.add_argument("--workers", type=_positive, help="작업 프로세스 상한 (기본: 메모리 예산과 CPU 수로 정한다)")
-    ingest.add_argument("--max-memory", type=_size, metavar="SIZE",
-                        help="메모리 예산(8G, 512M, 1.5GiB, 바이트 수) (기본: 알아낸 사용 가능 메모리의 80%%)")
+    ingest.add_argument("--max-memory", type=_size, metavar="SIZE", help=MEMORY_HELP)
     ingest.add_argument("--force", action="store_true", help="원본이 같아도 다시 파싱")
     ingest.add_argument("--no-ocr", action="store_true", help=OCR_HELP)
     ingest.add_argument("--no-layout", action="store_true", help=LAYOUT_HELP)
@@ -287,6 +292,40 @@ def _summary(counts: Counter[str], run: IngestRun, seconds: float) -> str:
     return f"{APP_NAME}: " + "; ".join(parts)
 
 
+def _error_line(error: Any) -> str:
+    """parse가 예외를 알리던 것과 같은 한 줄: 엔진 오류는 문구만, 그 밖은 '클래스: 문구'."""
+    cls = getattr(errors, error.type, None)
+    known = isinstance(cls, type) and issubclass(cls, HanjiError)
+    return f"{APP_NAME}: {error.message}" if known else f"{APP_NAME}: {error.type}: {error.message}"
+
+
+def _parse_split(args: argparse.Namespace, run: IngestRun) -> int:
+    """쪼갠 parse: 문서 하나를 작업 프로세스들이 쪽 묶음으로 나눠 돌린 뒤 지금처럼 트리를 출력한다. 표준 오류에 경고와
+    요약 한 줄(작업 수·ORT 스레드·예산). 종료 코드는 지금 parse와 같다: 실패한 문서의 error.code, worker_crashed 1,
+    Ctrl+C 130."""
+    for warning in run.warnings:
+        print(f"{APP_NAME}: warning: {warning}", file=sys.stderr, flush=True)
+    budget = "unknown" if run.budget is None else resources.format_size(run.budget)
+    threads = "default" if run.ort_threads is None else run.ort_threads
+    print(f"{APP_NAME}: split into page chunks; workers {run.workers}, ORT threads {threads}, memory budget {budget}",
+          file=sys.stderr, flush=True)
+    with run:
+        try:
+            results = list(run)
+        except KeyboardInterrupt:
+            run.close()
+            return EXIT_INTERRUPTED
+    (result,) = results
+    if result.status in ("created", "unchanged"):
+        assert result.document_id is not None and result.version is not None
+        with SqliteStore(resolve_db(args.db)) as store:
+            _emit_tree(store.get_tree(result.document_id, result.version), args)
+        return EXIT_OK
+    assert result.error is not None
+    print(_error_line(result.error), file=sys.stderr)
+    return result.error.code
+
+
 def _ingest(args: argparse.Namespace) -> int:
     """문서마다 JSON 한 줄(끝난 순서, 줄마다 flush), 표준 오류에 경고와 요약. 종료 코드: 0 모두 created·unchanged,
     6 failed·worker_crashed가 있음, 7 배치 중단, 130 Ctrl+C."""
@@ -361,6 +400,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                else args.out if args.command in ("parse", "export") else None)
         if out and Path(out).is_dir():  # 저장소·그림 파일을 건드리기 전에 막는다(view는 기본 출력 경로도)
             raise IsADirectoryError(f"output path is a directory: {out}")
+        if args.command == "parse":  # 쪼갤 큰 PDF만 작업 프로세스로(갈림길은 스케줄러 사전 확인보다 먼저), 나머지는 지금 경로
+            run = parse_run(args.file, db=args.db, document_id=args.document_id, force=args.force,
+                            ocr=False if args.no_ocr else None, layout=False if args.no_layout else None,
+                            workers=args.workers, max_memory=args.max_memory)
+            if run is not None:
+                return _parse_split(args, run)
         with SqliteStore(resolve_db(args.db)) as store:
             no_ocr, no_layout = getattr(args, "no_ocr", False), getattr(args, "no_layout", False)
             parsers = (default_parsers(ocr=False if no_ocr else None, layout=False if no_layout else None)
