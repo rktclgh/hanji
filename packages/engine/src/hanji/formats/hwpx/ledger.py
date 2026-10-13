@@ -21,12 +21,11 @@ def ink(text: str) -> int:
 
 
 def source_chars(t: ET.Element) -> int:
-    """hp:t 출처의 n(x): t.text + 모르는 자식의 글자(문서 순서) + 자식 뒤 글자에서 공백 아닌 코드 포인트 수.
+    """hp:t 출처의 n(x): t.text + 자식 요소 안 글자(문서 순서) + 자식 뒤 글자에서 공백 아닌 코드 포인트 수.
     대치 글자는 모두 공백이라 들지 않는다. 블록 글자를 만드는 쪽과 따로 센다(같은 함수를 쓰면 빠뜨림이 감춰진다)."""
     count = ink(t.text or "")
     for child in t:
-        if child.tag not in INLINE:
-            count += ink("".join(child.itertext()))
+        count += ink("".join(child.itertext()))  # 아는 인라인 요소 안 글자도 센다(대치 글자는 공백이라 들지 않는다)
         count += ink(child.tail or "")
     return count
 

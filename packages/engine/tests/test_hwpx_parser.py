@@ -201,3 +201,14 @@ def test_hidden_source_put_into_a_block_is_a_mismatch(monkeypatch):
     count = counts[0]
     assert (count.source, count.in_blocks, count.hidden, count.doubled, count.partial) == (4, 4, 2, 1, 0)
     assert not count.ok and "coverage_mismatch" in reasons(parsed)  # 4 != 4 + 2
+
+
+def test_negative_outline_level_is_clamped_to_heading_level_one():
+    parsed, _ = parse(B.section(B.para(B.run(B.t("음수 수준")), pr=1)), head=B.header(headings={1: ("OUTLINE", -1)}))
+    assert [(b["kind"], b["level"]) for b in parsed.blocks] == [("heading", 1)]
+
+
+def test_text_inside_a_known_inline_element_is_kept_once_with_a_record():
+    parsed, counts = parse(B.section(B.para(B.run(B.t("가", "<hp:tab>엑스</hp:tab>", "나")))))
+    assert texts(parsed) == [("paragraph", "가\t엑스나")]
+    assert reasons(parsed) == ["unknown_inline_element"] and counts[0].ok and counts[0].source == 4

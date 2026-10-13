@@ -56,12 +56,10 @@ def _t_text(t: ET.Element) -> tuple[str, bool]:
     parts = [t.text or ""]
     unknown = False
     for child in t:
-        if child.tag in INLINE:
-            parts.append(INLINE[child.tag])
-        else:
-            inner = "".join(child.itertext())
-            parts.append(inner)
-            unknown = unknown or bool(inner.strip())
+        # 아는 인라인 요소는 대치 글자를 넣고, 안에 글자가 있으면(모르는 자식처럼) 그 자리에 잇고 기록한다
+        inner = "".join(child.itertext())
+        parts.append(INLINE.get(child.tag, "") + inner)
+        unknown = unknown or bool(inner.strip())
         parts.append(child.tail or "")
     return "".join(parts), unknown
 
@@ -139,7 +137,7 @@ class _Section:
         bundles = self.bundles(p, anchor)
         kind, level = self.doc.styles.headings.get(p.get("paraPrIDRef", ""), ("NONE", 0))
         if kind == "OUTLINE":
-            self.emit("heading", bundles, anchor, level=min(level + 1, MAX_LEVEL))
+            self.emit("heading", bundles, anchor, level=max(1, min(level + 1, MAX_LEVEL)))  # 음수 수준도 1~6 안으로
         elif kind in ("NUMBER", "BULLET"):
             self.emit("list_item", bundles, anchor)
         else:
