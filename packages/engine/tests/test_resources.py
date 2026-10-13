@@ -365,16 +365,19 @@ def test_parse_size_rejects_unicode_look_alike_units(text):
 SPEC = resources.COSTS["both"]  # 실측 상수(OCR + 레이아웃)
 
 
-def test_config_and_estimate_cover_the_four_settings_and_both_formats():
-    """설정 4가지는 상수가 있고, 추가 몫 = 쪽 몫 × 쪽 수 + 바이트 배수 × 크기(배수는 PDF·그 밖 따로, MD는 쪽 0)."""
+def test_config_and_estimate_cover_the_four_settings_and_the_formats():
+    """설정 4가지는 상수가 있고, 추가 몫 = 쪽 몫 × 쪽 수 + 바이트 배수 × 크기(배수는 PDF·HWPX·그 밖 따로, PDF 밖은 쪽 0)."""
     assert {(o, la): resources.config_of(o, la) for o in (False, True) for la in (False, True)} == {
         (False, False): "none", (False, True): "layout", (True, False): "ocr", (True, True): "both"}
     assert set(resources.COSTS) == {"none", "layout", "ocr", "both"}
     assert all(c.base > 0 and c.per_page > 0 for c in resources.COSTS.values())
     cost = resources.Cost(base=1000, per_page=10)
-    pdf, other = resources.BYTES_FACTOR["pdf"], resources.BYTES_FACTOR["other"]
-    assert resources.estimate(cost, 12, 1000, pdf=True) == 12 * 10 + pdf * 1000
-    assert resources.estimate(cost, 0, 1000, pdf=False) == other * 1000
+    pdf, hwpx, other = (resources.BYTES_FACTOR[k] for k in ("pdf", "hwpx", "other"))
+    assert resources.estimate(cost, 12, 1000, "pdf") == 12 * 10 + pdf * 1000
+    assert resources.estimate(cost, 0, 1000, "hwpx") == hwpx * 1000
+    assert resources.estimate(cost, 0, 1000, "other") == other * 1000
+    assert hwpx > other and [resources.byte_kind(p) for p in ("a.PDF", "b.HwPx", "c.md", "d")] == [
+        "pdf", "hwpx", "other", "other"]
 
 
 @pytest.mark.parametrize(("budget", "cores", "workers"), [

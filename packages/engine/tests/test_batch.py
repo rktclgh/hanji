@@ -181,11 +181,12 @@ def test_plan_hashes_the_file_and_estimates_its_extra_memory(tmp_path):
     md = write(tmp_path / "a.md")
     broken = tmp_path / "broken.pdf"
     broken.write_bytes(b"%PDF-1.4 not really")
-    plans = [batch._plan(batch._Entry(0, str(p), str(p)), cost) for p in (md, pdf, broken)]
-    assert [d.sha for d in plans] == [hashlib.sha256(p.read_bytes()).hexdigest() for p in (md, pdf, broken)]
+    hwpx = FIXTURES / "hwpx" / "inputs" / "basic.hwpx"
+    plans = [batch._plan(batch._Entry(0, str(p), str(p)), cost) for p in (md, pdf, broken, hwpx)]
+    assert [d.sha for d in plans] == [hashlib.sha256(p.read_bytes()).hexdigest() for p in (md, pdf, broken, hwpx)]
     by = resources.BYTES_FACTOR
     assert [d.extra for d in plans] == [by["other"] * md.stat().st_size, 2 * 10 + by["pdf"] * pdf.stat().st_size,
-                                        10 + by["pdf"] * broken.stat().st_size]
+                                        10 + by["pdf"] * broken.stat().st_size, by["hwpx"] * hwpx.stat().st_size]
 
 
 @pytest.fixture

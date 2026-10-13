@@ -277,7 +277,10 @@ COSTS: dict[Config, Cost] = {
     "ocr": Cost(base=1889 * MiB, per_page=11 * MiB),
     "both": Cost(base=1889 * MiB, per_page=11 * MiB),
 }
-BYTES_FACTOR = {"pdf": 2, "other": 20}  # 입력 바이트마다(큰 MD는 입력의 약 20배를 쓴다)
+# 입력 바이트마다. 큰 MD는 입력의 약 20배를 쓴다. HWPX는 압축을 풀고 XML 트리·그림 디코드가 함께 있어 더 크다: lab
+# 12건(2026-10-14 macOS arm64, 문서마다 새 프로세스, 새 SqliteStore에 force 수집 전후 최대 메모리 차이) 최대 137.0배 × 1.5를
+# 올림. 잰 세트를 덮는 값이지 새 문서의 상한이 아니다
+BYTES_FACTOR = {"pdf": 2, "hwpx": 206, "other": 20}
 
 
 def config_of(ocr: bool, layout: bool) -> Config:
@@ -285,9 +288,14 @@ def config_of(ocr: bool, layout: bool) -> Config:
     return ("both" if layout else "ocr") if ocr else ("layout" if layout else "none")
 
 
-def estimate(cost: Cost, pages: int, size: int, pdf: bool) -> int:
-    """돌고 있는 문서 하나의 추가 몫 = 쪽 몫 × 쪽 수 + 바이트 배수 × 파일 크기(MD는 쪽 수 0)."""
-    return cost.per_page * pages + BYTES_FACTOR["pdf" if pdf else "other"] * size
+def byte_kind(path: str) -> str:
+    """파일 확장자(대소문자 무시) → BYTES_FACTOR 키."""
+    return {".pdf": "pdf", ".hwpx": "hwpx"}.get(os.path.splitext(path)[1].lower(), "other")
+
+
+def estimate(cost: Cost, pages: int, size: int, kind: str) -> int:
+    """돌고 있는 문서 하나의 추가 몫 = 쪽 몫 × 쪽 수 + 바이트 배수(kind: byte_kind) × 파일 크기(PDF 밖은 쪽 수 0)."""
+    return cost.per_page * pages + BYTES_FACTOR[kind] * size
 
 
 def plan_workers(budget: int | None, cost: Cost, cores: int, requested: int | None,

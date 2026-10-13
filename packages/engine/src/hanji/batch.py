@@ -221,9 +221,9 @@ def _plan(entry: _Entry, cost: resources.Cost) -> _Doc:
         while chunk := file.read(READ_CHUNK):
             digest.update(chunk)
             size += len(chunk)
-    pdf = os.path.splitext(entry.path)[1].lower() == ".pdf"
-    pages = _pdf_pages(entry.path) if pdf else 0
-    return _Doc(entry, digest.hexdigest(), resources.estimate(cost, pages, size, pdf), pages=pages, size=size)
+    kind = resources.byte_kind(entry.path)
+    pages = _pdf_pages(entry.path) if kind == "pdf" else 0
+    return _Doc(entry, digest.hexdigest(), resources.estimate(cost, pages, size, kind), pages=pages, size=size)
 
 
 def _stored(db: str | os.PathLike[str], document_id: str, sha: str) -> bool:
