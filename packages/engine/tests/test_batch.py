@@ -1321,7 +1321,8 @@ def test_the_stored_check_only_reads_and_gives_up_on_a_lock_within_about_a_secon
         start = time.monotonic()
         assert batch._stored(db, doc, sha) and not batch._stored(db, doc, "0" * 64)
         assert not batch._stored(db, "doc_other", sha)
-        assert time.monotonic() - start < 10  # 넉넉한 상한: 저장소를 쓰기로 열면 60초 넘게 막힌다(느린 CI 러너 대비)
+        # 넉넉한 상한: 저장소를 쓰기로 열면 60초 넘게 막힌다(느린 CI 러너에서 2.2초를 봤다)
+        assert time.monotonic() - start < 10
     finally:
         writer.rollback()
         writer.close()
@@ -1332,7 +1333,7 @@ def test_the_stored_check_only_reads_and_gives_up_on_a_lock_within_about_a_secon
     try:
         start = time.monotonic()
         assert not batch._stored(other, doc, sha)
-        assert time.monotonic() - start < batch.STORED_TIMEOUT + 9  # 넉넉한 상한(느린 CI 러너에서 2.2초를 봤다)
+        assert time.monotonic() - start < batch.STORED_TIMEOUT + 9  # 넉넉한 상한(느린 CI 러너)
     finally:
         holder.execute("ROLLBACK")
         holder.close()
