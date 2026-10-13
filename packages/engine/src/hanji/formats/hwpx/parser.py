@@ -73,8 +73,8 @@ def _t_text(t: ET.Element) -> tuple[str, bool]:
 def _lines(p: ET.Element) -> int:
     """저장된 표시 줄 수(linesegarray의 lineseg 수), 없으면 줄바꿈 수 + 1."""
     segs = p.find(LINESEGS)
-    if segs is not None:
-        return len(segs.findall(LINESEG))
+    if segs is not None and (count := len(segs.findall(LINESEG))):
+        return count
     return sum(1 for run in p.iterfind(RUN) for t in run.iterfind(T) for _ in t.iterfind(LINE_BREAK)) + 1
 
 
@@ -151,8 +151,7 @@ class _Section:
         bundles = self.bundles(p, anchor)
         kind, level = self.doc.styles.headings.get(p.get("paraPrIDRef", ""), ("NONE", 0))
         if kind == "OUTLINE":
-            # 음수 수준도 1~6 안으로
-            if self.emit("heading", bundles, anchor, level=max(1, min(level + 1, MAX_LEVEL))):
+            if self.emit("heading", bundles, anchor, level=max(1, min(level + 1, MAX_LEVEL))):  # 음수 수준도 1~6 안으로
                 self.doc.outline = True
         elif kind in ("NUMBER", "BULLET"):
             self.emit("list_item", bundles, anchor, _sizes=self.sizes(p))
@@ -247,8 +246,9 @@ def _headings_by_size(specs: list[dict[str, Any]]) -> None:
               and spec["_size"] >= body * (BOLD_HEADING_RATIO if spec["_bold"] else HEADING_RATIO)]
     ranks = sorted({spec["_size"] for spec in chosen}, reverse=True)
     for spec in chosen:
+        # 제목은 한 줄로(PDF처럼 줄을 공백으로 잇는다): 줄바꿈이 목록·제목 경로·마크다운 제목을 깨지 않게
         spec.update(kind="heading", level=min(ranks.index(spec["_size"]) + 1, MAX_LEVEL),
-                    confidence=CONFIDENCE["heading"])
+                    text=" ".join(spec["text"].split()), confidence=CONFIDENCE["heading"])
 
 
 def _finish(doc: _Doc) -> tuple[tuple[dict[str, Any], ...], tuple[RegionRecord, ...]]:

@@ -213,14 +213,15 @@ def test_text_inside_a_known_inline_element_is_kept_once_with_a_record():
     assert texts(parsed) == [("paragraph", "가\t엑스나")]
     assert reasons(parsed) == ["unknown_inline_element"] and counts[0].ok and counts[0].source == 4
 
+
 SIZES = B.header(chars={1: (1600, False), 2: (1100, True), 3: (1300, False), 4: (2000, False), 5: (1050, True)},
                  headings={1: ("OUTLINE", 0)})
 BODY = "본문 크기로 쓴 지어낸 문단이다. 글자 수가 가장 많다."
 
 
 def test_without_outline_levels_large_short_paragraphs_are_headings_by_size():
-    """본문 10pt. 20pt·16pt 짧은 문단 → 제목 1·2(크기 순위), 16pt 3줄 → 문단, 굵은 11pt(1.1배 ≥ 1.05) → 제목 3,
-    굵지 않은 13pt(1.3배)도 제목, 굵은 10.5pt(1.05배)는 제목, 첫 런만 크고 대부분 본문인 문단 → 문단."""
+    """본문 10pt. 20pt·16pt 짧은 문단 → 제목 1·2(크기 순위), 16pt 3줄 → 문단, 굵지 않은 13pt(1.3배) → 제목 3,
+    굵은 11pt(1.1배 ≥ 1.05) → 제목 4, 굵은 10.5pt(1.05배) → 제목 5, 첫 런만 크고 대부분 본문인 문단 → 문단."""
     s = B.section(B.para(B.run(B.t("가장 큰 제목"), char=4), lines=1),
                   B.para(B.run(B.t(BODY)), lines=1),
                   B.para(B.run(B.t("큰 제목"), char=1), lines=2),
@@ -252,10 +253,36 @@ def test_the_representative_size_is_weighted_by_characters_and_bold_needs_a_majo
 def test_line_count_falls_back_to_line_breaks_and_outline_documents_skip_the_size_rule():
     s = B.section(B.para(B.run(B.t(BODY * 2))),
                   B.para(B.run(B.t("큰", B.line_break(), "두 줄", B.line_break(), "세 줄"), char=1)),
-                  B.para(B.run(B.t("큰", B.line_break(), "두 줄"), char=1)))
-    parsed, _ = parse(s, head=SIZES)
-    assert [b["kind"] for b in parsed.blocks] == ["paragraph", "paragraph", "heading"]
+                  B.para(B.run(B.t("큰", B.line_break(), "두 줄"), char=1)),
+                  B.para(B.run(B.t("큰", B.line_break(), "두", B.line_break(), "세 줄"), char=1), lines=0),
+                  B.para(B.run(B.t("뒤따르는 본문"))))
+    parsed, counts = parse(s, head=SIZES)
+    assert [b["kind"] for b in parsed.blocks] == ["paragraph", "paragraph", "heading", "paragraph", "paragraph"]
+    assert parsed.blocks[2]["text"] == "큰 두 줄"  # 줄바꿈은 공백 하나로(마크다운 제목이 깨지지 않는다)
+    assert parsed.blocks[-1]["section_path"] == ("큰 두 줄",)
+    assert counts[0].ok  # 글자 장부는 원문 글자로 센다
     parsed, _ = parse(B.section(B.para(B.run(B.t("개요 제목")), pr=1), B.para(B.run(B.t(BODY * 2))),
                                 B.para(B.run(B.t("큰 글자"), char=1), lines=1)), head=SIZES)
     assert [(b["kind"], b.get("level"), b["confidence"]) for b in parsed.blocks] == [
         ("heading", 1, 1.0), ("paragraph", None, 1.0), ("paragraph", None, 1.0)]
+
+
+SHAPES = B.header(chars={2: (1100, True), 5: (1050, True), 6: (1100, False)})
+
+
+def test_bold_is_judged_by_character_majority_not_by_any_or_first_run():
+    """다수 크기 11pt인데 굵은 글자가 소수 → 굵지 않은 문단(11 < 11.5) → 문단. 굵은 글자가 과반이면 첫 런이 굵지
+    않아도 굵은 문단(10.5 ≥ 10.5) → 제목."""
+    s = B.section(B.para(B.run(B.t(BODY * 2))),
+                  B.para(B.run(B.t("열한 포인트 보통 굵기 문장"), char=6), B.run(B.t("굵게"), char=2), lines=1),
+                  B.para(B.run(B.t("보통"), char=0), B.run(B.t("굵은 글자가 과반"), char=5), lines=1))
+    parsed, _ = parse(s, head=SHAPES)
+    assert [b["kind"] for b in parsed.blocks] == ["paragraph", "paragraph", "heading"]
+
+
+def test_heading_levels_fold_at_six():
+    sizes = {k: (1100 + 100 * k, False) for k in range(1, 8)}  # 12pt ~ 18pt, 일곱 가지
+    s = B.section(B.para(B.run(B.t(BODY * 3))),
+                  *(B.para(B.run(B.t(f"제목 {k}"), char=k), lines=1) for k in range(7, 0, -1)))
+    parsed, _ = parse(s, head=B.header(chars=sizes))
+    assert [b.get("level") for b in parsed.blocks] == [None, 1, 2, 3, 4, 5, 6, 6]
