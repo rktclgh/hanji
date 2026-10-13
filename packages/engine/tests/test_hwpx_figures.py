@@ -9,7 +9,7 @@ from pathlib import Path
 from PIL import Image, PngImagePlugin
 
 from hanji.core import build_tree, check_assets
-from hanji.formats.hwpx import container, images
+from hanji.formats.hwpx import container, images, parser
 from hanji.formats.hwpx.parser import HwpxParser
 from hanji.formats.pdf import figures
 from hanji_contracts import DocumentTree, SourceInfo
@@ -166,3 +166,34 @@ def test_deeply_nested_groups_do_not_hit_the_recursion_limit():
                      binaries={"BinData/image1.png": B.GRAY_PNG})
     parsed = HwpxParser().parse(data, "a.hwpx")
     assert [b["kind"] for b in parsed.blocks] == ["figure"] and len(parsed.assets) == 1
+
+
+def test_a_png_refused_by_the_asset_budget_is_not_kept_and_later_references_have_no_image(monkeypatch):
+    first = images.to_png(B.GRAY_PNG)
+    monkeypatch.setattr(figures, "ASSET_LIMIT", len(first.data))  # 첫 그림만 들어간다
+    docs = []
+    finish = parser._finish
+    monkeypatch.setattr(parser, "_finish", lambda doc: docs.append(doc) or finish(doc))
+    data = B.package(B.section(B.para(B.run(B.pic("image1"))), B.para(B.run(B.pic("image2"))),
+                               B.para(B.run(B.pic("image2")))),
+                     items=[("image1", "BinData/image1.png", "image/png", True),
+                            ("image2", "BinData/image2.png", "image/png", True)],
+                     binaries={"BinData/image1.png": B.GRAY_PNG, "BinData/image2.png": B.RGBA_PNG})
+    parsed = HwpxParser().parse(data, "a.hwpx")
+    assert [("figure" in b) for b in parsed.blocks] == [True, False, False] and len(parsed.assets) == 1
+    assert reasons(parsed) == ["figure_image_budget", "figure_image_budget"]
+    (doc,) = docs
+    assert doc.pictures["BinData/image2.png"] == "figure_image_budget"
+    assert [href for href, v in doc.pictures.items() if isinstance(v, images.Png)] == ["BinData/image1.png"]
+
+
+def test_a_picture_inside_a_caption_is_not_silently_lost():
+    inner = B.pic("image1")
+    data = B.package(B.section(B.para(B.run(B.pic("image1", B.caption(B.para(B.run(B.t("그림 4. 지어낸 캡션"), inner))))))),
+                     items=[("image1", "BinData/image1.png", "image/png", True)],
+                     binaries={"BinData/image1.png": B.GRAY_PNG})
+    parsed, counts = HwpxParser()._parse(data, "a.hwpx")
+    assert [b["kind"] for b in parsed.blocks] == ["figure", "caption", "figure"]
+    assert parsed.blocks[0]["figure"]["caption_ref"] == 1 and "figure" in parsed.blocks[2]
+    assert parsed.blocks[1]["text"] == "그림 4. 지어낸 캡션" and len(parsed.assets) == 1
+    assert counts[0].ok and parsed.regions == ()

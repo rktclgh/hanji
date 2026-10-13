@@ -214,14 +214,19 @@ class _Section:
         return spec
 
     def caption(self, caption: ET.Element, anchor: int) -> dict[str, Any] | None:
-        """캡션 subList 문단 글자를 \\n으로 이은 caption 블록(낸 명세, 공백뿐이면 None)."""
+        """캡션 subList 문단 글자를 \\n으로 이은 caption 블록(낸 명세, 공백뿐이면 None). 캡션 문단에 박힌 개체는
+        캡션 블록 뒤에 블록으로 낸다(조용히 잃지 않는다)."""
         sub = caption.find(SUBLIST)
+        paras = list(sub.iterfind(P)) if sub is not None else []
         bundles: list[Bundle] = []
-        for i, p in enumerate(sub.iterfind(P) if sub is not None else ()):
+        for i, p in enumerate(paras):
             if i:
                 bundles.append((None, "\n"))
             bundles += self.bundles(p, anchor)
-        return self.doc.specs[-1] if self.emit("caption", bundles, anchor) else None
+        found = self.doc.specs[-1] if self.emit("caption", bundles, anchor) else None
+        for p in paras:
+            self.objects(p, anchor)
+        return found
 
     def picture(self, pic: ET.Element, anchor: int) -> None:
         """그림 블록과 캡션(TOP이면 앞, 아니면 뒤). 이미지가 있을 때만 caption_ref로 잇는다(스펙 §7.4)."""
@@ -264,6 +269,7 @@ class _Section:
                             "dpi": images.dpi(result.width, size.get("width") if size is not None else None),
                             "category": "image"}
                 reason = FIGURE_BUDGET
+                self.doc.pictures[item.href] = reason  # 담지 못한 PNG 바이트는 들고 있지 않는다(used는 줄지 않는다)
             else:
                 reason = result
         self.region("figure", "figure", reason, anchor)
