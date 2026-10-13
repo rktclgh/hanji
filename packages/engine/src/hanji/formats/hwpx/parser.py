@@ -7,8 +7,9 @@
 개요 수준을 쓰지 않는 문서는 PDF와 같은 글꼴 크기 규칙으로 제목을 고른다(_finish).
 
 문단에 박힌 개체는 문단 글자 블록 뒤에 나타난 순서대로 블록이 된다(스펙 §5.2): 표(1×1은 상자라 풀고, 칸 안 개체는
-칸 글자로, 칸 안 그림은 표 뒤 그림 블록), 그림과 캡션(PNG 자산), 묶음 속 개체, 글맵시, OLE 등은 이미지 없는 그림.
-개체 조립은 개체 중첩만큼만 재귀한다(XML 깊이 상한 256이 묶는다)."""
+칸 글자로, 칸 안 그림은 표 뒤 그림 블록), 그림과 캡션(PNG 자산), 머리말·꼬리말, 글상자·도형 글자, 수식 스크립트,
+글맵시, OLE 등은 이미지 없는 그림. 각주·미주는 구역 끝(닻 문단 위치). 개체 조립은 개체 중첩만큼만 재귀한다(XML 깊이
+상한 256이 묶는다)."""
 
 import bisect
 import xml.etree.ElementTree as ET
@@ -36,13 +37,18 @@ LINESEGS, LINESEG, LINE_BREAK = f"{HP}linesegarray", f"{HP}lineseg", f"{HP}lineB
 TEXTART, HIDDEN = f"{HP}textart", f"{HP}hiddenComment"
 TBL, TR, TC, CELL_ADDR, CELL_SPAN = f"{HP}tbl", f"{HP}tr", f"{HP}tc", f"{HP}cellAddr", f"{HP}cellSpan"
 PIC, IMG, CUR_SZ, CAPTION, CONTAINER = f"{HP}pic", f"{HC}img", f"{HP}curSz", f"{HP}caption", f"{HP}container"
+CTRL, DRAW_TEXT, EQUATION, SCRIPT = f"{HP}ctrl", f"{HP}drawText", f"{HP}equation", f"{HP}script"
+SHAPES = frozenset(f"{HP}{n}" for n in ("rect", "ellipse", "arc", "polygon", "curve", "connectLine", "line"))
 EMBEDDED = frozenset(f"{HP}{n}" for n in ("ole", "chart", "video"))  # 그림 성격 개체(이미지 없는 그림)
+MARGINS = {f"{HP}header": "page_header", f"{HP}footer": "page_footer"}
+NOTES = (f"{HP}footNote", f"{HP}endNote")  # 구역 끝에 이 차례로
 FIGURE_LINKED = "figure_image_linked"  # isEmbeded="0"(외부 연결 그림: 경로를 따라가지 않는다)
 FIGURE_MISSING = "figure_image_missing"  # id가 manifest에 없거나 href 멤버가 zip에 없다
 FIGURE_BUDGET = "figure_image_budget"  # MAX_BINARY_TOTAL 또는 문서 그림 바이트 상한을 넘었다
 EMBEDDED_OBJECT = "embedded_object"
 NESTED_TABLE = "nested_table_flattened"  # 칸 안 표를 칸 글자로 펼쳤다(계약에 중첩 표가 없다)
 SHAPE_TEXT = "shape_text"  # 글상자·도형·글맵시 글자를 문단으로 냈다(v1 범위 밖)
+EQUATION_SCRIPT = "equation_script"  # 수식 스크립트 원문(한컴 수식 문법)을 문단으로 냈다
 UNKNOWN_INLINE = "unknown_inline_element"  # hp:t 안 모르는 자식 요소의 글자를 그 자리에 넣었다
 HIDDEN_COMMENT = "hidden_comment"  # 숨은 설명(인쇄되지 않음): 블록에 넣지 않았다
 MASTERPAGE_TEXT = "masterpage_text_skipped"  # 마스터 쪽 글자(v1은 읽지 않는다)
@@ -126,6 +132,8 @@ class _Section:
         self.ledger = Ledger()
         self.late = False  # 구역 끝 블록을 내는 중(닻 문단 자리의 제목 경로를 쓴다)
         self.unknown: set[int] = set()  # 모르는 인라인 요소 기록을 남긴 문단(id)
+        self.notes: list[tuple[ET.Element, int]] = []  # (각주·미주, 닻)
+        self.inner = False  # 머리말·꼬리말·각주·미주·글상자 안(1×1 상자 문단도 제목 판정 없이 plain)
         self._sources()
 
     def _sources(self) -> None:
@@ -201,6 +209,11 @@ class _Section:
                       _lines=_lines(p))
         self.objects(p, anchor)
 
+    def plain(self, p: ET.Element, anchor: int) -> None:
+        """제목·목록 판정 없는 문단(각주·미주·글상자) 하나와 그 안 개체."""
+        self.emit("paragraph", self.bundles(p, anchor), anchor)
+        self.objects(p, anchor)
+
     def objects(self, p: ET.Element, anchor: int) -> None:
         """문단에 박힌 개체를 나타난 순서대로 블록으로."""
         for run in p.iterfind(RUN):
@@ -216,12 +229,68 @@ class _Section:
         elif tag == CONTAINER:
             for child in element:
                 self.obj(child, anchor)
+        elif tag in SHAPES:
+            self.shape(element, anchor)
+        elif tag == EQUATION:
+            if self.emit("paragraph", [(None, element.findtext(SCRIPT) or "")], anchor):
+                self.region("equation", "paragraph", EQUATION_SCRIPT, anchor)
         elif tag == TEXTART:
             if self.emit("paragraph", [(self.ledger.source_of(element), element.get("text", ""))], anchor):
                 self.region("shape", "paragraph", SHAPE_TEXT, anchor)
         elif tag in EMBEDDED:
             self.figure(None, anchor)
             self.region("object", "figure", EMBEDDED_OBJECT, anchor)
+        elif tag in MARGINS:
+            self.margin(element, anchor)
+        elif tag in NOTES:
+            self.notes.append((element, anchor))
+        elif tag == CTRL:
+            for child in element:
+                if child.tag in MARGINS or child.tag in NOTES:
+                    self.obj(child, anchor)
+
+    def has_text(self, element: ET.Element) -> bool:
+        return any(self.ledger.sources[self.ledger.source_of(t)].n for t in element.iter(T))
+
+    def shape(self, element: ET.Element, anchor: int) -> None:
+        """도형의 글상자(drawText/subList) 문단마다 문단 블록. 글자가 있는 도형마다 shape_text."""
+        sub = element.find(f"{DRAW_TEXT}/{SUBLIST}")
+        if sub is None:
+            return
+        if self.has_text(sub):
+            self.region("shape", "paragraph", SHAPE_TEXT, anchor)
+        inner, self.inner = self.inner, True
+        for p in sub.iterfind(P):
+            self.plain(p, anchor)
+        self.inner = inner
+
+    def margin(self, element: ET.Element, anchor: int) -> None:
+        """머리말·꼬리말: subList 문단 글자를 \\n으로 이은 블록 하나(놓인 자리에 한 번), 그 뒤 안의 개체."""
+        sub = element.find(SUBLIST)
+        paras = sub.findall(P) if sub is not None else []
+        bundles: list[Bundle] = []
+        for i, p in enumerate(paras):
+            if i:
+                bundles.append((None, "\n"))
+            bundles += self.bundles(p, anchor)
+        self.emit(MARGINS[element.tag], bundles, anchor)
+        inner, self.inner = self.inner, True
+        for p in paras:
+            self.objects(p, anchor)
+        self.inner = inner
+
+    def end_notes(self) -> None:
+        """구역 끝: 각주 전체, 그다음 미주 전체(본문 참조 순서). 문단마다 블록, 그 뒤 안의 개체."""
+        self.inner = True
+        for tag in NOTES:
+            k = 0
+            while k < len(self.notes):  # 각주 안 각주가 뒤에 붙어도 돈다
+                note, anchor = self.notes[k]
+                k += 1
+                sub = note.find(SUBLIST)
+                if note.tag == tag and sub is not None:
+                    for p in sub.iterfind(P):
+                        self.plain(p, anchor)
 
     def figure(self, figure: dict[str, Any] | None, anchor: int) -> dict[str, Any]:
         """그림 블록(글자 없음). figure가 None이면 이미지 없는 그림."""
@@ -295,7 +364,8 @@ class _Section:
         return None
 
     def table(self, tbl: ET.Element, anchor: int) -> None:
-        """1×1은 상자: 칸 문단을 이 자리의 본문 문단처럼. 그 밖은 표 블록(칸 안 그림 등은 표 뒤). 캡션은 TOP·LEFT면 앞."""
+        """1×1은 상자: 칸 문단을 이 자리의 본문 문단처럼(컨트롤·글상자 안이면 plain). 그 밖은 표 블록(칸 안 그림 등은
+        표 뒤). 캡션은 TOP·LEFT면 앞."""
         caption = tbl.find(CAPTION)
         before = caption is not None and caption.get("side") in ("TOP", "LEFT")
         if caption is not None and before:
@@ -303,7 +373,7 @@ class _Section:
         sub = _box(tbl)
         if sub is not None:
             for p in sub.iterfind(P):
-                self.paragraph(p, anchor)
+                (self.plain if self.inner else self.paragraph)(p, anchor)  # 컨트롤·글상자 안 상자는 제목 판정 밖
         else:
             self.grid(tbl, number(tbl.get("rowCnt")), number(tbl.get("colCnt")), anchor)
         if caption is not None and not before:
@@ -340,8 +410,8 @@ class _Section:
             self.obj(element, anchor)
 
     def cell(self, sub: ET.Element, anchor: int, after: list[ET.Element]) -> list[Bundle]:
-        """칸 글자: 문단을 \\n으로 잇고, 박힌 개체는 문서 순서대로 그 자리에 글자로(앞뒤 \\n). 그림·OLE는 after로(표 뒤
-        블록)."""
+        """칸 글자: 문단을 \\n으로 잇고, 박힌 개체는 문서 순서대로 그 자리에 글자로(앞뒤 \\n). 그림·OLE·머리말은 after로
+        (표 뒤 블록), 각주·미주는 구역 끝."""
         out: list[Bundle] = []
         for i, p in enumerate(sub.iterfind(P)):
             if i:
@@ -362,12 +432,28 @@ class _Section:
         elif tag == CONTAINER:
             for child in element:
                 self.inline(child, anchor, after, out)
+        elif tag in SHAPES:
+            sub = element.find(f"{DRAW_TEXT}/{SUBLIST}")
+            if sub is not None:
+                if self.has_text(sub):
+                    self.region("shape", "paragraph", SHAPE_TEXT, anchor)
+                inner = self.cell(sub, anchor, after)
+        elif tag == EQUATION:
+            script = element.findtext(SCRIPT) or ""
+            if script.strip():
+                self.region("equation", "paragraph", EQUATION_SCRIPT, anchor)
+                inner = [(None, script)]
         elif tag == TEXTART:
             if element.get("text", "").strip():
                 self.region("shape", "paragraph", SHAPE_TEXT, anchor)
             inner = [(self.ledger.source_of(element), element.get("text", ""))]
-        elif tag == PIC or tag in EMBEDDED:
+        elif tag == PIC or tag in EMBEDDED or tag in MARGINS:
             after.append(element)
+        elif tag in NOTES:
+            self.notes.append((element, anchor))
+        elif tag == CTRL:
+            for child in element:
+                self.inline(child, anchor, after, out)
         if inner:
             out += [(None, "\n"), *inner, (None, "\n")]
 
@@ -419,6 +505,7 @@ class _Section:
             anchor += 1
             self.paragraph(top, anchor)
         self.late = True
+        self.end_notes()
         self.rescue()
         counts = self.ledger.count()
         self.doc.counts.append(counts)

@@ -146,6 +146,38 @@ def tbl(rows: int, cols: int, *trs: Sequence[str], caption: str = "", inline: bo
             + "".join(f"<hp:tr>{''.join(cells)}</hp:tr>" for cells in trs) + "</hp:tbl>")
 
 
+def rect(*paras: str) -> str:
+    """글상자(사각형 도형의 drawText)."""
+    return (f'<hp:rect id="3"><hp:drawText lastWidth="1000"><hp:subList>{"".join(paras)}</hp:subList>'
+            f"</hp:drawText></hp:rect>")
+
+
+def line() -> str:
+    return '<hp:line id="4"/>'
+
+
+def ctrl(*items: str) -> str:
+    return f"<hp:ctrl>{''.join(items)}</hp:ctrl>"
+
+
+def margin(kind: str, *paras: str, apply: str = "BOTH") -> str:
+    """머리말(header)·꼬리말(footer)."""
+    return f'<hp:{kind} id="1" applyPageType="{apply}"><hp:subList>{"".join(paras)}</hp:subList></hp:{kind}>'
+
+
+def note(kind: str, *paras: str) -> str:
+    """각주(footNote)·미주(endNote). 번호(autoNum)는 글자가 아니다."""
+    return (f'<hp:{kind} number="1"><hp:subList>{"".join(paras)}</hp:subList></hp:{kind}>')
+
+
+def equation(script: str) -> str:
+    return f'<hp:equation id="5"><hp:script>{escape(script)}</hp:script></hp:equation>'
+
+
+def hidden(*paras: str) -> str:
+    return ctrl(f"<hp:hiddenComment><hp:subList>{''.join(paras)}</hp:subList></hp:hiddenComment>")
+
+
 def package(*sections: str, head: str | None = None, items: Sequence[tuple[str, str, str, bool]] = (),
             binaries: Mapping[str, bytes] = (), extra: Mapping[str, bytes] = (), spine: Sequence[str] | None = None,
             mimetype: bytes = MIME) -> bytes:
@@ -274,12 +306,33 @@ TABLE = section(
                                      [tc(1, 0, para(run(t("셋")))), tc(1, 1, para(run(t("넷"))))], inline=True),
              t(" 혼합 문단 뒤"))),
 )
+NOTES = (
+    section(
+        para(run(ctrl(margin("header", para(run(t("지어낸 머리말")))),
+                      margin("footer", para(run(t("지어낸 꼬리말"))), para(run(pic("image1")))))),
+             run(t("머리말을 둔 첫 문단이다.")), lines=1),
+        para(run(t("각주가 달린 문단"), ctrl(note("footNote", para(run(t("첫째 각주 글")))))), run(t(" 이어지는 글"))),
+        para(run(tbl(2, 2, [tc(0, 0, para(run(t("각주 든 칸"), ctrl(note("footNote", para(run(t("칸 속 각주")))))))),
+                            tc(0, 1, para(run(t("둘째 칸"))))],
+                     [tc(1, 0, para(run(t("셋째 칸")))), tc(1, 1, para(run(rect(para(run(t("칸 속 글상자")))))))]))),
+        para(run(rect(para(run(t("본문 글상자 첫째"))), para(run(t("본문 글상자 둘째")))))),
+        para(run(container(rect(para(run(t("묶음 속 글상자")))), line()))),
+        para(run(equation("x = {-b +- sqrt {b^2 - 4ac}} over {2a}"))),
+        para(run(t("미주가 달린 문단"), ctrl(note("endNote", para(run(t("첫째 미주 글"))))))),
+        para(run(t("숨은 설명이 있는 문단"), hidden(para(run(t("숨은 설명 글")))))),
+    ),
+    section(
+        para(run(t("둘째 구역 문단"), ctrl(note("footNote", para(run(t("둘째 구역 각주"))))))),
+        para(run(t("둘째 구역 끝 문단이다."))),
+    ),
+)
 SAMPLES: dict[str, bytes] = {
     "basic.hwpx": package(*BASIC, head=BASIC_HEAD),
     "headings.hwpx": package(*HEADINGS, head=HEAD_SIZES),
     "empty.hwpx": package(section(para())),
     "figures.hwpx": package(FIGURES, items=FIGURE_ITEMS, binaries=FIGURE_BINARIES),
     "table.hwpx": package(TABLE, head=TABLE_HEAD, items=FIGURE_ITEMS[:1], binaries={"BinData/image1.png": GRAY_PNG}),
+    "notes.hwpx": package(*NOTES, items=FIGURE_ITEMS[:1], binaries={"BinData/image1.png": GRAY_PNG}),
 }
 ROOT = Path(__file__).resolve().parent / "fixtures" / "hwpx"
 
