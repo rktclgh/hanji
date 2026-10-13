@@ -1,0 +1,217 @@
+{
+  "schema_version": "0.4",
+  "document_id": "fx-hwpx-headings",
+  "version": 1,
+  "layer_state": "det",
+  "source": {
+    "name": "headings.hwpx",
+    "mime": "application/hwp+zip",
+    "content_hash": "sha256:f97bcd564feb5aa4b54c1493fd138b3b2536450e396a4b6c1ca34c3447e17ccc",
+    "page_count": null
+  },
+  "pages": [],
+  "blocks": [
+    {
+      "block_id": "b_9708ce8f746718581e675328",
+      "content_hash": "c_067ad285960c86181820986f3bd3f404",
+      "order": 0,
+      "kind": "heading",
+      "text": "지어낸 보고서 제목",
+      "table": null,
+      "figure": null,
+      "level": 1,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 0
+      },
+      "confidence": 0.6,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_d1985b295786c5ec4ddad777",
+      "content_hash": "c_797e25973265e2226a76696a61c6d85d",
+      "order": 1,
+      "kind": "paragraph",
+      "text": "본문 크기로 쓴 지어낸 문단이다. 이 문단의 글자 수가 문서에서 가장 많아 본문 크기가 된다.",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "지어낸 보고서 제목"
+      ],
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "지어낸 보고서 제목"
+        ],
+        "paragraph_index": 1
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_c132286581effd12b174434d",
+      "content_hash": "c_bc64aa482fda85f75a0c298eafa6d17d",
+      "order": 2,
+      "kind": "heading",
+      "text": "큰 글자 소제목",
+      "table": null,
+      "figure": null,
+      "level": 2,
+      "section_path": [
+        "지어낸 보고서 제목"
+      ],
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "지어낸 보고서 제목"
+        ],
+        "paragraph_index": 2
+      },
+      "confidence": 0.6,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_90d283bc64d55dc4bb4a1192",
+      "content_hash": "c_797e25973265e2226a76696a61c6d85d",
+      "order": 3,
+      "kind": "paragraph",
+      "text": "본문 크기로 쓴 지어낸 문단이다. 이 문단의 글자 수가 문서에서 가장 많아 본문 크기가 된다.",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "지어낸 보고서 제목",
+        "큰 글자 소제목"
+      ],
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "지어낸 보고서 제목",
+          "큰 글자 소제목"
+        ],
+        "paragraph_index": 3
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_21c2b951c5ed55c705cdb9c0",
+      "content_hash": "c_5bfd2b4167612053efc4b3c804efb748",
+      "order": 4,
+      "kind": "paragraph",
+      "text": "큰 글자로 쓴 강조 문단은 세 줄로 이어지면 제목이 아니라 문단이다.",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "지어낸 보고서 제목",
+        "큰 글자 소제목"
+      ],
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "지어낸 보고서 제목",
+          "큰 글자 소제목"
+        ],
+        "paragraph_index": 4
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_f22017fde15a141c2f0388d2",
+      "content_hash": "c_bbcc7db94f3cc5b783e69e7dba93a568",
+      "order": 5,
+      "kind": "heading",
+      "text": "굵은 작은 제목",
+      "table": null,
+      "figure": null,
+      "level": 3,
+      "section_path": [
+        "지어낸 보고서 제목",
+        "큰 글자 소제목"
+      ],
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "지어낸 보고서 제목",
+          "큰 글자 소제목"
+        ],
+        "paragraph_index": 5
+      },
+      "confidence": 0.6,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_16cb681aa599dae9c5a681d4",
+      "content_hash": "c_a8af1dc69f886f35c9028b24b2b0fccd",
+      "order": 6,
+      "kind": "paragraph",
+      "text": "크게시작했지만 대부분이 본문 크기인 문단이다.",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "지어낸 보고서 제목",
+        "큰 글자 소제목",
+        "굵은 작은 제목"
+      ],
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "지어낸 보고서 제목",
+          "큰 글자 소제목",
+          "굵은 작은 제목"
+        ],
+        "paragraph_index": 6
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_b6faf11988499a8bfd08242c",
+      "content_hash": "c_797e25973265e2226a76696a61c6d85d",
+      "order": 7,
+      "kind": "paragraph",
+      "text": "본문 크기로 쓴 지어낸 문단이다. 이 문단의 글자 수가 문서에서 가장 많아 본문 크기가 된다.",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "지어낸 보고서 제목",
+        "큰 글자 소제목",
+        "굵은 작은 제목"
+      ],
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "지어낸 보고서 제목",
+          "큰 글자 소제목",
+          "굵은 작은 제목"
+        ],
+        "paragraph_index": 7
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    }
+  ]
+}
