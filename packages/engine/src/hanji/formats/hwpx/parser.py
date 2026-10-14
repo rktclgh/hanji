@@ -285,16 +285,22 @@ class _Section:
 
     def end_notes(self) -> None:
         """구역 끝: 각주 전체, 그다음 미주 전체(본문 참조 순서). 문단마다 블록, 그 뒤 안의 개체."""
-        self.inner = True
-        for tag in NOTES:
-            k = 0
-            while k < len(self.notes):  # 각주 안 각주가 뒤에 붙어도 돈다
-                note, anchor = self.notes[k]
-                k += 1
-                sub = note.find(SUBLIST)
-                if note.tag == tag and sub is not None:
-                    for p in sub.iterfind(P):
-                        self.plain(p, anchor)
+        inner, self.inner = self.inner, True
+        seen: set[int] = set()
+        while len(seen) < len(self.notes):  # 미주 안 각주처럼 지난 차례 뒤에 붙은 주석은 한 바퀴 더 돈다
+            for tag in NOTES:
+                k = 0
+                while k < len(self.notes):  # 각주 안 각주가 뒤에 붙어도 돈다
+                    note, anchor = self.notes[k]
+                    k += 1
+                    if note.tag != tag or k in seen:
+                        continue
+                    seen.add(k)
+                    sub = note.find(SUBLIST)
+                    if sub is not None:
+                        for p in sub.iterfind(P):
+                            self.plain(p, anchor)
+        self.inner = inner
 
     def figure(self, figure: dict[str, Any] | None, anchor: int) -> dict[str, Any]:
         """그림 블록(글자 없음). figure가 None이면 이미지 없는 그림."""

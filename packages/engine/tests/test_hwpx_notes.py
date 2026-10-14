@@ -116,3 +116,12 @@ def test_objects_inside_notes_and_text_boxes_become_blocks_too():
         ("paragraph", "본문"), ("paragraph", "글상자 안"), ("paragraph", "a over b"), ("paragraph", "표가 든 각주"),
         ("table", "가\n나")]
     assert count.ok and [r.fallback_reason for r in parsed.regions] == ["shape_text", "equation_script"]
+
+
+def test_a_footnote_inside_an_endnote_is_a_note_paragraph_not_rescued_text():
+    inside = B.ctrl(B.note("footNote", p("미주 안 각주")))
+    end = B.ctrl(B.note("endNote", B.para(B.run(B.t("미주"), inside))))
+    parsed, (count,) = HwpxParser()._parse(B.package(B.section(B.para(B.run(B.t("본문"), end)))), "a.hwpx")
+    assert [(b["kind"], b["text"]) for b in parsed.blocks] == [
+        ("paragraph", "본문"), ("paragraph", "미주"), ("paragraph", "미주 안 각주")]
+    assert count.ok and count.rescued == 0 and parsed.regions == ()
