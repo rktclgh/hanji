@@ -40,10 +40,11 @@ def _history(name: str) -> ProcessingHistory:
 
 
 def test_fixtures_are_up_to_date():
+    """트리는 그림 자산 키에서 나온 값을 가려 비교하고, 그림은 화소 정보(pixels.json)로 정확히 비교한다."""
     built = BUILDER.build_all()
     assert {p.relative_to(ROOT).as_posix() for p in ROOT.rglob("*") if p.is_file()} >= set(built)
     for rel, data in built.items():
-        assert (ROOT / rel).read_bytes() == data, rel
+        assert BUILDER.same(rel, data, ROOT / rel), rel
 
 
 @pytest.mark.parametrize("name", NAMES)
@@ -56,7 +57,11 @@ def test_golden_zip_members_pin_create_system_for_cross_os_bytes(name):
 def test_engine_ingest_matches_golden_tree_and_history(name):
     engine = LocalEngine(MemoryStore(), default_parsers(ocr=False, layout=False))
     ref = engine.ingest(str(ROOT / "inputs" / name), document_id=BUILDER.document_id(name))
-    assert engine.get_tree(ref.document_id) == _expected(name)
+    tree = engine.get_tree(ref.document_id)
+    assert BUILDER.portable(tree.model_dump(mode="json")) == BUILDER.portable(_expected(name).model_dump(mode="json"))
+    order = list(dict.fromkeys(b.figure.asset for b in tree.blocks if b.figure is not None))
+    shown = json.loads((ROOT / "expected" / f"{Path(name).stem}.pixels.json").read_text(encoding="utf-8"))
+    assert [BUILDER.pixels(engine.get_asset(key)) for key in order] == shown
     assert engine.history(ref.document_id) == _history(name)
     again = engine.ingest(str(ROOT / "inputs" / name), document_id=BUILDER.document_id(name))
     assert again == ref  # 같은 원본은 그대로

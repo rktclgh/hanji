@@ -1,0 +1,132 @@
+{
+  "schema_version": "0.4",
+  "document_id": "fx-hwpx-notes",
+  "version": 1,
+  "regions": [
+    {
+      "region_id": "s0-p7-hidden-comment-0",
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 7
+      },
+      "kind": "paragraph",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": {
+        "passed": true,
+        "checks": [
+          {
+            "name": "hidden_chars",
+            "passed": true,
+            "value": 5.0,
+            "threshold": null
+          }
+        ]
+      },
+      "fallback_reason": "hidden_comment"
+    },
+    {
+      "region_id": "s0-p2-shape-0",
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 2
+      },
+      "kind": "paragraph",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "shape_text"
+    },
+    {
+      "region_id": "s0-p3-shape-0",
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 3
+      },
+      "kind": "paragraph",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "shape_text"
+    },
+    {
+      "region_id": "s0-p4-shape-0",
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 4
+      },
+      "kind": "paragraph",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "shape_text"
+    },
+    {
+      "region_id": "s0-p5-equation-0",
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 5
+      },
+      "kind": "paragraph",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "equation_script"
+    }
+  ]
+}
