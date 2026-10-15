@@ -138,8 +138,8 @@ def test_comments_are_counted_but_not_read():
         ("comments_skipped", "doc-comments", 5)]
 
 
-def test_text_boxes_headers_and_footnotes_are_rescued_until_they_get_blocks():
-    """OX-A: 글상자·머리말·각주 글자는 블록이 없어 구역 끝 구조 문단으로 살아남는다(OX-B가 블록으로 낸다)."""
+def test_headers_and_footnotes_are_rescued_until_they_get_blocks():
+    """글상자는 블록이다. 머리말·각주 글자는 아직 블록이 없어 구역 끝 구조 문단으로 살아남는다."""
     box = ("<w:r><w:drawing><wp:inline><a:graphic><a:graphicData><wps:wsp><wps:txbx><w:txbxContent>"
            + B.p("글상자 글") + "</w:txbxContent></wps:txbx></wps:wsp></a:graphicData></a:graphic></wp:inline>"
            "</w:drawing></w:r>")
@@ -153,11 +153,11 @@ def test_text_boxes_headers_and_footnotes_are_rescued_until_they_get_blocks():
                            doc_rels=[("rIdH", B.REL["header"], "header1.xml"),
                                      ("rIdF", B.REL["footnotes"], "footnotes.xml")])
     assert [(b["kind"], b["text"], b["confidence"], b["locator"].paragraph_index) for b in parsed.blocks] == [
-        ("paragraph", "본문", 1.0, 0), ("paragraph", "참조", 1.0, 1), ("paragraph", "글상자 글\n머리말 글", 0.3, 0),
-        ("paragraph", "각주 글", 0.3, 1), ("paragraph", "둘째 구역", 1.0, 2)]
+        ("paragraph", "본문", 1.0, 0), ("paragraph", "글상자 글", 1.0, 0), ("paragraph", "참조", 1.0, 1),
+        ("paragraph", "머리말 글", 0.3, 0), ("paragraph", "각주 글", 0.3, 1), ("paragraph", "둘째 구역", 1.0, 2)]
     assert [(r.fallback_reason, r.region_id) for r in parsed.regions] == [
-        ("unassigned_text", "s0-p0-unassigned-text-0")]
-    assert [c.ok for c in counts] == [True, True] and counts[0].rescued == 11
+        ("shape_text", "s0-p0-shape-0"), ("unassigned_text", "s0-p0-unassigned-text-0")]
+    assert [c.ok for c in counts] == [True, True] and counts[0].rescued == 7
 
 
 SAMPLE = [B.p("첫째 문단"), B.p(B.r("가", "<w:tab/>", "나"), B.r("둘째"))]

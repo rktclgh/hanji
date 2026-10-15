@@ -1,6 +1,6 @@
 """OOXML 출처 열거와 표시(스펙 §9). 블록 조립과 따로, 이야기(본문·머리말 파트·주석 하나·글상자 내용)를 명시적 스택으로
 훑어 출처 요소(w:t·w:instrText·w:sym·m:t)를 모두 장부에 올리고, 그때 조상과 필드 상태를 보고 출처마다 표시를 단다:
-보통(보이는 글자), 숨김(w:vanish), 범위 밖(고르지 않은 mc 쪽·무시한 요소·필드 명령 구간·w:moveFrom·w:del). 블록 조립은
+보통(보이는 글자), 숨김(w:vanish, 숨긴 그림 틀 wp:docPr@hidden 안), 범위 밖(고르지 않은 mc 쪽·무시한 요소·필드 명령 구간·w:moveFrom·w:del). 블록 조립은
 표시가 보통인 출처만 넣는다. 숨김·범위 밖 출처는 장부에 숨은 출처로 올라 살리지 않고, 블록에 들어가면 불일치다.
 처리 이력 재료(Note)도 여기서 센다: alternate_content_skipped·tracked_deletion_skipped(문서), field_unterminated(이야기),
 hidden_text·symbol_char·equation_text(문단)."""
@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from ..flowledger import Ledger, ink
 from ..zipxml import Prefixes
 from .docx.styles import Styles
+from .drawing import FRAMES, hidden_frame
 from .package import MC, choose, ignorable
 
 W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
@@ -90,7 +91,7 @@ class _Para:
 
 @dataclass(frozen=True, slots=True)
 class _Ctx:
-    out: str | None  # None, "alt"(고르지 않은 mc·무시한 요소), "deleted"
+    out: str | None  # None, "alt"(고르지 않은 mc·무시한 요소), "deleted", "hidden"(숨긴 그림 틀 안)
     ignored: frozenset[str]
     process: frozenset[tuple[str, str]]
     para: ET.Element | None
@@ -174,6 +175,8 @@ class Walker:
                 ctx = _Ctx(ctx.out, ctx.ignored, ctx.process, element, None, ctx.story)
             elif element.tag in _RUNS:
                 ctx = _Ctx(ctx.out, ctx.ignored, ctx.process, ctx.para, element, ctx.story)
+            elif element.tag in FRAMES and ctx.out is None and hidden_frame(element):
+                ctx = _Ctx("hidden", ctx.ignored, ctx.process, ctx.para, ctx.run, ctx.story)
             elif element.tag == STORY:
                 inner = Story()
                 stack.append(inner)  # 자식을 다 본 뒤 이 이야기를 닫는다
@@ -197,7 +200,10 @@ class Walker:
         n = ink(source_text(element))
         para = ctx.para if ctx.para is not None else self._empty
         blockers = [f for f in ctx.story.fields if f.instr]
-        if ctx.out is not None:
+        if ctx.out == "hidden":
+            mark = HIDDEN
+            self._para(para, section, anchor).hidden += n
+        elif ctx.out is not None:
             mark = OUT
             if ctx.out == "alt":
                 self.skipped += n

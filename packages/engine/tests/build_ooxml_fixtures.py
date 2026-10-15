@@ -34,6 +34,16 @@ NS = {
     "w14": "http://schemas.microsoft.com/office/word/2010/wordml",
     "x": "urn:hanji:test:future",  # S에 없는 이름공간(모르는 Requires·무시 표시)
 }
+# 개체 쓰기 도구가 그 요소 자리에서 선언하는 접두어(문서 뿌리 선언을 바꾸지 않아 OX-A 골든 입력 바이트가 그대로다)
+LOCAL = {
+    "pic": "http://schemas.openxmlformats.org/drawingml/2006/picture",
+    "wpg": "http://schemas.microsoft.com/office/word/2010/wordprocessingGroup",
+    "wpc": "http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas",
+    "o": "urn:schemas-microsoft-com:office:office",
+    "asvg": "http://schemas.microsoft.com/office/drawing/2016/SVG/main",
+}
+EMU = 914400  # 1인치
+PIC_URI = "http://schemas.openxmlformats.org/drawingml/2006/picture"
 DECL = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
 WHEN = (1980, 1, 1, 0, 0, 0)
 DOCX_MAIN = "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"
@@ -47,7 +57,7 @@ def attrs(**values: object) -> str:
 
 
 def xmlns(*prefixes: str) -> str:
-    return "".join(f' xmlns:{p}="{NS[p]}"' for p in prefixes)
+    return "".join(f' xmlns:{p}="{NS[p] if p in NS else LOCAL[p]}"' for p in prefixes)
 
 
 def t(text: str) -> str:
@@ -200,6 +210,73 @@ def docx(document_xml: str, styles_xml: str | None = None, numbering_xml: str | 
         ("word/_rels/document.xml.rels", rels(*links, *doc_rels))]
     members += [(member, xml) for member, xml, _, _ in parts]
     return zip_bytes([*members, *extra], deflated)
+
+
+def pic(embed: str | None = None, link: str | None = None, cx: int | None = None, svg: str | None = None) -> str:
+    """pic:pic(a:blip@r:embed·r:link). cx가 있으면 그림 자신의 표시 너비(a:xfrm), svg는 asvg:svgBlip 관계 id."""
+    ext = (f'<a:extLst><a:ext uri="{{96DAC541-7B7A-43D3-8B79-37D633B846F1}}"><asvg:svgBlip{xmlns("asvg")}'
+           f'{attrs(r__embed=svg)}/></a:ext></a:extLst>') if svg else ""
+    xfrm = f'<a:xfrm><a:off x="0" y="0"/><a:ext cx="{cx}" cy="{cx}"/></a:xfrm>' if cx else ""
+    return (f'<pic:pic{xmlns("pic")}><pic:nvPicPr><pic:cNvPr id="1" name="p"/><pic:cNvPicPr/></pic:nvPicPr>'
+            f"<pic:blipFill><a:blip{attrs(r__embed=embed, r__link=link)}>{ext}</a:blip></pic:blipFill>"
+            f"<pic:spPr>{xfrm}</pic:spPr></pic:pic>")
+
+
+def drawing(*graphic: str, cx: int = EMU, anchor: bool = False, hidden: bool = False, uri: str = PIC_URI) -> str:
+    """w:drawing 런: wp:inline(anchor면 wp:anchor)/a:graphic/a:graphicData 아래 graphic들."""
+    frame = "anchor" if anchor else "inline"
+    return (f'<w:r><w:drawing><wp:{frame}><wp:extent cx="{cx}" cy="{cx}"/>'
+            f'<wp:docPr id="1" name="d"{attrs(hidden="1" if hidden else None)}/><a:graphic>'
+            f'<a:graphicData uri="{uri}">{"".join(graphic)}</a:graphicData></a:graphic></wp:{frame}></w:drawing></w:r>')
+
+
+def wsp(*items: str) -> str:
+    """DrawingML 글상자 도형(wps:wsp/wps:txbx/w:txbxContent). 꺾쇠로 시작하지 않는 항목은 문단 하나."""
+    inner = "".join(item if item.startswith("<") else p(item) for item in items)
+    return f"<wps:wsp><wps:spPr/><wps:txbx><w:txbxContent>{inner}</w:txbxContent></wps:txbx><wps:bodyPr/></wps:wsp>"
+
+
+def wgp(*children: str) -> str:
+    return f'<wpg:wgp{xmlns("wpg")}><wpg:cNvGrpSpPr/><wpg:grpSpPr/>{"".join(children)}</wpg:wgp>'
+
+
+def vshape(image: str | None = None, *items: str) -> str:
+    """VML 도형: image는 v:imagedata@r:id, items가 있으면 v:textbox 글상자(꺾쇠로 시작하지 않으면 문단)."""
+    data = f"<v:imagedata{attrs(r__id=image)}/>" if image else ""
+    inner = "".join(item if item.startswith("<") else p(item) for item in items)
+    box = f"<v:textbox><w:txbxContent>{inner}</w:txbxContent></v:textbox>" if items else ""
+    return f'<v:shape style="width:20pt;height:20pt">{data}{box}</v:shape>'
+
+
+def vpict(*shapes: str, ole: bool = False) -> str:
+    """w:pict(ole면 w:object와 o:OLEObject) 런."""
+    if ole:
+        return f'<w:r><w:object>{"".join(shapes)}<o:OLEObject{xmlns("o")} ProgID="Excel.Sheet.12"/></w:object></w:r>'
+    return f'<w:r><w:pict>{"".join(shapes)}</w:pict></w:r>'
+
+
+# 그림 원본: HWPX 골든과 같은 고정 바이트(6×6 회색 PNG, 4×4 반투명 RGBA PNG, 8×8 CMYK JPEG). 가짜 EMF는 머리만 있다
+GRAY_PNG = bytes.fromhex(
+    "89504e470d0a1a0a0000000d4948445200000006000000060800000000c5a7b094000000134944415478da638c626060606060622048"
+    "01000f900066ffa59b760000000049454e44ae426082")
+RGBA_PNG = bytes.fromhex(
+    "89504e470d0a1a0a0000000d4948445200000004000000040806000000a9f19e7e000000154944415478da633c2127d7c080049818d0"
+    "006101006506018c5f1704320000000049454e44ae426082")
+CMYK_JPEG = bytes.fromhex(
+    "ffd8ffee000e41646f626500640000000000ffdb004300080606070605080707070909080a0c140d0c0b0b0c1912130f141d1a1f1e1d"
+    "1a1c1c20242e2720222c231c1c2837292c30313434341f27393d38323c2e333432ffc000140800080008044311004d11005911004b11"
+    "00ffc4001f0000010501010101010100000000000000000102030405060708090a0bffc400b510000201030302040305050404000001"
+    "7d01020300041105122131410613516107227114328191a1082342b1c11552d1f02433627282090a161718191a25262728292a343536"
+    "3738393a434445464748494a535455565758595a636465666768696a737475767778797a838485868788898a92939495969798999aa2"
+    "a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae1e2e3e4e5e6e7e8e9eaf1f2f3f4f5f6f7f8f9"
+    "faffda000e0443004d0059004b00003f00f7fa4af9febdfebfffd9")
+FAKE_EMF = bytes.fromhex("01000000") + bytes(36) + b" EMF" + bytes(40)
+
+
+def media(**files: tuple[str, bytes]) -> dict[str, list[tuple[str, ...]] | list[tuple[str, bytes | str]]]:
+    """관계 id → (word/ 아래 멤버, 바이트)들 → docx()의 doc_rels·extra 인자."""
+    return {"doc_rels": [(rid, f"{R}/image", member) for rid, (member, _) in files.items()],
+            "extra": [(f"word/{member}", data) for member, data in files.values()]}
 
 
 # ---- 골든 예제 ----

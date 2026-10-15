@@ -4,7 +4,9 @@
 제목, numPr → 목록 항목, 그 밖 문단(제목 스타일이 하나도 없는 문서는 PDF와 같은 글꼴 크기 규칙). 위치는 FlowLocator(제목
 경로, 본문 항목 순번). 구역(w:sectPr)이 장부 단위다. ooxml/ledger.py의 Walker가 출처를 따로 열거해 보통·숨김·범위 밖으로
 표시하고, 블록에는 보통 출처만 넣는다. 한 번도 넣지 않은 보통 출처는 구역 끝 구조 문단(신뢰도 0.3, unassigned_text)으로
-살린다. 그림·글상자·머리말·꼬리말·각주·미주는 아직 블록을 내지 않아 그 글자가 살리기로 나온다(OX-B가 블록으로 낸다)."""
+살린다. 문단 안 개체(w:drawing·w:pict·w:object)는 문단 글자 뒤에 블록으로 낸다(스펙 §7.1, §7.4): 그림은 PNG 자산(관계 →
+미디어 파트, drawing.Images), 글상자는 안 문단마다 문단 블록(제목·목록 판정 없음)과 shape_text, 묶음·캔버스는 자식을 차례로.
+칸 안 개체는 표 블록 뒤에 낸다. 머리말·꼬리말·각주·미주는 아직 블록을 내지 않아 그 글자가 살리기로 나온다."""
 
 import xml.etree.ElementTree as ET
 from collections import Counter
@@ -17,11 +19,13 @@ from ....errors import ParseError
 from ...base import ParsedSource
 from ...flowdoc import Region, finish, gate, ledger_gate
 from ...flowledger import Bundle, Counts, Ledger, ink
+from ...hwpx.parser import EMBEDDED_OBJECT, SHAPE_TEXT
 from ...hwpx.tables import RawCell, build
 from ...pdf.group import RESCUED_CONFIDENCE, step
 from ...pdf.parser import COVERAGE_MISMATCH, UNASSIGNED_TEXT
 from ...zipxml import Prefixes
 from ..ledger import NORMAL, SOURCES, Note, Story, Walker, part_chars, sym_char
+from ..drawing import A, FRAMES, PIC, R_ID, WP, Images, blip, emu, hidden_frame
 from ..package import MC, READ, Package, choose, ignorable
 from . import tables
 from .styles import Styles, read_styles
@@ -35,6 +39,14 @@ P, TBL, RUN, SDT, SDT_CONTENT = f"{W}p", f"{W}tbl", f"{W}r", f"{W}sdt", f"{W}sdt
 CUSTOM_XML, SECT_PR, BODY = f"{W}customXml", f"{W}sectPr", f"{W}body"
 T, INSTR, SYM, BR, CR = f"{W}t", f"{W}instrText", f"{W}sym", f"{W}br", f"{W}cr"
 ALTERNATE = f"{MC}AlternateContent"
+DRAWING, PICT, OBJECT, TXBX = f"{W}drawing", f"{W}pict", f"{W}object", f"{W}txbxContent"
+OBJECTS = frozenset({DRAWING, PICT, OBJECT})  # 문단 안 개체 뿌리(문단 글자 뒤 블록)
+DELETED = frozenset({f"{W}del", f"{W}moveFrom"})
+WPS = "{http://schemas.microsoft.com/office/word/2010/wordprocessingShape}"
+WPG = "{http://schemas.microsoft.com/office/word/2010/wordprocessingGroup}"
+WPC = "{http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas}"
+V = "{urn:schemas-microsoft-com:vml}"
+GROUPS = frozenset({f"{WPG}wgp", f"{WPG}grpSp", f"{WPC}wpc"})  # 자식을 차례로 읽는 묶음·캔버스
 ITEMS = frozenset({P, TBL})
 Chain = tuple[ET.Element, ...]  # w:body와 본문 층 요소 사이의 감싼 요소들(위에서 아래로)
 # 문단 안에서 벗기는 감싼 요소(스펙 §5.2). w:sdt는 w:sdtContent만 읽는다
@@ -70,6 +82,7 @@ class _Doc:
     styles: Styles
     walker: Walker
     prefixes: Prefixes
+    images: Images
     specs: list[dict[str, Any]] = field(default_factory=list)
     regions: list[Region] = field(default_factory=list)
     counts: list[Counts] = field(default_factory=list)
@@ -163,6 +176,10 @@ class _Section:
         self.items = items
         self.ledger = ledger
         self.late = False  # 구역 끝 블록을 내는 중(닻 문단 자리의 제목 경로를 쓴다)
+        self.inner = False  # 글상자·머리말·각주 안(문단은 제목·목록 판정 없이, 1×1 상자 안도)
+        self.after: list[ET.Element] = []  # 지금 만드는 표의 칸 안 개체(표 블록 뒤에 낸다)
+        self.host = doc.package.main  # 지금 읽는 파트(그림 관계를 이 파트에서 푼다)
+        self.prefixes = doc.prefixes  # 그 파트의 접두어 선언(mc:Choice@Requires)
 
     def region(self, tag: str, kind: str, reason: str, anchor: int, result: Any = None) -> None:
         self.doc.regions.append(Region(tag, kind, reason, self.index, anchor, result))
@@ -198,7 +215,7 @@ class _Section:
                     if content is not None:
                         stack.extend((child, None) for child in reversed(content))
                 elif tag == ALTERNATE:
-                    chosen = choose(element, self.doc.prefixes)
+                    chosen = choose(element, self.prefixes)
                     if chosen is not None:
                         stack.extend((child, None) for child in reversed(chosen))
                 elif tag == MATH_RUN:
@@ -218,7 +235,7 @@ class _Section:
                     if tag == CR or (tag == BR and element.get(f"{W}type", "textWrapping") == "textWrapping"):
                         lines += 1
             elif tag == ALTERNATE:
-                chosen = choose(element, self.doc.prefixes)
+                chosen = choose(element, self.prefixes)
                 if chosen is not None:
                     stack.extend((child, run) for child in reversed(chosen))
             elif tag not in SILENT:
@@ -244,7 +261,11 @@ class _Section:
             sizes[(step(size), bold)] += n
 
     def paragraph(self, p: ET.Element, anchor: int) -> None:
-        """본문 항목 문단: 개요 수준·제목 스타일 → 제목, 목록 → 목록 항목, 그 밖 문단(크기 규칙 후보)."""
+        """본문 항목 문단: 개요 수준·제목 스타일 → 제목, 목록 → 목록 항목, 그 밖 문단(크기 규칙 후보). 그 뒤 박힌
+        개체. 글상자·머리말·각주 안이면 판정 없는 문단."""
+        if self.inner:
+            self.plain(p, anchor)
+            return
         bundles, sizes, lines = self.content(p, anchor)
         level = self.doc.styles.heading(p)
         if level is not None:
@@ -260,15 +281,145 @@ class _Section:
             size = max(by_size, key=lambda s: (by_size[s], s)) if by_size else None
             self.emit("paragraph", bundles, anchor, _sizes=sizes, _size=size, _bold=bold * 2 > sum(sizes.values()),
                       _lines=lines)
+        self.place(self.objects(p), anchor)
+
+    def plain(self, p: ET.Element, anchor: int) -> None:
+        """제목·목록 판정 없는 문단(글상자·머리말·각주 안) 하나와 그 안 개체."""
+        self.emit("paragraph", self.content(p, anchor)[0], anchor)
+        self.place(self.objects(p), anchor)
+
+    def objects(self, p: ET.Element) -> list[ET.Element]:
+        """문단 안 개체 뿌리(w:drawing·w:pict·w:object)를 문서 순서로. 고른 mc 쪽만 보고, 변경 추적 삭제·읽지 않는
+        이름공간 요소 안은 보지 않는다(그 안 글자는 Walker가 범위 밖으로 표시한다)."""
+        out: list[ET.Element] = []
+        stack = list(reversed(p))
+        while stack:
+            element = stack.pop()
+            tag = element.tag
+            if tag in OBJECTS:
+                out.append(element)
+            elif tag == ALTERNATE:
+                chosen = choose(element, self.prefixes)
+                if chosen is not None:
+                    stack.extend(reversed(chosen))
+            elif tag not in DELETED and tag[1:].partition("}")[0] in READ:
+                stack.extend(reversed(element))
+        return out
+
+    def place(self, found: list[ET.Element], anchor: int) -> None:
+        """개체 블록을 나타난 순서대로. 숨긴 그림 틀(wp:docPr@hidden)은 내지 않는다."""
+        for element in found:
+            if element.tag != DRAWING:
+                self.vml(element, anchor)
+                continue
+            for frame in element:
+                data = frame.find(f"{A}graphic/{A}graphicData")
+                if frame.tag not in FRAMES or hidden_frame(frame) or data is None:
+                    continue
+                extent = frame.find(f"{WP}extent")
+                for child in data:
+                    self.graphic(child, anchor, emu(extent.get("cx")) if extent is not None else None, True)
+
+    def graphic(self, element: ET.Element, anchor: int, cx: int | None, top: bool) -> None:
+        """DrawingML 개체 하나(재귀는 묶음 중첩만큼, XML 깊이가 묶는다). top은 a:graphicData 바로 아래인가: 거기서
+        모르는 개체는 이미지 없는 그림 + embedded_object, 묶음 안 모르는 요소(묶음 속성 등)는 건너뛴다."""
+        tag = element.tag
+        if tag == f"{PIC}pic":
+            if cx is None:  # 묶음 안 그림: 그림 자신의 표시 너비
+                ext = element.find(f"{PIC}spPr/{A}xfrm/{A}ext")
+                cx = emu(ext.get("cx")) if ext is not None else None
+            embed, link = blip(element)
+            self.image(self.doc.images.figure(self.host, embed, link, cx), anchor)
+        elif tag == f"{WPS}wsp":
+            content = element.find(f"{WPS}txbx/{TXBX}")
+            if content is not None:
+                self.textbox(content, anchor)
+        elif tag in GROUPS:
+            for child in element:
+                self.graphic(child, anchor, None, False)
+        elif tag == f"{WPG}graphicFrame":
+            data = element.find(f"{A}graphic/{A}graphicData")
+            for child in data if data is not None else ():
+                self.graphic(child, anchor, None, True)
+        elif tag == ALTERNATE:
+            chosen = choose(element, self.prefixes)
+            for child in chosen if chosen is not None else ():
+                self.graphic(child, anchor, cx, top)
+        elif top:
+            self.figure(None, anchor)
+            self.region("object", "figure", EMBEDDED_OBJECT, anchor)
+
+    def vml(self, element: ET.Element, anchor: int) -> None:
+        """w:pict·w:object 안 VML 도형(v:group은 펼친다): v:imagedata → 그림, v:textbox → 글상자. w:object(OLE)는
+        미리보기 그림(없으면 이미지 없는 그림)과 embedded_object."""
+        ole = element.tag == OBJECT
+        shown = False
+        stack = list(reversed(element))
+        while stack:
+            shape = stack.pop()
+            if shape.tag == f"{V}group":
+                stack.extend(reversed(shape))
+                continue
+            if not shape.tag.startswith(V) or shape.tag == f"{V}shapetype":
+                continue
+            data = shape.find(f"{V}imagedata")
+            if data is not None:
+                self.image(self.doc.images.figure(self.host, data.get(R_ID), None, None), anchor)
+                if ole:
+                    self.region("object", "figure", EMBEDDED_OBJECT, anchor)
+                shown = True
+            content = shape.find(f"{V}textbox/{TXBX}")
+            if content is not None:
+                self.textbox(content, anchor)
+        if ole and not shown:
+            self.figure(None, anchor)
+            self.region("object", "figure", EMBEDDED_OBJECT, anchor)
+
+    def image(self, result: dict[str, Any] | str, anchor: int) -> None:
+        """그림 블록(figure 값) 또는 이미지 없는 그림과 그 사유."""
+        if isinstance(result, str):
+            self.figure(None, anchor)
+            self.region("figure", "figure", result, anchor)
+        else:
+            self.figure(result, anchor)
+
+    def figure(self, figure: dict[str, Any] | None, anchor: int) -> None:
+        """그림 블록(글자 없음). figure가 None이면 이미지 없는 그림."""
+        spec: dict[str, Any] = {"kind": "figure", "text": "", "confidence": 1.0, "state": "det",
+                                "text_source": "native", "_anchor": anchor, "_late": self.late}
+        if figure is not None:
+            spec["figure"] = figure
+        self.doc.specs.append(spec)
+
+    def textbox(self, content: ET.Element, anchor: int) -> None:
+        """글상자 내용(w:txbxContent): 항목마다 문단(판정 없음)·표 블록. 보통 글자가 있으면 shape_text."""
+        if self.has_text(content):
+            self.region("shape", "paragraph", SHAPE_TEXT, anchor)
+        inner, self.inner = self.inner, True
+        for item in tables.cell_items(content):
+            (self.paragraph if item.tag == P else self.table)(item, anchor)
+        self.inner = inner
+
+    def has_text(self, element: ET.Element) -> bool:
+        ledger = self.ledger
+        return any(ledger.sources[k].n and not ledger.sources[k].hidden for e in element.iter()
+                   if (k := ledger.index.get(id(e))) is not None)
 
     def table(self, tbl: ET.Element, anchor: int) -> None:
-        """1×1은 상자: 칸 항목을 이 자리의 본문 항목처럼(문단은 제목·목록 판정). 그 밖은 표 블록, 검증 실패·상한
-        초과는 칸 글자를 문서 순서로 \\n 이은 문단과 처리 이력."""
+        """1×1은 상자: 칸 항목을 이 자리의 본문 항목처럼(문단은 제목·목록 판정, 글상자·머리말·각주 안이면 판정
+        없이). 그 밖은 표 블록, 검증 실패·상한 초과는 칸 글자를 문서 순서로 \\n 이은 문단과 처리 이력. 칸 안 개체는
+        그 뒤에 블록으로."""
         box = tables.is_box(tbl)
         if box is not None:
             for item in tables.cell_items(box):
                 (self.paragraph if item.tag == P else self.table)(item, anchor)
             return
+        after, self.after = self.after, []
+        self.grid(tbl, anchor)
+        found, self.after = self.after, after
+        self.place(found, anchor)
+
+    def grid(self, tbl: ET.Element, anchor: int) -> None:
         tcs = [tc for _, row in tables.rows(tbl) for tc in row]
         parts = {id(tc): self.cell(tc, anchor) for tc in tcs}  # 칸 글자는 문서 순서로 한 번만 만든다
         shape = tables.grid(tbl)
@@ -294,7 +445,11 @@ class _Section:
         for i, item in enumerate(tables.cell_items(tc)):
             if i:
                 out.append((None, "\n"))
-            out += self.content(item, anchor)[0] if item.tag == P else self.flatten(item, anchor)
+            if item.tag == P:
+                out += self.content(item, anchor)[0]
+                self.after += self.objects(item)
+            else:
+                out += self.flatten(item, anchor)
         return out
 
     def flatten(self, tbl: ET.Element, anchor: int) -> list[Bundle]:
@@ -386,7 +541,7 @@ class DocxParser:
             raise ParseError("missing w:body", f"{name}:{package.main}")
         styles = read_styles(self._optional(package, "styles", f"{W}styles"),
                              self._optional(package, "numbering", f"{W}numbering"))
-        doc = _Doc(name, package, styles, Walker(styles), prefixes)
+        doc = _Doc(name, package, styles, Walker(styles), prefixes, Images(package))
         layout = _layout(body, prefixes, (root,))
         parts = [([e for e, _, item in entries if item], sect) for entries, sect in layout]
         ledgers = [Ledger() for _ in parts]
@@ -413,7 +568,8 @@ class DocxParser:
             doc.regions.append(Region("comments", "paragraph", COMMENTS_SKIPPED, 0, 0, gate("chars", chars, None),
                                       "doc-comments"))
         blocks, regions = finish(doc.specs, doc.regions, doc.outline)
-        return ParsedSource(mime=MIME, blocks=blocks, regions=regions), tuple(doc.counts)
+        parsed = ParsedSource(mime=MIME, blocks=blocks, assets=doc.images.budget.assets, regions=regions)
+        return parsed, tuple(doc.counts)
 
     @staticmethod
     def _optional(package: Package, kind: str, root: str) -> ET.Element | None:
