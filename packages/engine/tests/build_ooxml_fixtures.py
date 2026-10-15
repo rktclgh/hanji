@@ -131,10 +131,34 @@ def instr(text: str) -> str:
     return f'<w:r><w:instrText xml:space="preserve">{escape(text)}</w:instrText></w:r>'
 
 
-def document(*items: str, ignorable: str = "w14") -> str:
-    """w:document(본문 항목들 + 마지막 구역 속성). 모든 테스트 접두어를 뿌리에서 선언한다."""
-    return (f'{DECL}<w:document{xmlns(*NS)} mc:Ignorable="{ignorable}"><w:body>{"".join(items)}{sect()}'
+def document(*items: str, ignorable: str = "w14", final: str | None = None) -> str:
+    """w:document(본문 항목들 + 마지막 구역 속성, final이 있으면 그것). 모든 테스트 접두어를 뿌리에서 선언한다."""
+    return (f'{DECL}<w:document{xmlns(*NS)} mc:Ignorable="{ignorable}"><w:body>{"".join(items)}{final or sect()}'
             "</w:body></w:document>")
+
+
+def margin(root: str, *items: str) -> str:
+    """머리말(root "hdr")·꼬리말("ftr") 파트. 꺾쇠로 시작하지 않는 항목은 문단 하나."""
+    inner = "".join(item if item.startswith("<") else p(item) for item in items)
+    return f"{DECL}<w:{root}{xmlns(*NS)}>{inner}</w:{root}>"
+
+
+def notes(kind: str, *entries: tuple[str, str | None, str]) -> str:
+    """각주(kind "footnotes")·미주("endnotes") 파트. 항목은 (w:id, w:type 또는 None, 안 XML)."""
+    tag = kind[:-1]
+    inner = "".join(f"<w:{tag}{attrs(w__type=kind_, w__id=key)}>{body}</w:{tag}>" for key, kind_, body in entries)
+    return f"{DECL}<w:{kind}{xmlns(*NS)}>{inner}</w:{kind}>"
+
+
+def note_ref(kind: str, key: str, vanish: bool = False) -> str:
+    """각주(kind "footnote")·미주("endnote") 참조 런."""
+    return f'<w:r>{rpr(vanish="" if vanish else None)}<w:{kind}Reference w:id="{key}"/></w:r>'
+
+
+def sect_refs(*refs: tuple[str, str, str]) -> str:
+    """머리말·꼬리말 참조를 단 구역 속성. 항목은 ("header"·"footer", w:type, 관계 id)."""
+    inner = "".join(f'<w:{kind}Reference w:type="{kind_}" r:id="{rid}"/>' for kind, kind_, rid in refs)
+    return f"<w:sectPr>{inner}</w:sectPr>"
 
 
 def style(key: str, name: str | None = None, kind: str = "paragraph", based: str | None = None,

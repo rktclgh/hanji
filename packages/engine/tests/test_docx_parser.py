@@ -138,8 +138,8 @@ def test_comments_are_counted_but_not_read():
         ("comments_skipped", "doc-comments", 5)]
 
 
-def test_headers_and_footnotes_are_rescued_until_they_get_blocks():
-    """글상자는 블록이다. 머리말·각주 글자는 아직 블록이 없어 구역 끝 구조 문단으로 살아남는다."""
+def test_text_boxes_headers_and_footnotes_get_blocks_and_nothing_is_rescued():
+    """글상자·머리말·각주 글자가 블록이다(OX-A에서는 살리기로 나왔다). 글자 있는 구분선 주석은 범위 밖."""
     box = ("<w:r><w:drawing><wp:inline><a:graphic><a:graphicData><wps:wsp><wps:txbx><w:txbxContent>"
            + B.p("글상자 글") + "</w:txbxContent></wps:txbx></wps:wsp></a:graphicData></a:graphic></wp:inline>"
            "</w:drawing></w:r>")
@@ -153,11 +153,11 @@ def test_headers_and_footnotes_are_rescued_until_they_get_blocks():
                            doc_rels=[("rIdH", B.REL["header"], "header1.xml"),
                                      ("rIdF", B.REL["footnotes"], "footnotes.xml")])
     assert [(b["kind"], b["text"], b["confidence"], b["locator"].paragraph_index) for b in parsed.blocks] == [
-        ("paragraph", "본문", 1.0, 0), ("paragraph", "글상자 글", 1.0, 0), ("paragraph", "참조", 1.0, 1),
-        ("paragraph", "머리말 글", 0.3, 0), ("paragraph", "각주 글", 0.3, 1), ("paragraph", "둘째 구역", 1.0, 2)]
+        ("page_header", "머리말 글", 1.0, 0), ("paragraph", "본문", 1.0, 0), ("paragraph", "글상자 글", 1.0, 0),
+        ("paragraph", "참조", 1.0, 1), ("paragraph", "각주 글", 1.0, 1), ("paragraph", "둘째 구역", 1.0, 2)]
     assert [(r.fallback_reason, r.region_id) for r in parsed.regions] == [
-        ("shape_text", "s0-p0-shape-0"), ("unassigned_text", "s0-p0-unassigned-text-0")]
-    assert [c.ok for c in counts] == [True, True] and counts[0].rescued == 7
+        ("shape_text", "s0-p0-shape-0"), ("special_note_skipped", "doc-special-note")]
+    assert [c.ok for c in counts] == [True, True] and counts[0].rescued == 0 and counts[0].hidden == 2
 
 
 SAMPLE = [B.p("첫째 문단"), B.p(B.r("가", "<w:tab/>", "나"), B.r("둘째"))]
@@ -306,12 +306,13 @@ def test_a_symbol_with_code_zero_puts_no_nul_into_blocks():
     assert all("\x00" not in b["text"] for b in parsed.blocks) and counts[0].ok
 
 
-def test_a_header_shared_by_two_sections_is_rescued_once():
-    """구역 둘이 같은 머리말 파트를 참조해도 그 글자는 한 번(처음 참조한 구역에서)만 살린다(스펙 §7.2)."""
+def test_a_header_shared_by_two_sections_is_emitted_once():
+    """구역 둘이 같은 머리말 파트를 참조해도 처음 참조한 구역에서 한 번만 낸다(스펙 §7.2)."""
     parsed, counts = parse(B.p("첫 구역", extra=SHARED), B.p("둘째 구역", extra=SHARED), B.p("셋째 구역"),
                            **_margin_and_note_parts())
-    assert [b["text"] for b in parsed.blocks].count("공유 머리말") == 1
-    assert [c.rescued for c in counts] == [5, 0, 0] and all(c.ok for c in counts)
+    assert [(b["kind"], b["locator"].paragraph_index) for b in parsed.blocks if b["text"] == "공유 머리말"] == [
+        ("page_header", 0)]
+    assert [c.rescued for c in counts] == [0, 0, 0] and all(c.ok for c in counts)
 
 
 def test_a_toc_field_continues_across_sections():

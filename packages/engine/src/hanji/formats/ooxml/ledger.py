@@ -1,9 +1,10 @@
 """OOXML 출처 열거와 표시(스펙 §9). 블록 조립과 따로, 이야기(본문·머리말 파트·주석 하나·글상자 내용)를 명시적 스택으로
 훑어 출처 요소(w:t·w:instrText·w:sym·m:t)를 모두 장부에 올리고, 그때 조상과 필드 상태를 보고 출처마다 표시를 단다:
-보통(보이는 글자), 숨김(w:vanish, 숨긴 그림 틀 wp:docPr@hidden 안), 범위 밖(고르지 않은 mc 쪽·무시한 요소·필드 명령 구간·w:moveFrom·w:del). 블록 조립은
+보통(보이는 글자), 숨김(w:vanish, 숨긴 그림 틀 wp:docPr@hidden 안), 범위 밖(고르지 않은 mc 쪽·무시한 요소·필드 명령 구간·w:moveFrom·w:del·
+특수 주석). 블록 조립은
 표시가 보통인 출처만 넣는다. 숨김·범위 밖 출처는 장부에 숨은 출처로 올라 살리지 않고, 블록에 들어가면 불일치다.
-처리 이력 재료(Note)도 여기서 센다: alternate_content_skipped·tracked_deletion_skipped(문서), field_unterminated(이야기),
-hidden_text·symbol_char·equation_text(문단)."""
+처리 이력 재료(Note)도 여기서 센다: alternate_content_skipped·tracked_deletion_skipped·special_note_skipped(문서),
+field_unterminated(이야기), hidden_text·symbol_char·equation_text(문단)."""
 
 import xml.etree.ElementTree as ET
 from collections.abc import Sequence
@@ -30,6 +31,7 @@ TRACKED_DELETION = "tracked_deletion_skipped"
 HIDDEN_TEXT = "hidden_text"
 SYMBOL_CHAR = "symbol_char"
 EQUATION_TEXT = "equation_text"
+SPECIAL_NOTE = "special_note_skipped"  # 구분선 같은 특수 주석(separator 등)의 글자는 범위 밖
 _PARA = f"{W}p"
 _RUNS = frozenset({f"{W}r", f"{M}r"})
 
@@ -91,7 +93,7 @@ class _Para:
 
 @dataclass(frozen=True, slots=True)
 class _Ctx:
-    out: str | None  # None, "alt"(고르지 않은 mc·무시한 요소), "deleted", "hidden"(숨긴 그림 틀 안)
+    out: str | None  # None, "alt"(고르지 않은 mc·무시한 요소), "deleted", "hidden"(숨긴 그림 틀 안), "special"(특수 주석)
     ignored: frozenset[str]
     process: frozenset[tuple[str, str]]
     para: ET.Element | None
@@ -105,8 +107,8 @@ def _split(tag: str) -> tuple[str, str]:
 
 
 class Walker:
-    """문서 하나의 출처를 표시한다. marks는 id(출처 요소) → 표시, notes는 처리 이력 재료(문서 순서), refs는 범위 안
-    각주·미주 참조 (구역, 닻, 참조 요소 이름, w:id)(문서 순서)."""
+    """문서 하나의 출처를 표시한다. marks는 id(출처 요소) → 표시, notes는 처리 이력 재료(문서 순서), refs는 보이는
+    각주·미주 참조 (구역, 닻, 참조 요소 이름, w:id)(문서 순서: 범위 밖·필드 명령 구간·숨긴 런의 참조는 들지 않는다)."""
 
     def __init__(self, styles: Styles) -> None:
         self.styles = styles
@@ -115,17 +117,19 @@ class Walker:
         self.refs: list[tuple[int, int, str, str]] = []
         self.skipped = 0  # 고르지 않은 mc 쪽·무시한 요소의 출처 글자
         self.deleted = 0  # 변경 추적 삭제(moveFrom·del 안 출처, delText) 글자
+        self.special = 0  # 특수 주석 안 출처 글자
         self._paras: dict[int, _Para] = {}
         self._empty = ET.Element(_PARA)
 
     def walk(self, root: ET.Element, prefixes: Prefixes, ledger: Ledger, section: int, anchor: int, story: Story,
-             ancestors: Sequence[ET.Element] = ()) -> None:
+             ancestors: Sequence[ET.Element] = (), forced: str | None = None) -> None:
         """root 아래 출처를 문서 순서로 장부에 올리고 표시한다(재귀 없음). 글상자 내용은 새 이야기다. ancestors는
         root 위 요소들(위에서 아래로: 파트 뿌리·w:body·본문 층 감싼 요소). 위에서부터 훑은 것처럼 그 mc:Ignorable·
-        ProcessContent가 root에도 미치고, 무시한 요소·고르지 않은 mc 쪽·변경 추적 삭제 아래면 root도 범위 밖이다."""
+        ProcessContent가 root에도 미치고, 무시한 요소·고르지 않은 mc 쪽·변경 추적 삭제 아래면 root도 범위 밖이다.
+        forced가 있으면 root 전체가 그 범위 밖 종류다(특수 주석 "special")."""
         ignored: frozenset[str] = frozenset()
         process: frozenset[tuple[str, str]] = frozenset()
-        out: str | None = None
+        out: str | None = forced
         path = (*ancestors, root)
         for k, element in enumerate(ancestors):
             more, also = ignorable(element, prefixes)
@@ -169,7 +173,8 @@ class Walker:
                 continue
             elif element.tag == f"{W}fldChar" and ctx.out is None:
                 self.field(element, ctx.story, section, anchor)
-            elif element.tag in NOTE_REFS and ctx.out is None:
+            elif element.tag in NOTE_REFS and ctx.out is None and not any(f.instr for f in ctx.story.fields) \
+                    and not self.styles.run(ctx.para if ctx.para is not None else self._empty, ctx.run)[2]:
                 self.refs.append((section, anchor, element.tag, element.get(f"{W}id", "")))
             elif element.tag == _PARA:
                 ctx = _Ctx(ctx.out, ctx.ignored, ctx.process, element, None, ctx.story)
@@ -207,6 +212,8 @@ class Walker:
             mark = OUT
             if ctx.out == "alt":
                 self.skipped += n
+            elif ctx.out == "special":
+                self.special += n
             else:
                 self.deleted += n
         elif blockers:
@@ -257,3 +264,5 @@ class Walker:
             self.notes.append(Note(0, None, "alternate-content", ALTERNATE_SKIPPED, "chars", self.skipped))
         if self.deleted:
             self.notes.append(Note(0, None, "tracked-deletion", TRACKED_DELETION, "chars", self.deleted))
+        if self.special:
+            self.notes.append(Note(0, None, "special-note", SPECIAL_NOTE, "chars", self.special))

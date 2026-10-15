@@ -6,7 +6,8 @@
 표시하고, 블록에는 보통 출처만 넣는다. 한 번도 넣지 않은 보통 출처는 구역 끝 구조 문단(신뢰도 0.3, unassigned_text)으로
 살린다. 문단 안 개체(w:drawing·w:pict·w:object)는 문단 글자 뒤에 블록으로 낸다(스펙 §7.1, §7.4): 그림은 PNG 자산(관계 →
 미디어 파트, drawing.Images), 글상자는 안 문단마다 문단 블록(제목·목록 판정 없음)과 shape_text, 묶음·캔버스는 자식을 차례로.
-칸 안 개체는 표 블록 뒤에 낸다. 머리말·꼬리말·각주·미주는 아직 블록을 내지 않아 그 글자가 살리기로 나온다."""
+칸 안 개체는 표 블록 뒤에 낸다. 머리말·꼬리말(스펙 §7.2)은 구역이 처음 참조한 파트마다 구역 첫 항목 자리에 블록 하나(파트
+문단 글자를 \\n으로)와 그 안 표·개체, 각주·미주(스펙 §7.3)는 구역 끝에 각주 전체·미주 전체를 참조 순서대로 낸다."""
 
 import xml.etree.ElementTree as ET
 from collections import Counter
@@ -34,7 +35,6 @@ MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 MAIN = f"{MIME}.main+xml"
 W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 M = "{http://schemas.openxmlformats.org/officeDocument/2006/math}"
-R_ID = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
 P, TBL, RUN, SDT, SDT_CONTENT = f"{W}p", f"{W}tbl", f"{W}r", f"{W}sdt", f"{W}sdtContent"
 CUSTOM_XML, SECT_PR, BODY = f"{W}customXml", f"{W}sectPr", f"{W}body"
 T, INSTR, SYM, BR, CR = f"{W}t", f"{W}instrText", f"{W}sym", f"{W}br", f"{W}cr"
@@ -67,6 +67,9 @@ NOTES = {"footnotes": (f"{W}footnotes", f"{W}footnote"), "endnotes": (f"{W}endno
 SPECIAL_NOTES = frozenset({"separator", "continuationSeparator", "continuationNotice"})
 UNKNOWN_INLINE = "unknown_inline_element"  # 모르는 런 자식 안 글자를 그 자리에 넣었다
 COMMENTS_SKIPPED = "comments_skipped"  # 메모(인쇄되지 않음)는 범위 밖
+UNREFERENCED = "unreferenced_part_skipped"  # 참조되지 않은 머리말·꼬리말 파트와 주석은 범위 밖
+MARGIN_KINDS = {"header": "page_header", "footer": "page_footer"}
+Story_ = tuple[str, ET.Element, str, Prefixes]  # (블록 종류·주석 종류, 요소, 파트 멤버, 그 파트 접두어)
 NESTED_TABLE = "nested_table_flattened"  # 칸 안 표를 칸 글자로 펼쳤다(계약에 중첩 표가 없다)
 MERGE_REPAIRED = "table_merge_repaired"  # 짝 없는 세로 병합 continue를 보통 칸으로 두었다
 CELLS_PADDED = "table_cells_padded"  # gridBefore·gridAfter·짧은 행의 빈자리를 빈 칸으로 채웠다(근사)
@@ -89,6 +92,9 @@ class _Doc:
     outline: bool = False  # 개요 수준·제목 스타일 제목을 하나라도 썼나(그러면 크기 규칙을 쓰지 않는다)
     # _stories가 연 파트 뿌리: Walker·장부가 id(w:p)로 문단을 가리키므로 파싱이 끝날 때까지 붙잡아 id 재사용을 막는다
     held: list[ET.Element] = field(default_factory=list)
+    margins: dict[int, list[tuple[int, Story_]]] = field(default_factory=dict)  # 구역 → (닻, 머리말·꼬리말 파트)
+    notes: dict[int, list[tuple[int, Story_]]] = field(default_factory=dict)  # 구역 → (닻, 주석) 참조 차례
+    unreferenced: int = 0  # 참조되지 않은 머리말·꼬리말 파트·주석의 글자
 
 
 def _text(element: ET.Element) -> str:
@@ -467,13 +473,52 @@ class _Section:
                 out += [(None, "\t")] * bool(c) + self.cell(tc, anchor)
         return out
 
+    def use(self, member: str, prefixes: Prefixes) -> tuple[str, Prefixes]:
+        """읽는 파트를 바꾸고 앞의 (파트, 접두어)를 돌려준다."""
+        before = (self.host, self.prefixes)
+        self.host, self.prefixes = member, prefixes
+        return before
+
+    def margins(self) -> None:
+        """머리말·꼬리말: 파트 문단 글자를 \\n으로 이은 블록 하나, 그 뒤 안의 표·개체(판정 없음)."""
+        inner, self.inner = self.inner, True
+        for anchor, (kind, root, member, prefixes) in self.doc.margins.get(self.index, []):
+            before = self.use(member, prefixes)
+            items = tables.cell_items(root)
+            bundles: list[Bundle] = []
+            for i, p in enumerate(item for item in items if item.tag == P):
+                bundles += [(None, "\n")] * bool(i) + self.content(p, anchor)[0]
+            self.emit(kind, bundles, anchor)
+            for item in items:
+                if item.tag == P:
+                    self.place(self.objects(item), anchor)
+                else:
+                    self.table(item, anchor)
+            self.use(*before)
+        self.inner = inner
+
+    def end_notes(self) -> None:
+        """구역 끝: 각주 전체, 그다음 미주 전체(참조 순서). 주석 항목마다 문단(판정 없음)·표, 그 뒤 안의 개체."""
+        inner, self.inner = self.inner, True
+        for wanted in NOTES:
+            for anchor, (kind, note, member, prefixes) in self.doc.notes.get(self.index, []):
+                if kind != wanted:
+                    continue
+                before = self.use(member, prefixes)
+                for item in tables.cell_items(note):
+                    (self.paragraph if item.tag == P else self.table)(item, anchor)
+                self.use(*before)
+        self.inner = inner
+
     def build(self) -> None:
+        self.margins()
         for anchor, item in self.items:
             if item.tag == P:
                 self.paragraph(item, anchor)
             else:
                 self.table(item, anchor)
         self.late = True
+        self.end_notes()
         self.rescue()
         counts = self.ledger.count()
         self.doc.counts.append(counts)
@@ -567,6 +612,9 @@ class DocxParser:
         if chars:
             doc.regions.append(Region("comments", "paragraph", COMMENTS_SKIPPED, 0, 0, gate("chars", chars, None),
                                       "doc-comments"))
+        if doc.unreferenced:
+            doc.regions.append(Region("unreferenced-part", "paragraph", UNREFERENCED, 0, 0,
+                                      gate("chars", doc.unreferenced, None), "doc-unreferenced-part"))
         blocks, regions = finish(doc.specs, doc.regions, doc.outline)
         parsed = ParsedSource(mime=MIME, blocks=blocks, assets=doc.images.budget.assets, regions=regions)
         return parsed, tuple(doc.counts)
@@ -578,13 +626,15 @@ class DocxParser:
 
     def _stories(self, doc: _Doc, parts: list[tuple[list[ET.Element], ET.Element | None]],
                  numbered: list[list[tuple[int, ET.Element]]], ledgers: list[Ledger]) -> None:
-        """본문 밖 이야기의 출처를 장부에 올린다: 구역이 처음 참조한 머리말·꼬리말 파트(닻 = 구역 첫 항목), 본문이
-        처음 참조한 각주·미주(닻 = 참조 항목). 아직 블록을 내지 않으므로 보통 출처는 살리기로 나온다."""
+        """본문 밖 이야기의 출처를 장부에 올리고 블록 재료를 doc에 둔다: 구역이 처음 참조한 머리말·꼬리말 파트(닻 =
+        구역 첫 항목, 항목 없는 구역은 앞 항목), 보이는 참조가 처음 가리킨 각주·미주(닻 = 참조 항목). 특수 주석은 범위
+        밖 출처(구역 0), 참조되지 않은 파트·주석은 글자 수만(unreferenced_part_skipped)."""
         package = doc.package
         rels = package.rels(package.main)
         seen: set[str] = set()
         base = 0
         for k, (items, sect) in enumerate(parts):
+            anchor = base if items else max(base - 1, 0)
             for ref in sect if sect is not None else ():
                 if ref.tag not in MARGIN_REFS:
                     continue
@@ -597,25 +647,37 @@ class DocxParser:
                 root, prefixes = package.part(rel.target, root_tag)
                 doc.held.append(root)
                 story = Story()
-                doc.walker.walk(root, prefixes, ledgers[k], k, base, story, (root,))
+                doc.walker.walk(root, prefixes, ledgers[k], k, anchor, story, (root,))
                 doc.walker.close(story)
+                doc.margins.setdefault(k, []).append((anchor, (MARGIN_KINDS[kind], root, rel.target, prefixes)))
             base += len(items)
-        notes: dict[str, tuple[ET.Element, Prefixes, dict[str, ET.Element]]] = {}
+        for kind, root_tag in (("header", f"{W}hdr"), ("footer", f"{W}ftr")):
+            for member in package.related(package.main, kind):
+                if member not in seen:
+                    doc.unreferenced += part_chars(package.part(member, root_tag)[0])
+        notes: dict[str, tuple[ET.Element, str, Prefixes, dict[str, ET.Element]]] = {}
         for kind, (root_tag, note_tag) in NOTES.items():
             members = package.related(package.main, kind)
             if members:
                 root, prefixes = package.part(members[0], root_tag)
                 doc.held.append(root)
-                found = {n.get(f"{W}id", ""): n for n in root.iterfind(note_tag)
-                         if n.get(f"{W}type") not in SPECIAL_NOTES}
-                notes[kind] = (root, prefixes, found)
+                found: dict[str, ET.Element] = {}
+                for note in root.iterfind(note_tag):
+                    if note.get(f"{W}type") in SPECIAL_NOTES:
+                        doc.walker.walk(note, prefixes, ledgers[0], 0, 0, Story(), (root,), forced="special")
+                    else:
+                        found.setdefault(note.get(f"{W}id", ""), note)
+                notes[kind] = (root, members[0], prefixes, found)
         done: set[tuple[str, str]] = set()
-        for section, anchor, tag, key in doc.walker.refs:
+        for section, anchor, tag, key in doc.walker.refs:  # 주석 안 참조가 뒤에 붙어도 돈다
             kind = NOTE_REFS[tag]
-            if kind not in notes or (kind, key) in done or key not in notes[kind][2]:
+            if kind not in notes or (kind, key) in done or key not in notes[kind][3]:
                 continue
             done.add((kind, key))
-            root, prefixes, found = notes[kind]
+            root, member, prefixes, found = notes[kind]
             story = Story()
             doc.walker.walk(found[key], prefixes, ledgers[section], section, anchor, story, (root,))
             doc.walker.close(story)
+            doc.notes.setdefault(section, []).append((anchor, (kind, found[key], member, prefixes)))
+        for kind, (_, _, _, found) in notes.items():
+            doc.unreferenced += sum(part_chars(note) for key, note in found.items() if (kind, key) not in done)
