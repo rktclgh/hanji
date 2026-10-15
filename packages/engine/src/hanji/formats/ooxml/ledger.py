@@ -21,6 +21,7 @@ SOURCES = frozenset({T, INSTR, SYM, MT})
 STORY = f"{W}txbxContent"  # 그 안은 이야기 하나(필드 상태가 처음부터)
 DELETED = frozenset({f"{W}moveFrom", f"{W}del"})  # 안의 출처는 범위 밖(변경 추적 삭제)
 DEL_TEXT = frozenset({f"{W}delText", f"{W}delInstrText"})  # 출처가 아니다(글자 수만 처리 이력에)
+NOTE_REFS = frozenset({f"{W}footnoteReference", f"{W}endnoteReference"})
 NORMAL, HIDDEN, OUT = "normal", "hidden", "out"
 ALTERNATE_SKIPPED = "alternate_content_skipped"
 FIELD_UNTERMINATED = "field_unterminated"
@@ -103,12 +104,14 @@ def _split(tag: str) -> tuple[str, str]:
 
 
 class Walker:
-    """문서 하나의 출처를 표시한다. marks는 id(출처 요소) → 표시, notes는 처리 이력 재료(문서 순서)."""
+    """문서 하나의 출처를 표시한다. marks는 id(출처 요소) → 표시, notes는 처리 이력 재료(문서 순서), refs는 범위 안
+    각주·미주 참조 (구역, 닻, 참조 요소 이름, w:id)(문서 순서)."""
 
     def __init__(self, styles: Styles) -> None:
         self.styles = styles
         self.marks: dict[int, str] = {}
         self.notes: list[Note] = []
+        self.refs: list[tuple[int, int, str, str]] = []
         self.skipped = 0  # 고르지 않은 mc 쪽·무시한 요소의 출처 글자
         self.deleted = 0  # 변경 추적 삭제(moveFrom·del 안 출처, delText) 글자
         self._paras: dict[int, _Para] = {}
@@ -117,13 +120,25 @@ class Walker:
     def walk(self, root: ET.Element, prefixes: Prefixes, ledger: Ledger, section: int, anchor: int, story: Story,
              ancestors: Sequence[ET.Element] = ()) -> None:
         """root 아래 출처를 문서 순서로 장부에 올리고 표시한다(재귀 없음). 글상자 내용은 새 이야기다. ancestors는
-        root 위 요소들(파트 뿌리·w:body: 그 mc:Ignorable·ProcessContent가 root에도 미친다)."""
+        root 위 요소들(위에서 아래로: 파트 뿌리·w:body·본문 층 감싼 요소). 위에서부터 훑은 것처럼 그 mc:Ignorable·
+        ProcessContent가 root에도 미치고, 무시한 요소·고르지 않은 mc 쪽·변경 추적 삭제 아래면 root도 범위 밖이다."""
         ignored: frozenset[str] = frozenset()
         process: frozenset[tuple[str, str]] = frozenset()
-        for element in ancestors:
+        out: str | None = None
+        path = (*ancestors, root)
+        for k, element in enumerate(ancestors):
             more, also = ignorable(element, prefixes)
             ignored, process = ignored | more, process | also
-        stack: list[tuple[ET.Element, _Ctx] | Story] = [(root, _Ctx(None, ignored, process, None, None, story))]
+            uri, local = _split(element.tag)
+            if out is not None:
+                continue
+            if uri in ignored and (uri, local) not in process and (uri, "*") not in process:
+                out = "alt"
+            elif element.tag == f"{MC}AlternateContent" and choose(element, prefixes) is not path[k + 1]:
+                out = "alt"
+            elif element.tag in DELETED:
+                out = "deleted"
+        stack: list[tuple[ET.Element, _Ctx] | Story] = [(root, _Ctx(out, ignored, process, None, None, story))]
         while stack:
             item = stack.pop()
             if isinstance(item, Story):
@@ -153,6 +168,8 @@ class Walker:
                 continue
             elif element.tag == f"{W}fldChar" and ctx.out is None:
                 self.field(element, ctx.story, section, anchor)
+            elif element.tag in NOTE_REFS and ctx.out is None:
+                self.refs.append((section, anchor, element.tag, element.get(f"{W}id", "")))
             elif element.tag == _PARA:
                 ctx = _Ctx(ctx.out, ctx.ignored, ctx.process, element, None, ctx.story)
             elif element.tag in _RUNS:

@@ -70,10 +70,10 @@ def ppr(style: str | None = None, outline: int | str | None = None, num: str | N
 
 
 def p(*items: str, style: str | None = None, outline: int | str | None = None, num: str | None = None,
-      extra: str = "") -> str:
-    """문단. 꺾쇠로 시작하지 않는 항목은 런 하나(글자 하나)가 된다."""
+      extra: str = "", process: str | None = None) -> str:
+    """문단. 꺾쇠로 시작하지 않는 항목은 런 하나(글자 하나)가 된다. process는 mc:ProcessContent 값."""
     inner = "".join(item if item.startswith("<") else r(item) for item in items)
-    return f"<w:p>{ppr(style, outline, num, extra)}{inner}</w:p>"
+    return f"<w:p{attrs(mc__ProcessContent=process)}>{ppr(style, outline, num, extra)}{inner}</w:p>"
 
 
 def sect() -> str:
