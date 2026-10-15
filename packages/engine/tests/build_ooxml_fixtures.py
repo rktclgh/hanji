@@ -76,6 +76,26 @@ def p(*items: str, style: str | None = None, outline: int | str | None = None, n
     return f"<w:p{attrs(mc__ProcessContent=process)}>{ppr(style, outline, num, extra)}{inner}</w:p>"
 
 
+def tc(*items: str, span: int | str | None = None, merge: str | None = None) -> str:
+    """표 칸. 꺾쇠로 시작하지 않는 항목은 문단 하나가 된다(항목이 없으면 빈 문단). merge는 vMerge@w:val("" = 값 없음)."""
+    props = (f"<w:gridSpan{attrs(w__val=span)}/>" if span is not None else "") + (
+        f"<w:vMerge{attrs(w__val=merge or None)}/>" if merge is not None else "")
+    inner = "".join(item if item.startswith("<") else p(item) for item in items) or "<w:p/>"
+    return f"<w:tc>{f'<w:tcPr>{props}</w:tcPr>' if props else ''}{inner}</w:tc>"
+
+
+def tr(*cells: str, header: bool = False, before: int | None = None, after: int | None = None) -> str:
+    props = (f"<w:gridBefore{attrs(w__val=before)}/>" if before is not None else "") + (
+        f"<w:gridAfter{attrs(w__val=after)}/>" if after is not None else "") + ("<w:tblHeader/>" if header else "")
+    return f"<w:tr>{f'<w:trPr>{props}</w:trPr>' if props else ''}{''.join(cells)}</w:tr>"
+
+
+def tbl(*rows: str, cols: int | None = None) -> str:
+    """표. cols가 있으면 선언 격자 열 수(없으면 빈 격자: 열 수는 행에서 나온다)."""
+    grid = '<w:gridCol w:w="2000"/>' * (cols or 0)
+    return f'<w:tbl><w:tblPr/><w:tblGrid>{grid}</w:tblGrid>{"".join(rows)}</w:tbl>'
+
+
 def sect() -> str:
     return '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/></w:sectPr>'
 

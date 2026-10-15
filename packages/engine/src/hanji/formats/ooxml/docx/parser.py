@@ -11,15 +11,19 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
+from hanji_contracts import Table
+
 from ....errors import ParseError
 from ...base import ParsedSource
 from ...flowdoc import Region, finish, gate, ledger_gate
 from ...flowledger import Bundle, Counts, Ledger, ink
+from ...hwpx.tables import RawCell, build
 from ...pdf.group import RESCUED_CONFIDENCE, step
 from ...pdf.parser import COVERAGE_MISMATCH, UNASSIGNED_TEXT
 from ...zipxml import Prefixes
 from ..ledger import NORMAL, SOURCES, Note, Story, Walker, part_chars, sym_char
 from ..package import MC, READ, Package, choose
+from . import tables
 from .styles import Styles, read_styles
 
 MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -51,6 +55,10 @@ NOTES = {"footnotes": (f"{W}footnotes", f"{W}footnote"), "endnotes": (f"{W}endno
 SPECIAL_NOTES = frozenset({"separator", "continuationSeparator", "continuationNotice"})
 UNKNOWN_INLINE = "unknown_inline_element"  # 모르는 런 자식 안 글자를 그 자리에 넣었다
 COMMENTS_SKIPPED = "comments_skipped"  # 메모(인쇄되지 않음)는 범위 밖
+NESTED_TABLE = "nested_table_flattened"  # 칸 안 표를 칸 글자로 펼쳤다(계약에 중첩 표가 없다)
+MERGE_REPAIRED = "table_merge_repaired"  # 짝 없는 세로 병합 continue를 보통 칸으로 두었다
+CELLS_PADDED = "table_cells_padded"  # gridBefore·gridAfter·짧은 행의 빈자리를 빈 칸으로 채웠다(근사)
+MERGED_TEXT = "merged_cell_text_kept"  # 이어진 칸의 글자를 시작 칸 글자 뒤에 이었다
 
 
 @dataclass(slots=True)
@@ -236,10 +244,63 @@ class _Section:
             self.emit("paragraph", bundles, anchor, _sizes=sizes, _size=size, _bold=bold * 2 > sum(sizes.values()),
                       _lines=lines)
 
+    def table(self, tbl: ET.Element, anchor: int) -> None:
+        """1×1은 상자: 칸 항목을 이 자리의 본문 항목처럼(문단은 제목·목록 판정). 그 밖은 표 블록, 검증 실패·상한
+        초과는 칸 글자를 문서 순서로 \\n 이은 문단과 처리 이력."""
+        box = tables.is_box(tbl)
+        if box is not None:
+            for item in tables.cell_items(box):
+                (self.paragraph if item.tag == P else self.table)(item, anchor)
+            return
+        tcs = [tc for _, row in tables.rows(tbl) for tc in row]
+        parts = {id(tc): self.cell(tc, anchor) for tc in tcs}  # 칸 글자는 문서 순서로 한 번만 만든다
+        shape = tables.grid(tbl)
+        table, kept = (shape, False) if isinstance(shape, str) else _assemble(shape, parts)
+        if isinstance(table, Table) and not isinstance(shape, str):
+            self.doc.specs.append({"kind": "table", "table": table, "text": table.plain_text(), "confidence": 1.0,
+                                   "state": "det", "text_source": "native", "_anchor": anchor, "_late": self.late})
+            for tc in tcs:
+                self.ledger.put(parts[id(tc)])
+            for flag, reason in ((shape.repaired, MERGE_REPAIRED), (shape.padded, CELLS_PADDED), (kept, MERGED_TEXT)):
+                if flag:
+                    self.region("table", "table", reason, anchor)
+            return
+        joined: list[Bundle] = []
+        for i, tc in enumerate(tcs):
+            joined += [(None, "\n")] * bool(i) + parts[id(tc)]
+        self.emit("paragraph", joined, anchor)
+        self.region("table", "table", str(table), anchor)
+
+    def cell(self, tc: ET.Element, anchor: int) -> list[Bundle]:
+        """칸 글자: 칸 항목(문단·표)을 \\n으로 잇는다(제목 판정 없음). 칸 안 표는 펼친다."""
+        out: list[Bundle] = []
+        for i, item in enumerate(tables.cell_items(tc)):
+            if i:
+                out.append((None, "\n"))
+            out += self.content(item, anchor)[0] if item.tag == P else self.flatten(item, anchor)
+        return out
+
+    def flatten(self, tbl: ET.Element, anchor: int) -> list[Bundle]:
+        """칸 안 표의 글자: 1×1은 그 칸 글자(기록 없음), 그 밖은 칸 \\t, 행 \\n(w:tr·w:tc 문서 순서)과
+        nested_table_flattened."""
+        box = tables.is_box(tbl)
+        if box is not None:
+            return self.cell(box, anchor)
+        self.region("nested-table", "table", NESTED_TABLE, anchor)
+        out: list[Bundle] = []
+        for r, (_, tcs) in enumerate(tables.rows(tbl)):
+            if r:
+                out.append((None, "\n"))
+            for c, tc in enumerate(tcs):
+                out += [(None, "\t")] * bool(c) + self.cell(tc, anchor)
+        return out
+
     def build(self) -> None:
         for anchor, item in self.items:
             if item.tag == P:
                 self.paragraph(item, anchor)
+            else:
+                self.table(item, anchor)
         self.late = True
         self.rescue()
         counts = self.ledger.count()
@@ -268,6 +329,21 @@ class _Section:
             self.ledger.rescued = rescued
             self.region("unassigned-text", "paragraph", UNASSIGNED_TEXT, next(iter(groups)),
                         gate("rescued", rescued, "==0"))
+
+
+def _assemble(shape: tables.Grid, parts: dict[int, list[Bundle]]) -> tuple[Table | str, bool]:
+    """격자 칸 → 계약 Table(또는 사유)과 이어진 칸 글자를 이었는지. 이어진 칸 글자는 시작 칸 글자 뒤에 \\n으로."""
+    cells: list[RawCell] = []
+    kept = False
+    for slot in shape.slots:
+        text = _join(parts[id(slot.tc)]).strip() if slot.tc is not None else ""
+        for tc in slot.merged:
+            more = _join(parts[id(tc)]).strip()
+            if more:
+                kept = True
+                text = f"{text}\n{more}" if text else more
+        cells.append(RawCell(slot.row, slot.col, slot.rowspan, slot.colspan, slot.header, False, text))
+    return build(shape.rows, shape.cols, cells), kept
 
 
 def _region(note: Note) -> Region:
