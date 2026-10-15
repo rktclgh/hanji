@@ -1,0 +1,172 @@
+{
+  "schema_version": "0.4",
+  "document_id": "fx-ooxml-table",
+  "version": 1,
+  "regions": [
+    {
+      "region_id": "s0-p1-table-0",
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 1
+      },
+      "kind": "table",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "merged_cell_text_kept"
+    },
+    {
+      "region_id": "s0-p2-table-0",
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 2
+      },
+      "kind": "table",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "table_merge_repaired"
+    },
+    {
+      "region_id": "s0-p3-table-0",
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 3
+      },
+      "kind": "table",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "table_merge_repaired"
+    },
+    {
+      "region_id": "s0-p3-table-1",
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 3
+      },
+      "kind": "table",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "table_cells_padded"
+    },
+    {
+      "region_id": "s0-p4-table-0",
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 4
+      },
+      "kind": "table",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "table_invalid"
+    },
+    {
+      "region_id": "s0-p6-nested-table-0",
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "상자 안 제목"
+        ],
+        "paragraph_index": 6
+      },
+      "kind": "table",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "nested_table_flattened"
+    },
+    {
+      "region_id": "s0-p8-table-0",
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "상자 안 제목"
+        ],
+        "paragraph_index": 8
+      },
+      "kind": "table",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "table_too_large"
+    }
+  ]
+}

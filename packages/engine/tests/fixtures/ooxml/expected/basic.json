@@ -1,0 +1,397 @@
+{
+  "schema_version": "0.4",
+  "document_id": "fx-ooxml-basic",
+  "version": 1,
+  "layer_state": "det",
+  "source": {
+    "name": "basic.docx",
+    "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "content_hash": "sha256:22987ee2065736a2d3f5e3af297348712c0328b9b0d877b999a40eeb1c7653ae",
+    "page_count": null
+  },
+  "pages": [],
+  "blocks": [
+    {
+      "block_id": "b_22c7ffd804b979c8c6f0c600",
+      "content_hash": "c_938e0296d1a03e6aef910c0710c36bf5",
+      "order": 0,
+      "kind": "heading",
+      "text": "2026년 지어낸 사업 계획",
+      "table": null,
+      "figure": null,
+      "level": 1,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 0
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_5fa9a8b43939ae832b61774d",
+      "content_hash": "c_6a62bf04ae3fcad719dec07c738e02e7",
+      "order": 1,
+      "kind": "paragraph",
+      "text": "본 문서는 합성 예제로 만든 글이다.",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "2026년 지어낸 사업 계획"
+      ],
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "2026년 지어낸 사업 계획"
+        ],
+        "paragraph_index": 1
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_2082a7ed3d0c7e88b2ccae7b",
+      "content_hash": "c_1f5328edfc3602fbe648605c8d93f63a",
+      "order": 2,
+      "kind": "heading",
+      "text": "1. 추진 배경",
+      "table": null,
+      "figure": null,
+      "level": 2,
+      "section_path": [
+        "2026년 지어낸 사업 계획"
+      ],
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "2026년 지어낸 사업 계획"
+        ],
+        "paragraph_index": 3
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_53110481afc386e4c013ecd3",
+      "content_hash": "c_64be6b4e0fff7a3d1836f14ed741d9d0",
+      "order": 3,
+      "kind": "paragraph",
+      "text": "구분\t내용\n둘째 줄 A‑B 기호 ",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "2026년 지어낸 사업 계획",
+        "1. 추진 배경"
+      ],
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "2026년 지어낸 사업 계획",
+          "1. 추진 배경"
+        ],
+        "paragraph_index": 4
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_af2ff68088ab94b4e4d55a77",
+      "content_hash": "c_e489293455a0ec2fe96d73508dd7adbe",
+      "order": 4,
+      "kind": "list_item",
+      "text": "첫째 번호 항목",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "2026년 지어낸 사업 계획",
+        "1. 추진 배경"
+      ],
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "2026년 지어낸 사업 계획",
+          "1. 추진 배경"
+        ],
+        "paragraph_index": 5
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_bfda0ced6c021766877a2072",
+      "content_hash": "c_38dad5bea573faa3a6605e856c174373",
+      "order": 5,
+      "kind": "list_item",
+      "text": "스타일 목록 항목",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "2026년 지어낸 사업 계획",
+        "1. 추진 배경"
+      ],
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "2026년 지어낸 사업 계획",
+          "1. 추진 배경"
+        ],
+        "paragraph_index": 6
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_92ad9bbf2cff63c607fb652d",
+      "content_hash": "c_e3af331ef4876708f2ba77db1763d1bd",
+      "order": 6,
+      "kind": "heading",
+      "text": "아주 깊은 개요",
+      "table": null,
+      "figure": null,
+      "level": 6,
+      "section_path": [
+        "2026년 지어낸 사업 계획",
+        "1. 추진 배경"
+      ],
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "2026년 지어낸 사업 계획",
+          "1. 추진 배경"
+        ],
+        "paragraph_index": 7
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_d7699417f32639c6a49129dc",
+      "content_hash": "c_b5160c499f05039c6a002df3c31570a9",
+      "order": 7,
+      "kind": "paragraph",
+      "text": "총액 1,234.5억원, 증가율 12.3%, 면적 84㎡, 변동 △0.5, GDP 대비 2.1%p(OECD 평균)",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "2026년 지어낸 사업 계획",
+        "1. 추진 배경",
+        "아주 깊은 개요"
+      ],
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "2026년 지어낸 사업 계획",
+          "1. 추진 배경",
+          "아주 깊은 개요"
+        ],
+        "paragraph_index": 8
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_d62efaad8d776382d0f45e0b",
+      "content_hash": "c_d7b98ad7836d719c582130ce36f35453",
+      "order": 8,
+      "kind": "heading",
+      "text": "순환 스타일 제목",
+      "table": null,
+      "figure": null,
+      "level": 3,
+      "section_path": [
+        "2026년 지어낸 사업 계획",
+        "1. 추진 배경"
+      ],
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "2026년 지어낸 사업 계획",
+          "1. 추진 배경"
+        ],
+        "paragraph_index": 9
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_a74278cc42fe622501e11c92",
+      "content_hash": "c_8da3603c4a9a45a5fd294d18d926e029",
+      "order": 9,
+      "kind": "paragraph",
+      "text": "모르는 자식 글 끝",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "2026년 지어낸 사업 계획",
+        "1. 추진 배경",
+        "순환 스타일 제목"
+      ],
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "2026년 지어낸 사업 계획",
+          "1. 추진 배경",
+          "순환 스타일 제목"
+        ],
+        "paragraph_index": 10
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_14df2179f48a74acd3a8e77d",
+      "content_hash": "c_c2fa1ae73c5115caaaca90602b193bee",
+      "order": 10,
+      "kind": "paragraph",
+      "text": "보이는 글 표시 기호 글",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "2026년 지어낸 사업 계획",
+        "1. 추진 배경",
+        "순환 스타일 제목"
+      ],
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "2026년 지어낸 사업 계획",
+          "1. 추진 배경",
+          "순환 스타일 제목"
+        ],
+        "paragraph_index": 11
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_544bbee32df46b280630f11d",
+      "content_hash": "c_7bd97bd250f81e78436b6d43ca81b3bf",
+      "order": 11,
+      "kind": "paragraph",
+      "text": "넣은 글 옮겨 온 글",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "2026년 지어낸 사업 계획",
+        "1. 추진 배경",
+        "순환 스타일 제목"
+      ],
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "2026년 지어낸 사업 계획",
+          "1. 추진 배경",
+          "순환 스타일 제목"
+        ],
+        "paragraph_index": 12
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_7729a953a7095ac09da396ed",
+      "content_hash": "c_df4d2605bbcd222eba46763d89bafdc7",
+      "order": 12,
+      "kind": "paragraph",
+      "text": "수식 x=12",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "2026년 지어낸 사업 계획",
+        "1. 추진 배경",
+        "순환 스타일 제목"
+      ],
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "2026년 지어낸 사업 계획",
+          "1. 추진 배경",
+          "순환 스타일 제목"
+        ],
+        "paragraph_index": 13
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_5fc0a2f7322f7ca03ec6d1aa",
+      "content_hash": "c_c92aee16ef28072a9eae05a5cbcb9319",
+      "order": 13,
+      "kind": "heading",
+      "text": "2. 다음 절",
+      "table": null,
+      "figure": null,
+      "level": 1,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 14
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_ffa96efaf792573055659258",
+      "content_hash": "c_332d13f984b664ac6a477a2d03295079",
+      "order": 14,
+      "kind": "paragraph",
+      "text": "끝 문단이다.",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "2. 다음 절"
+      ],
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "2. 다음 절"
+        ],
+        "paragraph_index": 15
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    }
+  ]
+}

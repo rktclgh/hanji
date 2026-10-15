@@ -1,0 +1,215 @@
+{
+  "schema_version": "0.4",
+  "document_id": "fx-ooxml-fields",
+  "version": 1,
+  "layer_state": "det",
+  "source": {
+    "name": "fields.docx",
+    "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "content_hash": "sha256:71510125e9aa87c22484659bebfba2487ab1318fb79beef41ae2de3e606f4833",
+    "page_count": null
+  },
+  "pages": [],
+  "blocks": [
+    {
+      "block_id": "b_fde20f6861f21f472f77dcbc",
+      "content_hash": "c_72661bbefa429e892679935443317432",
+      "order": 0,
+      "kind": "paragraph",
+      "text": "1. 첫째 절\t1",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 0
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_7a1a6dde9ae55aaae5578745",
+      "content_hash": "c_164914557f6fd4dd50cd7a84de4eed81",
+      "order": 1,
+      "kind": "paragraph",
+      "text": "2. 둘째 절\t3",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 1
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_3d2dbef2ed61da79dba680bc",
+      "content_hash": "c_11b9630f66324a31ad572d84c207691e",
+      "order": 2,
+      "kind": "paragraph",
+      "text": "3. 셋째 절\t5",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 2
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_b79c98b90cd4b028221e0946",
+      "content_hash": "c_38f96d7f2d92c25eb12d1570c8e1bc71",
+      "order": 3,
+      "kind": "paragraph",
+      "text": "앞 참 뒤",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 3
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_dba4f4c44653074f33e06417",
+      "content_hash": "c_af1d70c75a7d7901a52b853f5c4b0740",
+      "order": 4,
+      "kind": "paragraph",
+      "text": "필드 밖 명령 글자",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 4
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_061a0b0ca81aa906ba9e8649",
+      "content_hash": "c_d1611bd8cbee5509423a8fc947b09bd7",
+      "order": 5,
+      "kind": "paragraph",
+      "text": "쪽 수 12",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 5
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_3e0ea2f90c85c3107b5d6ea8",
+      "content_hash": "c_ce9b74f7999b6075b1db870e22b3e47f",
+      "order": 6,
+      "kind": "paragraph",
+      "text": "고른 쪽 글",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 6
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_edef1334ecf388538c1d6649",
+      "content_hash": "c_2dc53751a11627998e7663ebe401303e",
+      "order": 7,
+      "kind": "paragraph",
+      "text": "대체 쪽 글",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 7
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_43e7d00431dfd611bc24845f",
+      "content_hash": "c_b1aefd1a03925ac4d93488e7e1454db0",
+      "order": 8,
+      "kind": "paragraph",
+      "text": "무시 표시 벗긴 글",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 9
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_d7068941031885cdf47b6349",
+      "content_hash": "c_197500c9fd35eff49afe05f862f2943d",
+      "order": 9,
+      "kind": "paragraph",
+      "text": "끝나지 않은",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 10
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    }
+  ]
+}

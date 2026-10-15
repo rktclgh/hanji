@@ -1,0 +1,714 @@
+{
+  "schema_version": "0.4",
+  "document_id": "fx-ooxml-table",
+  "version": 1,
+  "layer_state": "det",
+  "source": {
+    "name": "table.docx",
+    "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "content_hash": "sha256:c07462264fbf947404531b340d9af395ca5e0bd743fb5c166fc9963329da2f51",
+    "page_count": null
+  },
+  "pages": [],
+  "blocks": [
+    {
+      "block_id": "b_31abf2e800a91b45afef3438",
+      "content_hash": "c_206c072f1d24e81795658b3faeb0b819",
+      "order": 0,
+      "kind": "paragraph",
+      "text": "표 예제 문단",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 0
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_4252a88c8319af6b8e8f62ba",
+      "content_hash": "c_a250d8bae369bb4a68bec433879ee1e4",
+      "order": 1,
+      "kind": "table",
+      "text": "구분\t2025년\t2026년\n지역\n이어진 칸 글\t100억원\t120억원\n△5.0%\t+3.2%\n84㎡\t90㎡",
+      "table": {
+        "n_rows": 4,
+        "n_cols": 3,
+        "cells": [
+          {
+            "row": 0,
+            "col": 0,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "구분",
+            "header": "column",
+            "text_source": "native"
+          },
+          {
+            "row": 0,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "2025년",
+            "header": "column",
+            "text_source": "native"
+          },
+          {
+            "row": 0,
+            "col": 2,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "2026년",
+            "header": "column",
+            "text_source": "native"
+          },
+          {
+            "row": 1,
+            "col": 0,
+            "rowspan": 3,
+            "colspan": 1,
+            "text": "지역\n이어진 칸 글",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 1,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "100억원",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 1,
+            "col": 2,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "120억원",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 2,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "△5.0%",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 2,
+            "col": 2,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "+3.2%",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 3,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "84㎡",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 3,
+            "col": 2,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "90㎡",
+            "header": "none",
+            "text_source": "native"
+          }
+        ]
+      },
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 1
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_04ddefa016113d42b50f5132",
+      "content_hash": "c_96b86a53e9f7164ae73cb22bf534edb2",
+      "order": 2,
+      "kind": "table",
+      "text": "선언 격자보다 넓은 칸\n가\t나\t다\n짝 없는 이음\t라\t마\n사슬 시작\t바\t사\n사슬 끝\t아\t자\n끝난 뒤 이음\t차\t카",
+      "table": {
+        "n_rows": 6,
+        "n_cols": 3,
+        "cells": [
+          {
+            "row": 0,
+            "col": 0,
+            "rowspan": 1,
+            "colspan": 3,
+            "text": "선언 격자보다 넓은 칸",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 1,
+            "col": 0,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "가",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 1,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "나",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 1,
+            "col": 2,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "다",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 2,
+            "col": 0,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "짝 없는 이음",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 2,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "라",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 2,
+            "col": 2,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "마",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 3,
+            "col": 0,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "사슬 시작",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 3,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "바",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 3,
+            "col": 2,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "사",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 4,
+            "col": 0,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "사슬 끝",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 4,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "아",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 4,
+            "col": 2,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "자",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 5,
+            "col": 0,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "끝난 뒤 이음",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 5,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "차",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 5,
+            "col": 2,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "카",
+            "header": "none",
+            "text_source": "native"
+          }
+        ]
+      },
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 2
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_97317a064f1f20cfc722b16f",
+      "content_hash": "c_246472cc32de176a1e249e6335c0ccaf",
+      "order": 3,
+      "kind": "table",
+      "text": "빈자리 앞 시작\t하나\n\t둘\n빈자리 뒤 이음\t셋\n넷\t",
+      "table": {
+        "n_rows": 4,
+        "n_cols": 2,
+        "cells": [
+          {
+            "row": 0,
+            "col": 0,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "빈자리 앞 시작",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 0,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "하나",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 1,
+            "col": 0,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 1,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "둘",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 2,
+            "col": 0,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "빈자리 뒤 이음",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 2,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "셋",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 3,
+            "col": 0,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "넷",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 3,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "",
+            "header": "none",
+            "text_source": "native"
+          }
+        ]
+      },
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 3
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_93516f04502acd1af1cbec9a",
+      "content_hash": "c_25e14ac2841b5f7a868fc22dfa16aaed",
+      "order": 4,
+      "kind": "paragraph",
+      "text": "옛 가로 병합\n옆 칸\n아래 칸\n끝 칸",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 4
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_58a7214706cd37ce910d15d7",
+      "content_hash": "c_e06ad9fdee2ebefdd0434c8451bd4853",
+      "order": 5,
+      "kind": "heading",
+      "text": "상자 안 제목",
+      "table": null,
+      "figure": null,
+      "level": 1,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 5
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_43a6c2375538b224bc5edea3",
+      "content_hash": "c_4e37e7774bd8f1549a88a5c25a0656d4",
+      "order": 6,
+      "kind": "paragraph",
+      "text": "상자 안 문단",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "상자 안 제목"
+      ],
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "상자 안 제목"
+        ],
+        "paragraph_index": 5
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_71d0ed060d8d84feafbc369b",
+      "content_hash": "c_78d0a3a3f462a0c411718daa8ab16bf4",
+      "order": 7,
+      "kind": "table",
+      "text": "안 가\t안 나\n안 다\t안 라",
+      "table": {
+        "n_rows": 2,
+        "n_cols": 2,
+        "cells": [
+          {
+            "row": 0,
+            "col": 0,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "안 가",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 0,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "안 나",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 1,
+            "col": 0,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "안 다",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 1,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "안 라",
+            "header": "none",
+            "text_source": "native"
+          }
+        ]
+      },
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "상자 안 제목"
+      ],
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "상자 안 제목"
+        ],
+        "paragraph_index": 5
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_6985b55f27207f1131e06101",
+      "content_hash": "c_ee712e48b144981e166fae3fec136ff7",
+      "order": 8,
+      "kind": "table",
+      "text": "바깥 칸\n안 1\t안 2\n안 3\t안 4\t작은 상자\n아래 1\t아래 2",
+      "table": {
+        "n_rows": 2,
+        "n_cols": 2,
+        "cells": [
+          {
+            "row": 0,
+            "col": 0,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "바깥 칸\n안 1\t안 2\n안 3\t안 4",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 0,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "작은 상자",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 1,
+            "col": 0,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "아래 1",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 1,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "아래 2",
+            "header": "none",
+            "text_source": "native"
+          }
+        ]
+      },
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "상자 안 제목"
+      ],
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "상자 안 제목"
+        ],
+        "paragraph_index": 6
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_8ca91cdecc0c228b786ef92e",
+      "content_hash": "c_775ce023abf6d18cb69b4ee1aee6e67c",
+      "order": 9,
+      "kind": "table",
+      "text": "띠 1\t띠 2\t띠 3",
+      "table": {
+        "n_rows": 1,
+        "n_cols": 3,
+        "cells": [
+          {
+            "row": 0,
+            "col": 0,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "띠 1",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 0,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "띠 2",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 0,
+            "col": 2,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "띠 3",
+            "header": "none",
+            "text_source": "native"
+          }
+        ]
+      },
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "상자 안 제목"
+      ],
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "상자 안 제목"
+        ],
+        "paragraph_index": 7
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_a60384f5aa826a1ef57526a2",
+      "content_hash": "c_5cc66a1062e0dfaebc45ee5f24acbfe1",
+      "order": 10,
+      "kind": "paragraph",
+      "text": "아주 넓은 칸\n큰 값 아래",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "상자 안 제목"
+      ],
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "상자 안 제목"
+        ],
+        "paragraph_index": 8
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_7932742ec14b36e015aa43d7",
+      "content_hash": "c_077134ec8c1f3d0d5be48613de0ed3c5",
+      "order": 11,
+      "kind": "paragraph",
+      "text": "표 뒤 문단",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "상자 안 제목"
+      ],
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "상자 안 제목"
+        ],
+        "paragraph_index": 9
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    }
+  ]
+}

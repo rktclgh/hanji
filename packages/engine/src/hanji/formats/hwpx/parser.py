@@ -11,20 +11,18 @@
 글맵시, OLE 등은 이미지 없는 그림. 각주·미주는 구역 끝(닻 문단 위치). 개체 조립은 개체 중첩만큼만 재귀한다(XML 깊이
 상한 256이 묶는다)."""
 
-import bisect
 import xml.etree.ElementTree as ET
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
-from hanji_contracts import Attempt, FlowLocator, GateCheck, GateResult, RegionRecord, Table
+from hanji_contracts import GateResult, RegionRecord, Table
 
 from ...errors import ParseError
 from ..base import ParsedSource
+from ..flowdoc import Region, finish, gate, ledger_gate
 from ..pdf.figures import AssetBudget
-from ..pdf.group import (
-    BOLD_HEADING_RATIO, CONFIDENCE, HEADING_MAX_LINES, HEADING_RATIO, MAX_LEVEL, RESCUED_CONFIDENCE, step,
-)
+from ..pdf.group import MAX_LEVEL, RESCUED_CONFIDENCE, step
 from ..pdf.parser import COVERAGE_MISMATCH, UNASSIGNED_TEXT
 from . import images, tables
 from .container import HC, HH, HP, HS, MIME, OverBudget, Package, TooLarge
@@ -56,19 +54,6 @@ NO_SHAPE = CharShape(10.0, False)  # 모르는 charPrIDRef
 
 
 @dataclass(slots=True)
-class _Region:
-    """처리 이력 한 줄(제목 경로는 문서를 다 읽은 뒤 닻 문단의 것으로 채운다)."""
-
-    tag: str
-    kind: str
-    reason: str
-    section: int
-    anchor: int
-    gate: GateResult | None = None
-    region_id: str | None = None  # 정해진 id(구역 단위 기록)
-
-
-@dataclass(slots=True)
 class _Doc:
     """문서 전체에서 모으는 것: 블록 명세(내부 키 _anchor 등은 _finish가 지운다), 처리 이력, 장부 숫자."""
 
@@ -78,7 +63,7 @@ class _Doc:
     budget: AssetBudget = field(default_factory=AssetBudget)
     pictures: dict[str, images.Png | str] = field(default_factory=dict)  # href → PNG 또는 이미지 없음 사유
     specs: list[dict[str, Any]] = field(default_factory=list)
-    regions: list[_Region] = field(default_factory=list)
+    regions: list[Region] = field(default_factory=list)
     counts: list[Counts] = field(default_factory=list)
     outline: bool = False  # 개요 수준 제목을 하나라도 썼나(그러면 크기 규칙을 쓰지 않는다)
 
@@ -159,12 +144,12 @@ class _Section:
                 if element.tag == HIDDEN and not hidden:
                     chars = sum(source_chars(t) for t in element.iter(T))
                     self.region("hidden-comment", "paragraph", HIDDEN_COMMENT, max(anchor, self.base),
-                                _gate("hidden_chars", chars, None))
+                                gate("hidden_chars", chars, None))
                     hidden = True
                 stack.extend((child, hidden, para) for child in reversed(element))
 
     def region(self, tag: str, kind: str, reason: str, anchor: int, gate: GateResult | None = None) -> None:
-        self.doc.regions.append(_Region(tag, kind, reason, self.index, anchor, gate))
+        self.doc.regions.append(Region(tag, kind, reason, self.index, anchor, gate))
 
     def bundles(self, p: ET.Element, anchor: int) -> list[Bundle]:
         """문단 hp:run들의 hp:t 글자를 순서대로(개체 안 글자는 들지 않는다). 출처마다 묶음 하나."""
@@ -520,8 +505,8 @@ class _Section:
         counts = self.ledger.count()
         self.doc.counts.append(counts)
         if not counts.ok:
-            self.doc.regions.append(_Region("coverage", "paragraph", COVERAGE_MISMATCH, self.index, self.base,
-                                            _ledger_gate(counts), f"s{self.index}-coverage"))
+            self.doc.regions.append(Region("coverage", "paragraph", COVERAGE_MISMATCH, self.index, self.base,
+                                           ledger_gate(counts), f"s{self.index}-coverage"))
 
     def rescue(self) -> None:
         """한 번도 넣지 않은 출처를 닻 문단별로 모아 구조 문단으로(문서 순서). 같은 문단 출처는 잇고 문단은 \\n."""
@@ -544,92 +529,12 @@ class _Section:
         if rescued:
             self.ledger.rescued = rescued
             first = next(iter(groups))
-            self.region("unassigned-text", "paragraph", UNASSIGNED_TEXT, first, _gate("rescued", rescued, "==0"))
-
-
-def _gate(name: str, value: int, threshold: str | None) -> GateResult:
-    """근거 숫자 하나. 기준이 있으면 실패 검사(버그 신호), 없으면 기록용 통과 검사."""
-    passed = threshold is None
-    return GateResult(passed=passed, checks=(GateCheck(name=name, passed=passed, value=value, threshold=threshold),))
-
-
-def _ledger_gate(counts: Counts) -> GateResult:
-    """coverage_mismatch 근거: in_blocks(기준 source − hidden), doubled·partial(기준 0), hidden(기록)."""
-    expected = counts.source - counts.hidden
-    checks = (GateCheck(name="in_blocks", passed=counts.in_blocks == expected, value=counts.in_blocks,
-                        threshold=f"=={expected}"),
-              GateCheck(name="doubled", passed=counts.doubled == 0, value=counts.doubled, threshold="==0"),
-              GateCheck(name="partial", passed=counts.partial == 0, value=counts.partial, threshold="==0"),
-              GateCheck(name="hidden", passed=True, value=counts.hidden))
-    return GateResult(passed=all(c.passed for c in checks), checks=checks)
-
-
-def _headings_by_size(specs: list[dict[str, Any]]) -> None:
-    """개요 수준이 없는 문서: PDF와 같은 상수로 제목을 고른다. 본문 크기 = 대상 문단 글자 수로 센 크기 최빈값(같으면
-    작은 쪽), 제목 = 대표 크기 ≥ 본문 × 1.15(굵으면 × 1.05)이고 표시 줄 ≤ 2. 단계는 큰 크기부터 1, 2, …(6에서 접음)."""
-    counts = Counter[float]()
-    for spec in specs:
-        for (size, _), n in spec.get("_sizes", Counter()).items():
-            counts[size] += n
-    if not counts:
-        return
-    body = max(counts, key=lambda s: (counts[s], -s))
-    if body <= 0:  # 크기가 0 이하인 문서는 크기 규칙을 쓰지 않는다(모든 문단이 제목이 되지 않게)
-        return
-    chosen = [spec for spec in specs if spec.get("_size") is not None and spec["_lines"] <= HEADING_MAX_LINES
-              and spec["_size"] >= body * (BOLD_HEADING_RATIO if spec["_bold"] else HEADING_RATIO)]
-    ranks = sorted({spec["_size"] for spec in chosen}, reverse=True)
-    for spec in chosen:
-        # 제목은 한 줄로(PDF처럼 줄을 공백으로 잇는다): 줄바꿈이 목록·제목 경로·마크다운 제목을 깨지 않게
-        spec.update(kind="heading", level=min(ranks.index(spec["_size"]) + 1, MAX_LEVEL),
-                    text=" ".join(spec["text"].split()), confidence=CONFIDENCE["heading"])
+            self.region("unassigned-text", "paragraph", UNASSIGNED_TEXT, first, gate("rescued", rescued, "==0"))
 
 
 def _finish(doc: _Doc) -> tuple[tuple[dict[str, Any], ...], tuple[RegionRecord, ...]]:
-    """제목을 정하고 제목 경로를 채운다. 구역 끝 블록(_late)과 처리 이력은 닻 문단 자리의 제목 경로를 쓴다."""
-    if not doc.outline:
-        _headings_by_size(doc.specs)
-    index = {id(spec): k for k, spec in enumerate(doc.specs)}
-    stack: list[tuple[int, str]] = []
-    marks: list[tuple[int, tuple[str, ...]]] = []  # (닻, 그 닻까지 처리한 뒤 제목 경로)
-    blocks: list[dict[str, Any]] = []
-    for spec in doc.specs:
-        anchor = spec["_anchor"]
-        if spec["_late"]:
-            path = _path_at(marks, anchor)
-        else:
-            if spec["kind"] == "heading":
-                while stack and stack[-1][0] >= spec["level"]:
-                    stack.pop()
-            path = tuple(text for _, text in stack)
-            if spec["kind"] == "heading":
-                stack.append((spec["level"], spec["text"]))
-            marks.append((anchor, tuple(text for _, text in stack)))
-        block = {k: v for k, v in spec.items() if not k.startswith("_")}
-        if "_caption" in spec:  # 짝 캡션 명세의 순번(core/build.py가 caption_block_id로 바꾼다)
-            block["figure"] = {**block["figure"], "caption_ref": index[id(spec["_caption"])]}
-        block["section_path"] = path
-        block["locator"] = FlowLocator(section_path=path, paragraph_index=anchor)
-        blocks.append(block)
-    seen = Counter[tuple[int, int, str]]()
-    records = []
-    for region in doc.regions:
-        region_id = region.region_id
-        if region_id is None:
-            key = (region.section, region.anchor, region.tag)
-            region_id = f"s{region.section}-p{region.anchor}-{region.tag}-{seen[key]}"
-            seen[key] += 1
-        records.append(RegionRecord(region_id=region_id, kind=region.kind, chosen="det",
-                                    attempts=(Attempt(layer="det"),), fallback_reason=region.reason, gate=region.gate,
-                                    locator=FlowLocator(section_path=_path_at(marks, region.anchor),
-                                                        paragraph_index=region.anchor)))
-    return tuple(blocks), tuple(records)
-
-
-def _path_at(marks: list[tuple[int, tuple[str, ...]]], anchor: int) -> tuple[str, ...]:
-    """닻 문단까지 처리한 뒤의 제목 경로(그 닻 이하의 마지막 표시)."""
-    k = bisect.bisect_right(marks, anchor, key=lambda m: m[0])
-    return marks[k - 1][1] if k else ()
+    """공용 finish에 이 문서의 명세·처리 이력·개요 사용 여부를 넘긴다(테스트가 doc을 엿보는 자리)."""
+    return finish(doc.specs, doc.regions, doc.outline)
 
 
 class HwpxParser:
@@ -653,8 +558,8 @@ class HwpxParser:
         for k, member in enumerate(package.masterpages):
             chars = sum(source_chars(t) for t in package.xml(member, None).iter(T))
             if chars:
-                doc.regions.append(_Region("masterpage-text", "paragraph", MASTERPAGE_TEXT, 0, 0,
-                                           _gate("chars", chars, None), f"masterpage-{k}"))
+                doc.regions.append(Region("masterpage-text", "paragraph", MASTERPAGE_TEXT, 0, 0,
+                                          gate("chars", chars, None), f"masterpage-{k}"))
         blocks, regions = _finish(doc)
         return (ParsedSource(mime=MIME, blocks=blocks, assets=doc.budget.assets, regions=regions),
                 tuple(doc.counts))
