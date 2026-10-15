@@ -6,6 +6,7 @@ from pathlib import Path
 from hanji.formats.ooxml.docx.parser import DocxParser
 
 HERE = Path(__file__).resolve().parent
+CHART_URI = "http://schemas.openxmlformats.org/drawingml/2006/chart"
 
 
 def _load_builder():
@@ -138,4 +139,18 @@ def test_an_unreferenced_part_reached_through_two_relationship_ids_is_counted_on
     assert shown(parsed) == [("paragraph", "본문", 0)]
     assert [(r.fallback_reason, r.gate.checks[0].value) for r in parsed.regions] == [
         ("unreferenced_part_skipped", 6)]
+    assert counts[0].ok and counts[0].rescued == 0
+
+
+def test_a_chart_in_a_header_resolves_its_relationship_in_the_header_part():
+    """머리말 파트의 차트: 관계는 header1.xml.rels에만 있다. 머리말 자리에 머리말 글, 그림, 차트 글 문단."""
+    header = B.margin("hdr", B.p("머리말 글"), B.p(B.drawing(B.chart_ref("rIdC"), uri=CHART_URI)))
+    chart = ("word/charts/chart1.xml", B.chart_part("머리 차트 제목"))
+    link = ("word/_rels/header1.xml.rels", B.rels(("rIdC", f"{B.R}/chart", "charts/chart1.xml")))
+    parsed, counts = parse(B.p("본문"), parts={"header1.xml": header}, extra=(chart, link),
+                           final=B.sect_refs(("header", "default", "rIdH1")))
+    assert shown(parsed) == [("page_header", "머리말 글", 0), ("figure", "", 0), ("paragraph", "머리 차트 제목", 0),
+                             ("paragraph", "본문", 0)]
+    assert [(r.fallback_reason, r.gate.checks[0].value if r.gate else None) for r in parsed.regions] == [
+        ("embedded_object", None), ("chart_text", 0)]
     assert counts[0].ok and counts[0].rescued == 0

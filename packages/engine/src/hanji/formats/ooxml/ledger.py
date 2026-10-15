@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from ..flowledger import Ledger, ink
 from ..zipxml import Prefixes
 from .docx.styles import Styles
-from .drawing import A_P, A_T, CHART, FRAMES, SMARTART, hidden_frame
+from .drawing import A_P, A_T, CHART, FRAMES, R_DM, R_ID, SMARTART, hidden_frame
 from .package import MC, choose, ignorable
 
 W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
@@ -184,7 +184,7 @@ class Walker:
                 ctx = _Ctx(ctx.out, ctx.ignored, ctx.process, element, None, ctx.story)
             elif element.tag in _RUNS:
                 ctx = _Ctx(ctx.out, ctx.ignored, ctx.process, ctx.para, element, ctx.story)
-            elif element.tag in (CHART, SMARTART):
+            elif (element.tag == CHART and element.get(R_ID)) or (element.tag == SMARTART and element.get(R_DM)):
                 self.graphics.append((section, anchor, self.part, element, ctx.out))
             elif element.tag in FRAMES and ctx.out is None and hidden_frame(element):
                 ctx = _Ctx("hidden", ctx.ignored, ctx.process, ctx.para, ctx.run, ctx.story)

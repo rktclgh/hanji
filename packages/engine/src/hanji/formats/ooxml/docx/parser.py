@@ -30,7 +30,7 @@ from ..ledger import NORMAL, SOURCES, Note, Story, Walker, part_chars, sym_char
 from ..drawing import (A, A_BR, A_P, A_T, CHART, CHART_ROOT, CHART_TEXT, DATA_ROOT, DRAWN_ROOT, FRAMES, PIC, R_DM, R_ID,
                        SMARTART, SMARTART_TEXT, WP, Images, blip, cache_chars, drawn_rel, emu, hidden_frame,
                        smartart_shapes)
-from ..package import MC, READ, Package, choose, ignorable
+from ..package import MC, READ, R, Package, choose, ignorable
 from . import tables
 from .styles import Styles, read_styles
 
@@ -70,6 +70,7 @@ NOTES = {"footnotes": (f"{W}footnotes", f"{W}footnote"), "endnotes": (f"{W}endno
 SPECIAL_NOTES = frozenset({"separator", "continuationSeparator", "continuationNotice"})
 UNKNOWN_INLINE = "unknown_inline_element"  # 모르는 런 자식 안 글자를 그 자리에 넣었다
 COMMENTS_SKIPPED = "comments_skipped"  # 메모(인쇄되지 않음)는 범위 밖
+DRAWN_TYPE = "http://schemas.microsoft.com/office/2007/relationships/diagramDrawing"
 UNREFERENCED = "unreferenced_part_skipped"  # 참조되지 않은 머리말·꼬리말 파트와 주석은 범위 밖
 MARGIN_KINDS = {"header": "page_header", "footer": "page_footer"}
 Story_ = tuple[str, ET.Element, str, Prefixes]  # (블록 종류·주석 종류, 요소, 파트 멤버, 그 파트 접두어)
@@ -743,21 +744,23 @@ class DocxParser:
             rels = package.rels(host)
             if element.tag == CHART:
                 rel = rels.get(element.get(R_ID, ""))
-                if rel is None or rel.target is None or not package.has(rel.target):
-                    continue
+                if rel is None or rel.type != f"{R}/chart" or rel.target is None or not package.has(rel.target):
+                    continue  # 풀 수 없거나 종류가 다른 관계: 이 자리는 이미지 없는 그림만
                 root, prefixes = package.part(rel.target, CHART_ROOT)
                 doc.charts[id(element)] = root
                 read = [(root, prefixes, out)]
             else:
                 rel = rels.get(element.get(R_DM, ""))
-                if rel is None or rel.target is None or not package.has(rel.target):
+                if rel is None or rel.type != f"{R}/diagramData" or rel.target is None or not package.has(rel.target):
                     continue
                 data, data_prefixes = package.part(rel.target, DATA_ROOT)
                 drawn = rels.get(drawn_rel(data) or "")
                 read = [(data, data_prefixes, out)]
-                if drawn is not None and drawn.target is not None and package.has(drawn.target):
+                if drawn is not None and drawn.type == DRAWN_TYPE and drawn.target is not None \
+                        and package.has(drawn.target):
                     root, prefixes = package.part(drawn.target, DRAWN_ROOT)
-                    read = [(root, prefixes, out), (data, data_prefixes, out or "alt")]
+                    # 고르지 않은 데이터 파트는 호스트가 숨김이어도 항상 범위 밖(스펙 §9)
+                    read = [(root, prefixes, out), (data, data_prefixes, "alt" if out in (None, "hidden") else out)]
                 doc.smartart[id(element)] = read[0][0]
             for root, prefixes, forced in read:
                 doc.held.append(root)

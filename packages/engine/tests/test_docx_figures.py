@@ -200,3 +200,48 @@ def test_smartart_reads_the_drawn_part_found_through_the_host_and_leaves_the_dat
         ("smartart_text", "s0-p1-smartart-0"), ("embedded_object", "s0-p2-object-0"),
         ("alternate_content_skipped", "doc-alternate-content")]
     assert parsed.regions[-1].gate.checks[0].value == 11 and counts[0].ok and counts[0].rescued == 0
+
+
+def test_a_hidden_smartart_counts_only_the_drawn_part_as_hidden_and_the_data_part_as_out_of_range():
+    data = B.smartart_data("데이터 글", drawn="rIdDr")
+    drawn = B.smartart_drawn(["그린 글"])
+    rels = (("rIdDm", f"{B.R}/diagramData", "diagrams/data1.xml"),
+            ("rIdDr", "http://schemas.microsoft.com/office/2007/relationships/diagramDrawing", "diagrams/drawing1.xml"))
+    parsed, counts = parse(B.p(B.drawing(B.smartart_ref("rIdDm"), uri=DIAGRAM_URI, hidden=True)), rels=rels,
+                           extra=(("word/diagrams/data1.xml", data), ("word/diagrams/drawing1.xml", drawn)))
+    assert parsed.blocks == ()
+    assert [(r.fallback_reason, r.gate.checks[0].value) for r in parsed.regions] == [
+        ("hidden_text", 3), ("alternate_content_skipped", 4)]
+    assert counts[0].ok and counts[0].source == 7 and counts[0].in_blocks == 0 and counts[0].rescued == 0
+
+
+def test_a_relationship_of_the_wrong_kind_leaves_a_figure_without_text_and_does_not_fail_the_document():
+    data = B.smartart_data("데이터 글", drawn="rIdDr")
+    rels = (("rIdDm", f"{B.R}/diagramData", "diagrams/data1.xml"),
+            ("rIdDr", f"{B.R}/chart", "diagrams/data1.xml"))  # 그려진 파트 자리에 차트 관계
+    parsed, counts = parse(B.p(B.drawing(B.chart_ref("rIdDm"), uri=CHART_URI)),
+                           B.p(B.drawing(B.smartart_ref("rIdDr"), uri=DIAGRAM_URI)),
+                           B.p(B.drawing(B.smartart_ref("rIdDm"), uri=DIAGRAM_URI)), rels=rels,
+                           extra=(("word/diagrams/data1.xml", data),))
+    assert [(k, t, a) for k, t, _, a in shown(parsed)] == [("figure", "", 0), ("figure", "", 1),
+                                                          ("paragraph", "데이터 글", 2)]
+    assert [(r.fallback_reason, r.region_id) for r in parsed.regions] == [
+        ("embedded_object", "s0-p0-object-0"), ("embedded_object", "s0-p1-object-0"),
+        ("smartart_text", "s0-p2-smartart-0")]
+    assert counts[0].ok and counts[0].rescued == 0
+
+
+def test_only_reference_elements_are_recorded_as_graphics(monkeypatch):
+    """차트 파트 안 c:chart(참조가 아닌 요소)는 기록하지 않는다: 차트 하나면 기록 하나."""
+    seen = []
+    original = DocxParser._graphics
+
+    def spy(doc, ledgers):
+        seen.append(len(doc.walker.graphics))
+        original(doc, ledgers)
+        seen.append(len(doc.walker.graphics))
+
+    monkeypatch.setattr(DocxParser, "_graphics", staticmethod(spy))
+    parse(B.p(B.drawing(B.chart_ref("rIdC"), uri=CHART_URI)), rels=(("rIdC", f"{B.R}/chart", "charts/chart1.xml"),),
+          extra=(("word/charts/chart1.xml", B.chart_part("제목")),))
+    assert seen == [1, 1]
