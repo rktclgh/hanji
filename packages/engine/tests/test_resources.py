@@ -380,6 +380,15 @@ def test_config_and_estimate_cover_the_four_settings_and_the_formats():
         "pdf", "hwpx", "other", "other"]
 
 
+def test_docx_has_its_own_measured_byte_factor():
+    """DOCX는 압축을 풀고 XML 트리·그림 디코드가 함께 있어 그 밖 형식보다 큰 배수를 따로 쓴다(스펙 §12.3)."""
+    cost = resources.Cost(base=1000, per_page=10)
+    assert resources.BYTES_FACTOR["docx"] > resources.BYTES_FACTOR["other"]
+    kinds = [resources.byte_kind(p) for p in ("a.docx", "b.DOCX", "c.doc", "d.docm")]
+    assert kinds == ["docx", "docx", "other", "other"]
+    assert resources.estimate(cost, 0, 1000, "docx") == resources.BYTES_FACTOR["docx"] * 1000
+
+
 @pytest.mark.parametrize(("budget", "cores", "workers"), [
     (int(48 * resources.GiB * 0.8), 15, 15),  # 이 기계: 38.4GiB
     (int(16 * resources.GiB * 0.8), 8, 5),  # 16GiB 노트북
