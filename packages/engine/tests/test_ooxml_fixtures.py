@@ -1,6 +1,8 @@
-"""DOCX 골든 예제(build_ooxml_fixtures.py --check): 정확 출력(숫자·단위·부호·순서·칸 사이 이동)과 엔진 수집."""
+"""DOCX 골든 예제(build_ooxml_fixtures.py --check): 정확 출력(숫자·단위·부호·순서·칸 사이 이동)과 엔진 수집. 그림은
+화소 정보(pixels.json)로 비교한다(트리는 그림 자산 키에서 나온 값을 가린다)."""
 
 import importlib.util
+import json
 import zipfile
 from io import BytesIO
 from pathlib import Path
@@ -42,7 +44,7 @@ def test_fixtures_are_up_to_date():
     built = BUILDER.build_all()
     assert {p.relative_to(ROOT).as_posix() for p in ROOT.rglob("*") if p.is_file()} == set(built)
     for rel, data in built.items():
-        assert (ROOT / rel).read_bytes() == data, rel
+        assert BUILDER.same(rel, data, ROOT / rel), rel
 
 
 @pytest.mark.parametrize("name", NAMES)
@@ -55,7 +57,11 @@ def test_golden_zip_members_pin_create_system_for_cross_os_bytes(name):
 def test_engine_ingest_matches_golden_tree_and_history(name):
     engine = LocalEngine(MemoryStore(), default_parsers(ocr=False, layout=False))
     ref = engine.ingest(str(ROOT / "inputs" / name), document_id=BUILDER.document_id(name))
-    assert engine.get_tree(ref.document_id) == _expected(name)
+    tree = engine.get_tree(ref.document_id)
+    assert BUILDER.portable(tree.model_dump(mode="json")) == BUILDER.portable(_expected(name).model_dump(mode="json"))
+    order = list(dict.fromkeys(b.figure.asset for b in tree.blocks if b.figure is not None))
+    shown = json.loads((ROOT / "expected" / f"{Path(name).stem}.pixels.json").read_text(encoding="utf-8"))
+    assert [BUILDER.pixels(engine.get_asset(key)) for key in order] == shown
     assert engine.history(ref.document_id) == _history(name)
     assert engine.ingest(str(ROOT / "inputs" / name), document_id=BUILDER.document_id(name)) == ref
 
@@ -121,3 +127,41 @@ def test_fields_golden_keeps_results_and_one_alternate_branch():
     assert [(r.fallback_reason, r.region_id, r.gate.checks[0].value) for r in history.regions] == [
         ("field_unterminated", "s0-p10-field-unterminated-0", 10), ("alternate_content_skipped",
                                                                     "doc-alternate-content", 24)]
+
+
+def test_figures_golden_keeps_pictures_reasons_and_order():
+    tree = _expected("figures.docx")
+    got = [(b.kind, b.text, b.figure.dpi if b.figure else None, b.locator.paragraph_index) for b in tree.blocks]
+    assert got == [
+        ("paragraph", "그림 예제 문단이다.", None, 0), ("paragraph", "그림 1. 지어낸 막대 그림", None, 1),
+        ("figure", "", 96, 1), ("figure", "", 96, 2), ("figure", "", None, 3), ("figure", "", None, 4),
+        ("figure", "", None, 5), ("figure", "", None, 6), ("figure", "", 96, 7), ("figure", "", 96, 8),
+        ("figure", "", 96, 9), ("table", "칸 속 그림\t옆 칸\n아래 칸\t끝 칸", None, 10), ("figure", "", 6, 10),
+        ("paragraph", "그림 뒤 문단이다.", None, 11)]
+    figures = [b.figure for b in tree.blocks if b.figure]
+    assert figures[0].asset == figures[4].asset and len({f.asset for f in figures}) == 3  # 같은 그림은 자산 하나
+    assert [(f.width_px, f.height_px) for f in figures] == [(4, 4), (8, 8), (6, 6), (6, 6), (4, 4), (6, 6)]
+    assert _regions("figures.docx") == [
+        ("figure_image_unsupported", "s0-p3-figure-0"), ("figure_image_linked", "s0-p4-figure-0"),
+        ("figure_image_missing", "s0-p5-figure-0"), ("figure_image_missing", "s0-p6-figure-0")]
+    assert len(json.loads((ROOT / "expected" / "figures.pixels.json").read_text(encoding="utf-8"))) == 3
+
+
+def test_notes_golden_margins_notes_and_text_boxes():
+    tree = _expected("notes.docx")
+    assert [(b.kind, b.text, b.locator.paragraph_index) for b in tree.blocks] == [
+        ("page_header", "지어낸 머리말\n머리말 둘째 줄", 0), ("paragraph", "머리말 글상자", 0),
+        ("page_header", "첫 쪽 머리말", 0), ("page_footer", "쪽 1", 0), ("figure", "", 0),
+        ("paragraph", "머리말을 둔 첫 문단이다.", 0), ("paragraph", "각주가 달린 문단 이어지는 글", 1),
+        ("table", "각주 든 칸\t둘째 칸\n셋째 칸\t", 2), ("paragraph", "칸 속 글상자", 2),
+        ("paragraph", "본문 글상자 첫째", 3), ("paragraph", "본문 글상자 둘째", 3), ("paragraph", "짝 글상자 새 형식", 4),
+        ("paragraph", "묶음 속 글상자", 5), ("paragraph", "안 묶음 글상자", 5), ("paragraph", "미주가 달린 문단", 6),
+        ("paragraph", "같은 각주를 다시 참조", 7), ("paragraph", "첫째 각주 글", 1), ("paragraph", "칸 속 각주", 2),
+        ("paragraph", "첫째 미주 글", 6), ("paragraph", "둘째 구역 문단이다.", 8)]
+    history = _history("notes.docx")
+    assert [(r.fallback_reason, r.region_id, r.gate.checks[0].value if r.gate else None) for r in history.regions] == [
+        ("shape_text", "s0-p0-shape-0", None), ("shape_text", "s0-p2-shape-0", None),
+        ("shape_text", "s0-p3-shape-0", None), ("shape_text", "s0-p4-shape-0", None),
+        ("shape_text", "s0-p5-shape-0", None), ("shape_text", "s0-p5-shape-1", None),
+        ("alternate_content_skipped", "doc-alternate-content", 14), ("special_note_skipped", "doc-special-note", 6),
+        ("unreferenced_part_skipped", "doc-unreferenced-part", 13)]

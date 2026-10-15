@@ -1,0 +1,244 @@
+{
+  "schema_version": "0.4",
+  "document_id": "fx-ooxml-notes",
+  "version": 1,
+  "regions": [
+    {
+      "region_id": "s0-p0-shape-0",
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 0
+      },
+      "kind": "paragraph",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "shape_text"
+    },
+    {
+      "region_id": "s0-p2-shape-0",
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 2
+      },
+      "kind": "paragraph",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "shape_text"
+    },
+    {
+      "region_id": "s0-p3-shape-0",
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 3
+      },
+      "kind": "paragraph",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "shape_text"
+    },
+    {
+      "region_id": "s0-p4-shape-0",
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 4
+      },
+      "kind": "paragraph",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "shape_text"
+    },
+    {
+      "region_id": "s0-p5-shape-0",
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 5
+      },
+      "kind": "paragraph",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "shape_text"
+    },
+    {
+      "region_id": "s0-p5-shape-1",
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 5
+      },
+      "kind": "paragraph",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "shape_text"
+    },
+    {
+      "region_id": "doc-alternate-content",
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 0
+      },
+      "kind": "paragraph",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": {
+        "passed": true,
+        "checks": [
+          {
+            "name": "chars",
+            "passed": true,
+            "value": 14.0,
+            "threshold": null
+          }
+        ]
+      },
+      "fallback_reason": "alternate_content_skipped"
+    },
+    {
+      "region_id": "doc-special-note",
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 0
+      },
+      "kind": "paragraph",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": {
+        "passed": true,
+        "checks": [
+          {
+            "name": "chars",
+            "passed": true,
+            "value": 6.0,
+            "threshold": null
+          }
+        ]
+      },
+      "fallback_reason": "special_note_skipped"
+    },
+    {
+      "region_id": "doc-unreferenced-part",
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 0
+      },
+      "kind": "paragraph",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": {
+        "passed": true,
+        "checks": [
+          {
+            "name": "chars",
+            "passed": true,
+            "value": 13.0,
+            "threshold": null
+          }
+        ]
+      },
+      "fallback_reason": "unreferenced_part_skipped"
+    }
+  ]
+}
