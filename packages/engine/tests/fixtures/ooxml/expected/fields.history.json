@@ -1,0 +1,73 @@
+{
+  "schema_version": "0.4",
+  "document_id": "fx-ooxml-fields",
+  "version": 1,
+  "regions": [
+    {
+      "region_id": "s0-p10-field-unterminated-0",
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 10
+      },
+      "kind": "paragraph",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": {
+        "passed": true,
+        "checks": [
+          {
+            "name": "chars",
+            "passed": true,
+            "value": 10.0,
+            "threshold": null
+          }
+        ]
+      },
+      "fallback_reason": "field_unterminated"
+    },
+    {
+      "region_id": "doc-alternate-content",
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 0
+      },
+      "kind": "paragraph",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": {
+        "passed": true,
+        "checks": [
+          {
+            "name": "chars",
+            "passed": true,
+            "value": 24.0,
+            "threshold": null
+          }
+        ]
+      },
+      "fallback_reason": "alternate_content_skipped"
+    }
+  ]
+}

@@ -71,6 +71,9 @@ jobs:
       # HWPX 골든은 zip 헤더 바이트까지 비교한다: OS마다 달라지는 값(만든 OS 표시 등)이 있으면 전체 테스트보다 먼저 드러나게 둔다
       - name: Engine HWPX fixtures up to date
         run: uv run python -W error::EncodingWarning packages/engine/tests/build_hwpx_fixtures.py --check
+      # DOCX 골든도 zip 헤더 바이트까지 비교한다(HWPX와 같은 이유로 전체 테스트보다 먼저)
+      - name: Engine OOXML fixtures up to date
+        run: uv run python -W error::EncodingWarning packages/engine/tests/build_ooxml_fixtures.py --check
       - name: Tests
         # EncodingWarning 오류화는 pyproject filterwarnings가 한다. 명령줄 -W는 그 안의 pypdfium2 예외 필터를 덮어쓰므로 쓰지 않는다
         env:

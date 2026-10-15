@@ -1,0 +1,159 @@
+{
+  "schema_version": "0.4",
+  "document_id": "fx-ooxml-basic",
+  "version": 1,
+  "regions": [
+    {
+      "region_id": "s1-p10-unknown-inline-0",
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "2026년 지어낸 사업 계획",
+          "1. 추진 배경",
+          "순환 스타일 제목"
+        ],
+        "paragraph_index": 10
+      },
+      "kind": "paragraph",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "unknown_inline_element"
+    },
+    {
+      "region_id": "s0-p4-symbol-0",
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "2026년 지어낸 사업 계획",
+          "1. 추진 배경"
+        ],
+        "paragraph_index": 4
+      },
+      "kind": "paragraph",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "symbol_char"
+    },
+    {
+      "region_id": "s1-p11-hidden-text-0",
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "2026년 지어낸 사업 계획",
+          "1. 추진 배경",
+          "순환 스타일 제목"
+        ],
+        "paragraph_index": 11
+      },
+      "kind": "paragraph",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": {
+        "passed": true,
+        "checks": [
+          {
+            "name": "hidden_chars",
+            "passed": true,
+            "value": 8.0,
+            "threshold": null
+          }
+        ]
+      },
+      "fallback_reason": "hidden_text"
+    },
+    {
+      "region_id": "s1-p13-equation-0",
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "2026년 지어낸 사업 계획",
+          "1. 추진 배경",
+          "순환 스타일 제목"
+        ],
+        "paragraph_index": 13
+      },
+      "kind": "paragraph",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "equation_text"
+    },
+    {
+      "region_id": "doc-tracked-deletion",
+      "locator": {
+        "kind": "flow",
+        "section_path": [
+          "2026년 지어낸 사업 계획"
+        ],
+        "paragraph_index": 0
+      },
+      "kind": "paragraph",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": {
+        "passed": true,
+        "checks": [
+          {
+            "name": "chars",
+            "passed": true,
+            "value": 7.0,
+            "threshold": null
+          }
+        ]
+      },
+      "fallback_reason": "tracked_deletion_skipped"
+    }
+  ]
+}
