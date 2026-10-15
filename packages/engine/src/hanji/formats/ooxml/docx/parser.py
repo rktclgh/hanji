@@ -22,7 +22,7 @@ from ...pdf.group import RESCUED_CONFIDENCE, step
 from ...pdf.parser import COVERAGE_MISMATCH, UNASSIGNED_TEXT
 from ...zipxml import Prefixes
 from ..ledger import NORMAL, SOURCES, Note, Story, Walker, part_chars, sym_char
-from ..package import MC, READ, Package, choose
+from ..package import MC, READ, Package, choose, ignorable
 from . import tables
 from .styles import Styles, read_styles
 
@@ -40,7 +40,7 @@ Chain = tuple[ET.Element, ...]  # w:body와 본문 층 요소 사이의 감싼 �
 # 문단 안에서 벗기는 감싼 요소(스펙 §5.2). w:sdt는 w:sdtContent만 읽는다
 WRAPPERS = frozenset(f"{W}{n}" for n in ("hyperlink", "smartTag", "customXml", "ins", "fldSimple", "moveTo", "dir",
                                           "bdo", "sdtContent"))
-MATH = frozenset({f"{M}oMath", f"{M}oMathPara"})
+MATH_RUN = f"{M}r"
 SEPARATORS = {f"{W}tab": "\t", f"{W}ptab": "\t", BR: "\n", CR: "\n", f"{W}noBreakHyphen": "‑",
               f"{W}softHyphen": ""}
 # 글자가 없는 아는 런 자식(개체·필드 표시·주석 참조는 글자가 아니다. 개체 안 글자는 Walker가 따로 센다)
@@ -90,27 +90,43 @@ def _join(bundles: list[Bundle]) -> str:
     return "".join(text for _, text in bundles)
 
 
-def sections(body: ET.Element, prefixes: Prefixes | None = None) -> list[tuple[list[ET.Element], ET.Element | None]]:
-    """본문 블록 항목을 구역마다 (항목들, 그 구역의 w:sectPr). prefixes는 mc:Choice@Requires를 푸는 데 쓴다."""
-    return [([e for e, _, item in entries if item], sect) for entries, sect in _layout(body, prefixes or {})]
+def sections(body: ET.Element, prefixes: Prefixes | None = None,
+             ancestors: tuple[ET.Element, ...] = ()) -> list[tuple[list[ET.Element], ET.Element | None]]:
+    """본문 블록 항목을 구역마다 (항목들, 그 구역의 w:sectPr). prefixes는 mc:Choice@Requires·mc:Ignorable 접두어를 푸는
+    데 쓰고, ancestors는 w:body 위 요소들(파트 뿌리: 그 mc:Ignorable이 본문 층에 미친다)."""
+    return [([e for e, _, item in entries if item], sect) for entries, sect in _layout(body, prefixes or {}, ancestors)]
 
 
 Entry = tuple[ET.Element, Chain, bool]  # (본문 층 요소, 감싼 요소들, 본문 블록 항목인가)
 
 
-def _layout(body: ET.Element, prefixes: Prefixes) -> list[tuple[list[Entry], ET.Element | None]]:
+def _layout(body: ET.Element, prefixes: Prefixes,
+            ancestors: tuple[ET.Element, ...] = ()) -> list[tuple[list[Entry], ET.Element | None]]:
     """본문 층을 구역마다 ([(요소, w:body와 요소 사이 감싼 요소들, 본문 블록 항목인가)], w:sectPr)로(스택 순회). 요소는
-    본문 블록 항목(w:p·w:tbl), 고르지 않은 mc 쪽 통째, 항목 밖 출처다(Walker가 감싼 요소들을 조상으로 모두 훑는다).
-    w:sdt/w:sdtContent·w:customXml·고른 mc 쪽·그 밖 요소는 벗긴다: 무시 표시 요소 안 항목의 글자는 Walker가 범위 밖으로
-    표시하고, 고르지 않은 쪽 글자는 alternate_content_skipped로 센다."""
+    본문 블록 항목(w:p·w:tbl), 고르지 않은 mc 쪽 통째, 무시 표시(mc:Ignorable, ProcessContent 아님) 요소 통째, 항목 밖
+    출처다(Walker가 감싼 요소들을 조상으로 모두 훑어 통째 요소 안 글자를 범위 밖으로 표시한다). 통째 요소는 항목 순번을
+    받지 않고 그 안 w:sectPr은 구역을 나누지 않는다. w:sdt/w:sdtContent·w:customXml·고른 mc 쪽·ProcessContent 요소·그 밖
+    요소는 벗긴다."""
     out: list[tuple[list[Entry], ET.Element | None]] = []
     entries: list[Entry] = []
     last: ET.Element | None = None
-    # (요소, 감싼 요소들, 벗기지 않고 통째로 내는 고르지 않은 mc 쪽인가)
-    stack: list[tuple[ET.Element, Chain, bool]] = [(child, (), False) for child in reversed(body)]
+    ignored: frozenset[str] = frozenset()
+    process: frozenset[tuple[str, str]] = frozenset()
+    for element in (*ancestors, body):
+        more, also = ignorable(element, prefixes)
+        ignored, process = ignored | more, process | also
+    Marks = tuple[frozenset[str], frozenset[tuple[str, str]]]
+    # (요소, 감싼 요소들, 벗기지 않고 통째로 내는 고르지 않은 mc 쪽인가, 위에서 이어받은 무시 표시)
+    stack: list[tuple[ET.Element, Chain, bool, Marks]] = [(child, (), False, (ignored, process))
+                                                         for child in reversed(body)]
     while stack:
-        element, chain, whole = stack.pop()
+        element, chain, whole, (ignored, process) = stack.pop()
         tag = element.tag
+        more, also = ignorable(element, prefixes)
+        marks = (ignored | more, process | also)
+        uri, _, local = tag[1:].partition("}") if tag.startswith("{") else ("", "", tag)
+        if not whole and uri in marks[0] and (uri, local) not in marks[1] and (uri, "*") not in marks[1]:
+            whole = True  # 무시하는 요소: 안까지 읽지 않는다(글자는 Walker가 범위 밖으로)
         if whole or tag in SOURCES:
             entries.append((element, chain, False))
         elif tag in ITEMS:
@@ -124,16 +140,16 @@ def _layout(body: ET.Element, prefixes: Prefixes) -> list[tuple[list[Entry], ET.
         elif tag == SDT:
             content = element.find(SDT_CONTENT)
             if content is not None:
-                stack.extend((child, (*chain, element, content), False) for child in reversed(content))
+                stack.extend((child, (*chain, element, content), False, marks) for child in reversed(content))
         elif tag == ALTERNATE:
             chosen = choose(element, prefixes)
             for child in reversed(element):
                 if child is chosen:
-                    stack.extend((inner, (*chain, element, child), False) for inner in reversed(child))
+                    stack.extend((inner, (*chain, element, child), False, marks) for inner in reversed(child))
                 else:
-                    stack.append((child, (*chain, element), True))
+                    stack.append((child, (*chain, element), True, marks))
         else:
-            stack.extend((child, (*chain, element), False) for child in reversed(element))
+            stack.extend((child, (*chain, element), False, marks) for child in reversed(element))
     out.append((entries, last))
     return out
 
@@ -185,10 +201,11 @@ class _Section:
                     chosen = choose(element, self.doc.prefixes)
                     if chosen is not None:
                         stack.extend((child, None) for child in reversed(chosen))
-                elif tag in MATH:
-                    for mr in element.iter(f"{M}r"):
-                        for mt in mr.iterfind(f"{M}t"):
-                            self.piece(mt, p, mr, out, sizes)
+                elif tag == MATH_RUN:
+                    stack.extend((child, element) for child in reversed(element))
+                elif tag.startswith(M):
+                    # 수식 구조(m:oMath·m:f·m:num 등)는 벗긴다: 안의 m:r과 w:ins·w:hyperlink·w:sdt 런이 제자리에 든다
+                    stack.extend((child, None) for child in reversed(element))
                 elif tag.startswith("{") and tag[1:].partition("}")[0] not in READ:
                     # 읽지 않는 이름공간 요소는 벗긴다: 무시 표시면 안 출처가 범위 밖이라 들지 않고, ProcessContent면 든다
                     stack.extend((child, None) for child in reversed(element))
@@ -370,7 +387,7 @@ class DocxParser:
         styles = read_styles(self._optional(package, "styles", f"{W}styles"),
                              self._optional(package, "numbering", f"{W}numbering"))
         doc = _Doc(name, package, styles, Walker(styles), prefixes)
-        layout = _layout(body, prefixes)
+        layout = _layout(body, prefixes, (root,))
         parts = [([e for e, _, item in entries if item], sect) for entries, sect in layout]
         ledgers = [Ledger() for _ in parts]
         story = Story()  # 본문은 이야기 하나(필드가 문단·구역을 넘어 이어진다)

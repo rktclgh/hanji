@@ -164,3 +164,14 @@ def test_ignorable_lists_unread_namespaces_and_process_content():
     mc = B.NS["mc"]
     element = ET.fromstring(f'<a xmlns:mc="{mc}" mc:Ignorable="x wps nope" mc:ProcessContent="x:box x:*"/>')
     assert ignorable(element, PREFIXES) == (frozenset({B.NS["x"]}), frozenset({(B.NS["x"], "box"), (B.NS["x"], "*")}))
+
+
+def test_percent_encoded_zip_member_names_are_found_raw_when_the_decoded_name_is_missing():
+    """대상의 퍼센트 인코딩은 한 번 풀고, 풀린 이름이 zip에 없고 원문 이름이 있으면 원문 이름을 쓴다."""
+    links = [("rIdA", f"{B.R}/image", "media/a%20b.png"), ("rIdB", f"{B.R}/image", "media/c%20d.png"),
+             ("rIdC", f"{B.R}/image", "media/e%20f.png")]
+    media = [("word/media/a%20b.png", b"x"), ("word/media/c d.png", b"y")]
+    package = open_docx(B.docx(DOC, doc_rels=links, extra=media))
+    rels = package.rels(package.main)
+    assert [rels[k].target for k in ("rIdA", "rIdB", "rIdC")] == [
+        "word/media/a%20b.png", "word/media/c d.png", "word/media/e f.png"]

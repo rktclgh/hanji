@@ -79,12 +79,13 @@ def rels_member(part: str) -> str:
     return f"{folder}/_rels/{base}.rels" if folder else f"_rels/{base}.rels"
 
 
-def resolve(part: str, target: str, location: str) -> str:
+def resolve(part: str, target: str, location: str, decode: bool = True) -> str:
     """내부 관계 대상 → zip 멤버 이름(스펙 §4.2-4). scheme·authority·역슬래시·NUL·조각은 거부하고, 퍼센트 인코딩을 한
-    번 풀고, 파트 폴더(/로 시작하면 뿌리)에서 조각을 하나씩 쌓는다. ..가 빈 스택을 꺼내려 하면 그 자리에서 거부한다."""
+    번 풀고(decode가 거짓이면 풀지 않는다), 파트 폴더(/로 시작하면 뿌리)에서 조각을 하나씩 쌓는다. ..가 빈 스택을
+    꺼내려 하면 그 자리에서 거부한다."""
     if _SCHEME.match(target) or target.startswith("//") or any(c in target for c in "\\\0#"):
         raise ParseError("invalid relationship target", location)
-    path = unquote(target)
+    path = unquote(target) if decode else target
     if any(c in path for c in "\\\0"):
         raise ParseError("invalid relationship target", location)
     stack = [] if path.startswith("/") else part.split("/")[:-1]
@@ -184,6 +185,9 @@ class Package(Archive):
                     raise ParseError(f"duplicate relationship id {key!r}", location)
                 external = rel.get("TargetMode") == "External"
                 target = None if external else resolve(part, rel.get("Target", ""), location)
+                if target is not None and not self.has(target):  # zip 이름이 퍼센트 인코딩 그대로일 수 있다
+                    raw = resolve(part, rel.get("Target", ""), location, decode=False)
+                    target = raw if self.has(raw) else target
                 found[key] = Rel(key, rel.get("Type", ""), target)
         self._rels[part] = found
         return found

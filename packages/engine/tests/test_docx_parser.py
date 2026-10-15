@@ -286,14 +286,14 @@ def test_story_part_roots_are_held_until_parsing_ends(monkeypatch):
 
 def test_body_level_alternate_content_and_unknown_wrappers_give_body_items():
     """본문 층 mc:AlternateContent는 고른 쪽 문단이 항목이고 버린 쪽 글자는 범위 밖, 모르는 감싼 요소는 벗긴다(무시
-    표시 요소 안 문단은 항목이지만 글자는 범위 밖)."""
+    표시 요소는 통째로 항목이 아니고 글자는 범위 밖)."""
     alternate = (f'<mc:AlternateContent><mc:Choice Requires="w14">{B.p("고른 문단")}</mc:Choice>'
                  f'<mc:Fallback>{B.p("버린 문단")}</mc:Fallback></mc:AlternateContent>')
     data = B.docx(B.document(alternate, f'<w14:wrap>{B.p("감싼 문단")}</w14:wrap>', f'<x:box>{B.p("무시한 문단")}</x:box>',
                              B.p("끝 문단"), ignorable="w14 x"), styles_xml=STYLES)
     parsed, counts = DocxParser()._parse(data, "a.docx")
     assert [(b["text"], b["locator"].paragraph_index) for b in parsed.blocks] == [
-        ("고른 문단", 0), ("감싼 문단", 1), ("끝 문단", 3)]
+        ("고른 문단", 0), ("감싼 문단", 1), ("끝 문단", 2)]
     assert [(r.fallback_reason, r.region_id, r.gate.checks[0].value) for r in parsed.regions] == [
         ("alternate_content_skipped", "doc-alternate-content", 9)]
     assert counts[0].ok and counts[0].hidden == 9
@@ -320,3 +320,28 @@ def test_a_toc_field_continues_across_sections():
     parsed, counts = parse(first, B.p(B.r("2. 둘째 줄"), B.fld("end")), B.p("본문"))
     assert texts(parsed) == [("paragraph", "1. 첫 줄"), ("paragraph", "2. 둘째 줄"), ("paragraph", "본문")]
     assert reasons(parsed) == [] and len(counts) == 2 and all(c.ok for c in counts)
+
+
+def test_ignored_body_elements_are_not_items_and_do_not_split_sections():
+    """무시 표시 요소(ProcessContent 아님)는 통째로 항목이 아니다: 순번 공백·빈 표 블록·안 w:sectPr의 구역 나눔이 없다."""
+    ignored = (f'<x:box>{B.p("무시한 문단", extra=B.sect())}{B.tbl(B.tr(B.tc("가"), B.tc("나")), B.tr(B.tc("다"), B.tc("라")))}'
+               "</x:box>")
+    kept = f'<x:keep>{B.p("벗긴 문단")}</x:keep>'
+    body = B.document(B.p("앞 문단"), ignored, kept, B.p("뒤 문단"), ignorable="w14 x").replace(
+        "<w:body>", '<w:body mc:ProcessContent="x:keep">')
+    parsed, counts = DocxParser()._parse(B.docx(body, styles_xml=STYLES), "a.docx")
+    assert [(b["kind"], b["text"], b["locator"].paragraph_index) for b in parsed.blocks] == [
+        ("paragraph", "앞 문단", 0), ("paragraph", "벗긴 문단", 1), ("paragraph", "뒤 문단", 2)]
+    assert [(r.fallback_reason, r.gate.checks[0].value) for r in parsed.regions] == [("alternate_content_skipped", 9)]
+    assert len(counts) == 1 and counts[0].ok
+
+
+def test_math_keeps_wrapped_runs_in_place():
+    """m:oMath 안 w:ins·w:hyperlink·w:sdt로 감싼 런도 문서 순서 그 자리에 든다(살리기로 밀려나지 않는다)."""
+    math = ("<m:oMath><m:r><m:t>a</m:t></m:r><w:ins><m:r><m:t>+</m:t></m:r></w:ins>"
+            '<w:hyperlink r:id="rId9"><w:r><w:t>b</w:t></w:r></w:hyperlink>'
+            "<w:sdt><w:sdtContent><m:r><m:t>=c</m:t></m:r></w:sdtContent></w:sdt>"
+            "<w:del><m:r><m:t>지움</m:t></m:r></w:del></m:oMath>")
+    parsed, counts = parse(B.p(B.r("식 "), math, B.r(" 끝")))
+    assert texts(parsed) == [("paragraph", "식 a+b=c 끝")]
+    assert reasons(parsed) == ["equation_text", "tracked_deletion_skipped"] and counts[0].ok
