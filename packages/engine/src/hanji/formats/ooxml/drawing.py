@@ -1,6 +1,7 @@
-"""DrawingML·VML 개체 도우미(스펙 §7.1, DOCX·PPTX 함께). 그림 관계 → 미디어 파트 → PNG 자산. 변환·상한·화소·사유는
+"""DrawingML·VML 개체 도우미(스펙 §7.1, §8.4, DOCX·PPTX 함께). 그림 관계 → 미디어 파트 → PNG 자산. 변환·상한·화소·사유는
 hwpx/images.py의 to_png를 그대로 쓰고(옮기지 않는다, 스펙 §3), 같은 미디어 파트는 한 번만 바꾼다. 자산 예산은 PDF·HWPX와
-같은 AssetBudget이다."""
+같은 AssetBudget이다. 차트는 풍부한 글자(a:t)만 블록으로 내고 캐시 문자열은 글자 수만 센다. SmartArt는 데이터 파트의
+확장(dsp:dataModelExt@relId)을 호스트 파트 관계로 풀어 그려진 파트를 찾는다."""
 
 import xml.etree.ElementTree as ET
 from typing import Any
@@ -9,6 +10,7 @@ from ...errors import ParseError
 from ..hwpx import images
 from ..hwpx.parser import FIGURE_BUDGET, FIGURE_LINKED, FIGURE_MISSING
 from ..pdf.figures import AssetBudget
+from ..flowledger import ink
 from ..zipxml import OverBudget, TooLarge
 from .package import R, Package
 
@@ -16,7 +18,16 @@ A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
 PIC = "{http://schemas.openxmlformats.org/drawingml/2006/picture}"
 WP = "{http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing}"
 FRAMES = frozenset({f"{WP}inline", f"{WP}anchor"})  # w:drawing 아래 그림 틀
-R_EMBED, R_LINK, R_ID = f"{{{R}}}embed", f"{{{R}}}link", f"{{{R}}}id"
+C = "{http://schemas.openxmlformats.org/drawingml/2006/chart}"
+DGM = "{http://schemas.openxmlformats.org/drawingml/2006/diagram}"
+DSP = "{http://schemas.microsoft.com/office/drawing/2008/diagram}"
+R_EMBED, R_LINK, R_ID, R_DM = f"{{{R}}}embed", f"{{{R}}}link", f"{{{R}}}id", f"{{{R}}}dm"
+A_T, A_P, A_BR = f"{A}t", f"{A}p", f"{A}br"
+CHART, SMARTART = f"{C}chart", f"{DGM}relIds"  # a:graphicData 아래 차트·SmartArt 참조(관계는 호스트 파트의 것)
+CHART_ROOT, DATA_ROOT, DRAWN_ROOT = f"{C}chartSpace", f"{DGM}dataModel", f"{DSP}drawing"
+DIAGRAM_EXT = "http://schemas.microsoft.com/office/drawing/2008/diagram"  # 데이터 파트 확장의 a:ext@uri
+CHART_TEXT = "chart_text"  # 차트의 풍부한 글자를 문단으로 냈다(캐시 문자열은 cache_chars로 수만)
+SMARTART_TEXT = "smartart_text"  # SmartArt 도형 글자를 문단으로 냈다
 EMU_PER_INCH = 914_400
 
 
@@ -84,3 +95,25 @@ class Images:
             return FIGURE_BUDGET
         return {"asset": key, "mime": "image/png", "width_px": result.width, "height_px": result.height,
                 "dpi": dpi(result.width, cx), "category": "image"}
+
+
+def cache_chars(chart: ET.Element) -> int:
+    """차트 파트의 캐시 문자열(c:strCache·c:numCache의 c:v) 공백 아닌 글자 수(범위 밖: 수만 남긴다)."""
+    return sum(ink(v.text or "") for tag in (f"{C}strCache", f"{C}numCache") for cache in chart.iter(tag)
+               for v in cache.iter(f"{C}v"))
+
+
+def drawn_rel(data: ET.Element) -> str | None:
+    """SmartArt 데이터 파트의 그려진 파트 관계 id(dgm:extLst/a:ext[@uri]/dsp:dataModelExt@relId, 호스트 파트의 관계)."""
+    for ext in data.iterfind(f"{DGM}extLst/{A}ext"):
+        found = ext.find(f"{DSP}dataModelExt")
+        if ext.get("uri") == DIAGRAM_EXT and found is not None and found.get("relId"):
+            return found.get("relId")
+    return None
+
+
+def smartart_shapes(root: ET.Element) -> list[ET.Element]:
+    """SmartArt 글 몸통들(문서 순서): 그려진 파트면 dsp:sp/dsp:txBody, 데이터 파트면 dgm:pt/dgm:t. 안의 a:p가 문단이다."""
+    if root.tag == DRAWN_ROOT:
+        return [body for sp in root.iter(f"{DSP}sp") if (body := sp.find(f"{DSP}txBody")) is not None]
+    return [body for pt in root.iter(f"{DGM}pt") if (body := pt.find(f"{DGM}t")) is not None]

@@ -41,6 +41,9 @@ LOCAL = {
     "wpc": "http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas",
     "o": "urn:schemas-microsoft-com:office:office",
     "asvg": "http://schemas.microsoft.com/office/drawing/2016/SVG/main",
+    "c": "http://schemas.openxmlformats.org/drawingml/2006/chart",
+    "dgm": "http://schemas.openxmlformats.org/drawingml/2006/diagram",
+    "dsp": "http://schemas.microsoft.com/office/drawing/2008/diagram",
 }
 EMU = 914400  # 1인치
 PIC_URI = "http://schemas.openxmlformats.org/drawingml/2006/picture"
@@ -277,6 +280,46 @@ def vpict(*shapes: str, ole: bool = False) -> str:
     if ole:
         return f'<w:r><w:object>{"".join(shapes)}<o:OLEObject{xmlns("o")} ProgID="Excel.Sheet.12"/></w:object></w:r>'
     return f'<w:r><w:pict>{"".join(shapes)}</w:pict></w:r>'
+
+
+def a_p(*texts: str) -> str:
+    """DrawingML 문단(a:p): 글자마다 런, 빈 문자열은 a:br."""
+    return "<a:p>" + "".join(f"<a:r><a:t>{escape(x)}</a:t></a:r>" if x else "<a:br/>" for x in texts) + "</a:p>"
+
+
+def chart_ref(rid: str) -> str:
+    return f'<c:chart{xmlns("c")}{attrs(r__id=rid)}/>'
+
+
+def chart_part(*titles: str, cache: Sequence[str] = ()) -> str:
+    """차트 파트: 풍부한 글자 제목들(a:p 하나씩)과 캐시 문자열 값들(c:strCache), 제목·차트마다 빈 a:p만 든 c:txPr."""
+    empty = '<c:txPr><a:bodyPr/><a:p><a:pPr/><a:endParaRPr lang="ko-KR"/></a:p></c:txPr>'
+    rich = "".join(f"<c:title><c:tx><c:rich><a:bodyPr/>{a_p(x)}</c:rich></c:tx>{empty}</c:title>" for x in titles)
+    points = "".join(f'<c:pt idx="{k}"><c:v>{escape(v)}</c:v></c:pt>' for k, v in enumerate(cache))
+    return (f'{DECL}<c:chartSpace{xmlns("c", "a", "r")}><c:chart>{rich}<c:plotArea><c:barChart><c:ser><c:cat><c:strRef>'
+            f"<c:f>Sheet1!$A$2</c:f><c:strCache>{points}</c:strCache></c:strRef></c:cat></c:ser></c:barChart>"
+            f"</c:plotArea></c:chart>{empty}</c:chartSpace>")
+
+
+def smartart_ref(dm: str) -> str:
+    return f'<dgm:relIds{xmlns("dgm")}{attrs(r__dm=dm, r__lo="rIdLo", r__qs="rIdQs", r__cs="rIdCs")}/>'
+
+
+def smartart_data(*texts: str, drawn: str | None = None) -> str:
+    """SmartArt 데이터 파트: 점마다 dgm:t 글자, drawn은 그려진 파트 관계 id(데이터 파트 확장, 호스트 관계로 푼다)."""
+    points = "".join(f'<dgm:pt modelId="{k + 1}"><dgm:t><a:bodyPr/>{a_p(x)}</dgm:t></dgm:pt>'
+                     for k, x in enumerate(texts))
+    ext = (f'<dgm:extLst><a:ext uri="http://schemas.microsoft.com/office/drawing/2008/diagram"><dsp:dataModelExt'
+           f'{xmlns("dsp")} relId="{drawn}" minVer="http://schemas.openxmlformats.org/drawingml/2006/diagram"/></a:ext>'
+           "</dgm:extLst>") if drawn else ""
+    return f'{DECL}<dgm:dataModel{xmlns("dgm", "a")}><dgm:ptLst>{points}</dgm:ptLst>{ext}</dgm:dataModel>'
+
+
+def smartart_drawn(*shapes: Sequence[str]) -> str:
+    """SmartArt 그려진 파트: 도형마다 dsp:txBody의 a:p들(항목마다 하나)."""
+    body = "".join(f'<dsp:sp modelId="{k}"><dsp:txBody><a:bodyPr/>{"".join(a_p(x) for x in shape)}'
+                   "</dsp:txBody></dsp:sp>" for k, shape in enumerate(shapes))
+    return f'{DECL}<dsp:drawing{xmlns("dsp", "a")}><dsp:spTree>{body}</dsp:spTree></dsp:drawing>'
 
 
 # 그림 원본: HWPX 골든과 같은 고정 바이트(6×6 회색 PNG, 4×4 반투명 RGBA PNG, 8×8 CMYK JPEG). 가짜 EMF는 머리만 있다

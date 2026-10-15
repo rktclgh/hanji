@@ -7,7 +7,8 @@
 살린다. 문단 안 개체(w:drawing·w:pict·w:object)는 문단 글자 뒤에 블록으로 낸다(스펙 §7.1, §7.4): 그림은 PNG 자산(관계 →
 미디어 파트, drawing.Images), 글상자는 안 문단마다 문단 블록(제목·목록 판정 없음)과 shape_text, 묶음·캔버스는 자식을 차례로.
 칸 안 개체는 표 블록 뒤에 낸다. 머리말·꼬리말(스펙 §7.2)은 구역이 처음 참조한 파트마다 구역 첫 항목 자리에 블록 하나(파트
-문단 글자를 \\n으로)와 그 안 표·개체, 각주·미주(스펙 §7.3)는 구역 끝에 각주 전체·미주 전체를 참조 순서대로 낸다."""
+문단 글자를 \\n으로)와 그 안 표·개체, 각주·미주(스펙 §7.3)는 구역 끝에 각주 전체·미주 전체를 참조 순서대로 낸다. 차트는
+이미지 없는 그림과 풍부한 글자 문단(chart_text), SmartArt는 도형 글자 문단(smartart_text)이다(스펙 §8.4와 같은 규칙)."""
 
 import xml.etree.ElementTree as ET
 from collections import Counter
@@ -26,7 +27,9 @@ from ...pdf.group import RESCUED_CONFIDENCE, step
 from ...pdf.parser import COVERAGE_MISMATCH, UNASSIGNED_TEXT
 from ...zipxml import Prefixes
 from ..ledger import NORMAL, SOURCES, Note, Story, Walker, part_chars, sym_char
-from ..drawing import A, FRAMES, PIC, R_ID, WP, Images, blip, emu, hidden_frame
+from ..drawing import (A, A_BR, A_P, A_T, CHART, CHART_ROOT, CHART_TEXT, DATA_ROOT, DRAWN_ROOT, FRAMES, PIC, R_DM, R_ID,
+                       SMARTART, SMARTART_TEXT, WP, Images, blip, cache_chars, drawn_rel, emu, hidden_frame,
+                       smartart_shapes)
 from ..package import MC, READ, Package, choose, ignorable
 from . import tables
 from .styles import Styles, read_styles
@@ -95,6 +98,8 @@ class _Doc:
     margins: dict[int, list[tuple[int, Story_]]] = field(default_factory=dict)  # 구역 → (닻, 머리말·꼬리말 파트)
     notes: dict[int, list[tuple[int, Story_]]] = field(default_factory=dict)  # 구역 → (닻, 주석) 참조 차례
     unreferenced: int = 0  # 참조되지 않은 머리말·꼬리말 파트·주석의 글자
+    charts: dict[int, ET.Element] = field(default_factory=dict)  # id(c:chart) → 그 호스트 자리에서 연 차트 파트 뿌리
+    smartart: dict[int, ET.Element] = field(default_factory=dict)  # id(dgm:relIds) → 고른 파트(그려진 파트·데이터) 뿌리
 
 
 def _text(element: ET.Element) -> str:
@@ -351,6 +356,10 @@ class _Section:
             chosen = choose(element, self.prefixes)
             for child in chosen if chosen is not None else ():
                 self.graphic(child, anchor, cx, top)
+        elif tag == CHART:
+            self.chart(element, anchor)
+        elif tag == SMARTART and id(element) in self.doc.smartart:
+            self.smartart(self.doc.smartart[id(element)], anchor)
         elif top:
             self.figure(None, anchor)
             self.region("object", "figure", EMBEDDED_OBJECT, anchor)
@@ -380,6 +389,39 @@ class _Section:
         if ole and not shown:
             self.figure(None, anchor)
             self.region("object", "figure", EMBEDDED_OBJECT, anchor)
+
+    def chart(self, element: ET.Element, anchor: int) -> None:
+        """차트: 이미지 없는 그림 + embedded_object, 차트 파트가 있으면 풍부한 글자(a:p를 \\n으로) 문단 하나와
+        chart_text(근거 cache_chars: 캐시 문자열 글자 수, 범위 밖). 글자 없는 a:p(c:txPr의 빈 문단 등)는 건너뛴다."""
+        self.figure(None, anchor)
+        self.region("object", "figure", EMBEDDED_OBJECT, anchor)
+        root = self.doc.charts.get(id(element))
+        if root is None:
+            return
+        bundles: list[Bundle] = []
+        for paragraph in (self.rich(p) for p in root.iter(A_P)):
+            if sum(ink(text) for _, text in paragraph):
+                bundles += [(None, "\n")] * bool(bundles) + paragraph
+        self.emit("paragraph", bundles, anchor)
+        self.region("chart", "paragraph", CHART_TEXT, anchor, gate("cache_chars", cache_chars(root), None))
+
+    def smartart(self, root: ET.Element, anchor: int) -> None:
+        """SmartArt: 고른 파트의 도형(글 몸통)마다 a:p 문단 블록, 보통 글자가 있는 도형마다 smartart_text."""
+        for body in smartart_shapes(root):
+            if self.has_text(body):
+                self.region("smartart", "paragraph", SMARTART_TEXT, anchor)
+            for p in body.iterfind(A_P):
+                self.emit("paragraph", self.rich(p), anchor)
+
+    def rich(self, p: ET.Element) -> list[Bundle]:
+        """DrawingML 문단(a:p) 글자: 보통 a:t를 차례로, a:br은 \\n."""
+        out: list[Bundle] = []
+        for element in p.iter():
+            if element.tag == A_T and self.doc.walker.marks.get(id(element)) == NORMAL:
+                out.append((self.ledger.source_of(element), _text(element)))
+            elif element.tag == A_BR:
+                out.append((None, "\n"))
+        return out
 
     def image(self, result: dict[str, Any] | str, anchor: int) -> None:
         """그림 블록(figure 값) 또는 이미지 없는 그림과 그 사유."""
@@ -600,6 +642,7 @@ class DocxParser:
                     numbered[-1].append((base + len(numbered[-1]), element))
                 # 항목 밖 요소(고르지 않은 mc 쪽·떠도는 출처)의 닻은 앞 항목(없으면 구역 첫 순번)
                 anchor = numbered[-1][-1][0] if numbered[-1] else base
+                doc.walker.part = package.main
                 doc.walker.walk(element, prefixes, ledgers[k], k, anchor, story, (root, body, *chain))
             base += len(numbered[-1])
         doc.walker.close(story)
@@ -647,26 +690,31 @@ class DocxParser:
                 root, prefixes = package.part(rel.target, root_tag)
                 doc.held.append(root)
                 story = Story()
+                doc.walker.part = rel.target
                 doc.walker.walk(root, prefixes, ledgers[k], k, anchor, story, (root,))
                 doc.walker.close(story)
                 doc.margins.setdefault(k, []).append((anchor, (MARGIN_KINDS[kind], root, rel.target, prefixes)))
             base += len(items)
         for kind, root_tag in (("header", f"{W}hdr"), ("footer", f"{W}ftr")):
-            for member in package.related(package.main, kind):
+            for member in dict.fromkeys(package.related(package.main, kind)):  # 관계 id가 달라도 같은 파트는 한 번
                 if member not in seen:
                     doc.unreferenced += part_chars(package.part(member, root_tag)[0])
         notes: dict[str, tuple[ET.Element, str, Prefixes, dict[str, ET.Element]]] = {}
+        dropped: dict[str, list[ET.Element]] = {kind: [] for kind in NOTES}  # w:id가 겹친 뒤 주석
         for kind, (root_tag, note_tag) in NOTES.items():
             members = package.related(package.main, kind)
             if members:
                 root, prefixes = package.part(members[0], root_tag)
                 doc.held.append(root)
+                doc.walker.part = members[0]
                 found: dict[str, ET.Element] = {}
                 for note in root.iterfind(note_tag):
                     if note.get(f"{W}type") in SPECIAL_NOTES:
                         doc.walker.walk(note, prefixes, ledgers[0], 0, 0, Story(), (root,), forced="special")
+                    elif note.get(f"{W}id", "") in found:
+                        dropped[kind].append(note)  # 같은 w:id의 뒤 주석: 블록 없이 글자 수만 센다
                     else:
-                        found.setdefault(note.get(f"{W}id", ""), note)
+                        found[note.get(f"{W}id", "")] = note
                 notes[kind] = (root, members[0], prefixes, found)
         done: set[tuple[str, str]] = set()
         for section, anchor, tag, key in doc.walker.refs:  # 주석 안 참조가 뒤에 붙어도 돈다
@@ -676,8 +724,41 @@ class DocxParser:
             done.add((kind, key))
             root, member, prefixes, found = notes[kind]
             story = Story()
+            doc.walker.part = member
             doc.walker.walk(found[key], prefixes, ledgers[section], section, anchor, story, (root,))
             doc.walker.close(story)
             doc.notes.setdefault(section, []).append((anchor, (kind, found[key], member, prefixes)))
         for kind, (_, _, _, found) in notes.items():
             doc.unreferenced += sum(part_chars(note) for key, note in found.items() if (kind, key) not in done)
+            doc.unreferenced += sum(part_chars(note) for note in dropped[kind])
+        self._graphics(doc, ledgers)
+
+    @staticmethod
+    def _graphics(doc: _Doc, ledgers: list[Ledger]) -> None:
+        """차트·SmartArt 파트의 출처를 호스트 자리마다 따로 올린다(같은 파트를 두 호스트가 가리키면 두 번 연다).
+        관계는 호스트 파트의 것이다. SmartArt는 그려진 파트가 있으면 그것, 없으면 데이터 파트를 읽고 고르지 않은 파트
+        글자는 범위 밖(alternate_content_skipped에 센다). 호스트가 범위 밖·숨김이면 파트 글자도 그 표시다."""
+        package = doc.package
+        for section, anchor, host, element, out in doc.walker.graphics:
+            rels = package.rels(host)
+            if element.tag == CHART:
+                rel = rels.get(element.get(R_ID, ""))
+                if rel is None or rel.target is None or not package.has(rel.target):
+                    continue
+                root, prefixes = package.part(rel.target, CHART_ROOT)
+                doc.charts[id(element)] = root
+                read = [(root, prefixes, out)]
+            else:
+                rel = rels.get(element.get(R_DM, ""))
+                if rel is None or rel.target is None or not package.has(rel.target):
+                    continue
+                data, data_prefixes = package.part(rel.target, DATA_ROOT)
+                drawn = rels.get(drawn_rel(data) or "")
+                read = [(data, data_prefixes, out)]
+                if drawn is not None and drawn.target is not None and package.has(drawn.target):
+                    root, prefixes = package.part(drawn.target, DRAWN_ROOT)
+                    read = [(root, prefixes, out), (data, data_prefixes, out or "alt")]
+                doc.smartart[id(element)] = read[0][0]
+            for root, prefixes, forced in read:
+                doc.held.append(root)
+                doc.walker.walk(root, prefixes, ledgers[section], section, anchor, Story(), (root,), forced=forced)

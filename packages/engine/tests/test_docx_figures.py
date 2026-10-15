@@ -143,3 +143,60 @@ def test_a_picture_member_with_a_broken_zip_crc_loses_only_that_picture():
     assert [(b["kind"], b["text"], "figure" in b) for b in parsed.blocks] == [
         ("paragraph", "앞 글", False), ("figure", "", False), ("figure", "", True), ("paragraph", "뒤 글", False)]
     assert reasons(parsed) == [("figure_image_unreadable", "s0-p1-figure-0")] and counts[0].ok
+
+
+CHART_URI = "http://schemas.openxmlformats.org/drawingml/2006/chart"
+DIAGRAM_URI = "http://schemas.openxmlformats.org/drawingml/2006/diagram"
+
+
+def test_charts_give_a_figure_and_their_rich_text_once_per_host_and_count_cache_text():
+    chart = B.chart_part("지어낸 매출 추이", "단위: 억원", cache=("1분기", "2분기", "10.5"))
+    rels = (("rIdC", f"{B.R}/chart", "charts/chart1.xml"), ("rIdN", f"{B.R}/chart", "charts/none.xml"))
+    parsed, counts = parse(B.p(B.r("차트 앞"), B.drawing(B.chart_ref("rIdC"), uri=CHART_URI)),
+                           B.p(B.drawing(B.chart_ref("rIdC"), uri=CHART_URI)),
+                           B.p(B.drawing(B.chart_ref("rIdC"), uri=CHART_URI, hidden=True)),
+                           B.p(B.drawing(B.chart_ref("rIdN"), uri=CHART_URI)),
+                           rels=rels, extra=(("word/charts/chart1.xml", chart),))
+    assert [(k, t, a) for k, t, _, a in shown(parsed)] == [
+        ("paragraph", "차트 앞", 0), ("figure", "", 0), ("paragraph", "지어낸 매출 추이\n단위: 억원", 0),
+        ("figure", "", 1), ("paragraph", "지어낸 매출 추이\n단위: 억원", 1), ("figure", "", 3)]
+    assert [(r.fallback_reason, r.region_id, r.gate.checks[0].value if r.gate else None) for r in parsed.regions] == [
+        ("embedded_object", "s0-p0-object-0", None), ("chart_text", "s0-p0-chart-0", 10),
+        ("embedded_object", "s0-p1-object-0", None), ("chart_text", "s0-p1-chart-0", 10),
+        ("embedded_object", "s0-p3-object-0", None), ("hidden_text", "s0-p2-hidden-text-0", 7),
+        ("hidden_text", "s0-p2-hidden-text-1", 5)]
+    assert counts[0].ok and counts[0].hidden == 12 and counts[0].rescued == 0
+
+
+def test_hidden_charts_in_different_paragraphs_each_get_their_own_hidden_text_record():
+    chart = B.chart_part("숨은 차트 제목")
+    rels = (("rIdC", f"{B.R}/chart", "charts/chart1.xml"),)
+    parsed, counts = parse(B.p(B.drawing(B.chart_ref("rIdC"), uri=CHART_URI, hidden=True)),
+                           B.p(B.r("보통 글")),
+                           B.p(B.drawing(B.chart_ref("rIdC"), uri=CHART_URI, hidden=True)),
+                           rels=rels, extra=(("word/charts/chart1.xml", chart),))
+    assert [(k, t) for k, t, _, _ in shown(parsed)] == [("paragraph", "보통 글")]
+    assert [(r.fallback_reason, r.region_id, r.gate.checks[0].value) for r in parsed.regions] == [
+        ("hidden_text", "s0-p0-hidden-text-0", 6), ("hidden_text", "s0-p2-hidden-text-0", 6)]
+    assert counts[0].ok and counts[0].hidden == 12 and counts[0].rescued == 0
+
+
+def test_smartart_reads_the_drawn_part_found_through_the_host_and_leaves_the_data_part_out():
+    data = B.smartart_data("데이터 글 하나", "데이터 글 둘", drawn="rIdDr")
+    drawn = B.smartart_drawn(["그린 첫 도형"], ["그린 둘째 도형", "둘째 문단"])
+    rels = (("rIdDm", f"{B.R}/diagramData", "diagrams/data1.xml"),
+            ("rIdDr", "http://schemas.microsoft.com/office/2007/relationships/diagramDrawing", "diagrams/drawing1.xml"),
+            ("rIdD2", f"{B.R}/diagramData", "diagrams/data2.xml"))
+    parsed, counts = parse(B.p(B.drawing(B.smartart_ref("rIdDm"), uri=DIAGRAM_URI)),
+                           B.p(B.drawing(B.smartart_ref("rIdD2"), uri=DIAGRAM_URI)),
+                           B.p(B.drawing(B.smartart_ref("rIdNo"), uri=DIAGRAM_URI)), rels=rels,
+                           extra=(("word/diagrams/data1.xml", data), ("word/diagrams/drawing1.xml", drawn),
+                                  ("word/diagrams/data2.xml", B.smartart_data("점 글", ""))))
+    assert [(k, t, a) for k, t, _, a in shown(parsed)] == [
+        ("paragraph", "그린 첫 도형", 0), ("paragraph", "그린 둘째 도형", 0), ("paragraph", "둘째 문단", 0),
+        ("paragraph", "점 글", 1), ("figure", "", 2)]
+    assert [(r.fallback_reason, r.region_id) for r in parsed.regions] == [
+        ("smartart_text", "s0-p0-smartart-0"), ("smartart_text", "s0-p0-smartart-1"),
+        ("smartart_text", "s0-p1-smartart-0"), ("embedded_object", "s0-p2-object-0"),
+        ("alternate_content_skipped", "doc-alternate-content")]
+    assert parsed.regions[-1].gate.checks[0].value == 11 and counts[0].ok and counts[0].rescued == 0

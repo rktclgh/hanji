@@ -22,9 +22,9 @@ PARTS = {"rIdH1": ("header", "header1.xml"), "rIdH2": ("header", "header2.xml"),
          "rIdEN": ("endnotes", "endnotes.xml")}
 
 
-def parse(*items: str, parts: dict[str, str], final: str | None = None, extra: tuple = ()):
+def parse(*items: str, parts: dict[str, str], final: str | None = None, extra: tuple = (), rels_more: tuple = ()):
     """(ParsedSource, 구역별 장부 숫자). parts는 word/ 아래 멤버 → XML(관계 id는 PARTS에서 찾는다)."""
-    rels = [(rid, B.REL[kind], member) for rid, (kind, member) in PARTS.items() if member in parts]
+    rels = [(rid, B.REL[kind], member) for rid, (kind, member) in PARTS.items() if member in parts] + [*rels_more]
     data = B.docx(B.document(*items, final=final), styles_xml=STYLES, doc_rels=rels,
                   extra=[*((f"word/{m}", x) for m, x in parts.items()), *extra])
     return DocxParser()._parse(data, "a.docx")
@@ -120,3 +120,22 @@ def test_text_boxes_in_headers_follow_the_header_part_prefixes_and_fields_restar
     assert shown(parsed) == [("page_header", "머리말", 0), ("paragraph", "머리 글상자", 0), ("paragraph", "본문", 0)]
     assert [r for r, _ in reasons(parsed)] == ["shape_text", "field_unterminated", "alternate_content_skipped"]
     assert counts[0].ok
+
+
+def test_a_later_note_with_a_duplicate_id_is_counted_as_unreferenced_text():
+    """같은 w:id의 뒤 주석은 블록도 처리 이력도 없이 버려지지 않고, 글자 수가 unreferenced_part_skipped에 든다."""
+    foot = B.notes("footnotes", ("1", None, B.p("첫 각주")), ("1", None, B.p("겹친 각주")))
+    parsed, counts = parse(B.p(B.r("본문"), B.note_ref("footnote", "1")), parts={"footnotes.xml": foot})
+    assert shown(parsed) == [("paragraph", "본문", 0), ("paragraph", "첫 각주", 0)]
+    assert [(r.fallback_reason, r.region_id, r.gate.checks[0].value) for r in parsed.regions] == [
+        ("unreferenced_part_skipped", "doc-unreferenced-part", 4)]
+    assert counts[0].ok and counts[0].rescued == 0
+
+
+def test_an_unreferenced_part_reached_through_two_relationship_ids_is_counted_once():
+    parsed, counts = parse(B.p("본문"), parts={"header2.xml": B.margin("hdr", "안 쓰는 머리말")},
+                           rels_more=(("rIdH9", B.REL["header"], "header2.xml"),))
+    assert shown(parsed) == [("paragraph", "본문", 0)]
+    assert [(r.fallback_reason, r.gate.checks[0].value) for r in parsed.regions] == [
+        ("unreferenced_part_skipped", 6)]
+    assert counts[0].ok and counts[0].rescued == 0

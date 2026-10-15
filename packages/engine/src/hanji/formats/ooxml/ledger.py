@@ -1,5 +1,5 @@
 """OOXML 출처 열거와 표시(스펙 §9). 블록 조립과 따로, 이야기(본문·머리말 파트·주석 하나·글상자 내용)를 명시적 스택으로
-훑어 출처 요소(w:t·w:instrText·w:sym·m:t)를 모두 장부에 올리고, 그때 조상과 필드 상태를 보고 출처마다 표시를 단다:
+훑어 출처 요소(w:t·w:instrText·w:sym·m:t·a:t)를 모두 장부에 올리고, 그때 조상과 필드 상태를 보고 출처마다 표시를 단다:
 보통(보이는 글자), 숨김(w:vanish, 숨긴 그림 틀 wp:docPr@hidden 안), 범위 밖(고르지 않은 mc 쪽·무시한 요소·필드 명령 구간·w:moveFrom·w:del·
 특수 주석). 블록 조립은
 표시가 보통인 출처만 넣는다. 숨김·범위 밖 출처는 장부에 숨은 출처로 올라 살리지 않고, 블록에 들어가면 불일치다.
@@ -13,13 +13,13 @@ from dataclasses import dataclass, field
 from ..flowledger import Ledger, ink
 from ..zipxml import Prefixes
 from .docx.styles import Styles
-from .drawing import FRAMES, hidden_frame
+from .drawing import A_P, A_T, CHART, FRAMES, SMARTART, hidden_frame
 from .package import MC, choose, ignorable
 
 W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 M = "{http://schemas.openxmlformats.org/officeDocument/2006/math}"
 T, INSTR, SYM, MT = f"{W}t", f"{W}instrText", f"{W}sym", f"{M}t"
-SOURCES = frozenset({T, INSTR, SYM, MT})
+SOURCES = frozenset({T, INSTR, SYM, MT, A_T})
 STORY = f"{W}txbxContent"  # 그 안은 이야기 하나(필드 상태가 처음부터)
 DELETED = frozenset({f"{W}moveFrom", f"{W}del"})  # 안의 출처는 범위 밖(변경 추적 삭제)
 DEL_TEXT = frozenset({f"{W}delText", f"{W}delInstrText"})  # 출처가 아니다(글자 수만 처리 이력에)
@@ -108,7 +108,9 @@ def _split(tag: str) -> tuple[str, str]:
 
 class Walker:
     """문서 하나의 출처를 표시한다. marks는 id(출처 요소) → 표시, notes는 처리 이력 재료(문서 순서), refs는 보이는
-    각주·미주 참조 (구역, 닻, 참조 요소 이름, w:id)(문서 순서: 범위 밖·필드 명령 구간·숨긴 런의 참조는 들지 않는다)."""
+    각주·미주 참조 (구역, 닻, 참조 요소 이름, w:id)(문서 순서: 범위 밖·필드 명령 구간·숨긴 런의 참조는 들지 않는다),
+    graphics는 차트·SmartArt 참조 (구역, 닻, 호스트 파트, 참조 요소, 범위 밖 종류 또는 None)(문서 순서). part는 지금 훑는
+    파트 멤버(부르는 쪽이 정한다). DrawingML 문단(a:p)도 w:p처럼 문단 단위다(차트·SmartArt 글자는 문단마다 기록)."""
 
     def __init__(self, styles: Styles) -> None:
         self.styles = styles
@@ -118,6 +120,8 @@ class Walker:
         self.skipped = 0  # 고르지 않은 mc 쪽·무시한 요소의 출처 글자
         self.deleted = 0  # 변경 추적 삭제(moveFrom·del 안 출처, delText) 글자
         self.special = 0  # 특수 주석 안 출처 글자
+        self.graphics: list[tuple[int, int, str, ET.Element, str | None]] = []
+        self.part = ""
         self._paras: dict[int, _Para] = {}
         self._empty = ET.Element(_PARA)
 
@@ -176,10 +180,12 @@ class Walker:
             elif element.tag in NOTE_REFS and ctx.out is None and not any(f.instr for f in ctx.story.fields) \
                     and not self.styles.run(ctx.para if ctx.para is not None else self._empty, ctx.run)[2]:
                 self.refs.append((section, anchor, element.tag, element.get(f"{W}id", "")))
-            elif element.tag == _PARA:
+            elif element.tag in (_PARA, A_P):
                 ctx = _Ctx(ctx.out, ctx.ignored, ctx.process, element, None, ctx.story)
             elif element.tag in _RUNS:
                 ctx = _Ctx(ctx.out, ctx.ignored, ctx.process, ctx.para, element, ctx.story)
+            elif element.tag in (CHART, SMARTART):
+                self.graphics.append((section, anchor, self.part, element, ctx.out))
             elif element.tag in FRAMES and ctx.out is None and hidden_frame(element):
                 ctx = _Ctx("hidden", ctx.ignored, ctx.process, ctx.para, ctx.run, ctx.story)
             elif element.tag == STORY:
