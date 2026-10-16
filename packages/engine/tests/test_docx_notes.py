@@ -154,3 +154,13 @@ def test_a_chart_in_a_header_resolves_its_relationship_in_the_header_part():
     assert [(r.fallback_reason, r.gate.checks[0].value if r.gate else None) for r in parsed.regions] == [
         ("embedded_object", None), ("chart_text", 0)]
     assert counts[0].ok and counts[0].rescued == 0
+
+
+def test_broken_count_only_parts_are_skipped_without_failing_the_document():
+    """수만 세는 파트(참조 안 된 머리말, 메모)가 깨졌거나 뿌리가 달라도 문서는 읽힌다: 세지 않고 넘어간다(스펙 §16-1)."""
+    parsed, counts = parse(B.p("본문"), parts={"header1.xml": B.DECL + "<w:hdr><broken",
+                                              "footer1.xml": B.margin("hdr", "뿌리 다른 꼬리말")},
+                           extra=(("word/comments.xml", B.DECL + "<w:comments><broken"),),
+                           rels_more=(("rIdC", B.REL["comments"], "comments.xml"),))
+    assert shown(parsed) == [("paragraph", "본문", 0)] and parsed.regions == ()
+    assert counts[0].ok and counts[0].rescued == 0

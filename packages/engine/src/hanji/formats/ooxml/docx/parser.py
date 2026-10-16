@@ -26,11 +26,10 @@ from ...hwpx.tables import RawCell, build
 from ...pdf.group import RESCUED_CONFIDENCE, step
 from ...pdf.parser import COVERAGE_MISMATCH, UNASSIGNED_TEXT
 from ...zipxml import Prefixes
-from ..ledger import NORMAL, SOURCES, Note, Story, Walker, part_chars, sym_char
-from ..drawing import (A, A_BR, A_P, A_T, CHART, CHART_ROOT, CHART_TEXT, DATA_ROOT, DRAWN_ROOT, FRAMES, PIC, R_DM, R_ID,
-                       SMARTART, SMARTART_TEXT, WP, Images, blip, cache_chars, drawn_rel, emu, hidden_frame,
-                       smartart_shapes)
-from ..package import MC, READ, R, Package, choose, ignorable
+from ..ledger import NORMAL, SOURCES, Note, Story, Walker, counted, part_chars, sym_char
+from ..drawing import (A, A_BR, A_P, A_T, CHART, CHART_TEXT, FRAMES, PIC, R_ID, SMARTART, SMARTART_TEXT, WP, Images,
+                       blip, cache_chars, emu, graphic_parts, hidden_frame, smartart_shapes)
+from ..package import MC, READ, Package, choose, ignorable
 from . import tables
 from .styles import Styles, read_styles
 
@@ -70,7 +69,6 @@ NOTES = {"footnotes": (f"{W}footnotes", f"{W}footnote"), "endnotes": (f"{W}endno
 SPECIAL_NOTES = frozenset({"separator", "continuationSeparator", "continuationNotice"})
 UNKNOWN_INLINE = "unknown_inline_element"  # 모르는 런 자식 안 글자를 그 자리에 넣었다
 COMMENTS_SKIPPED = "comments_skipped"  # 메모(인쇄되지 않음)는 범위 밖
-DRAWN_TYPE = "http://schemas.microsoft.com/office/2007/relationships/diagramDrawing"
 UNREFERENCED = "unreferenced_part_skipped"  # 참조되지 않은 머리말·꼬리말 파트와 주석은 범위 밖
 MARGIN_KINDS = {"header": "page_header", "footer": "page_footer"}
 Story_ = tuple[str, ET.Element, str, Prefixes]  # (블록 종류·주석 종류, 요소, 파트 멤버, 그 파트 접두어)
@@ -652,7 +650,7 @@ class DocxParser:
         for k, items in enumerate(numbered):
             _Section(doc, k, items, ledgers[k]).build()
         doc.regions.extend(_region(note) for note in doc.walker.notes)
-        chars = sum(part_chars(package.part(m, f"{W}comments")[0]) for m in package.related(package.main, "comments"))
+        chars = sum(counted(package, m, f"{W}comments") for m in package.related(package.main, "comments"))
         if chars:
             doc.regions.append(Region("comments", "paragraph", COMMENTS_SKIPPED, 0, 0, gate("chars", chars, None),
                                       "doc-comments"))
@@ -692,14 +690,14 @@ class DocxParser:
                 doc.held.append(root)
                 story = Story()
                 doc.walker.part = rel.target
-                doc.walker.walk(root, prefixes, ledgers[k], k, anchor, story, (root,))
+                doc.walker.walk(root, prefixes, ledgers[k], k, anchor, story)
                 doc.walker.close(story)
                 doc.margins.setdefault(k, []).append((anchor, (MARGIN_KINDS[kind], root, rel.target, prefixes)))
             base += len(items)
         for kind, root_tag in (("header", f"{W}hdr"), ("footer", f"{W}ftr")):
             for member in dict.fromkeys(package.related(package.main, kind)):  # 관계 id가 달라도 같은 파트는 한 번
                 if member not in seen:
-                    doc.unreferenced += part_chars(package.part(member, root_tag)[0])
+                    doc.unreferenced += counted(package, member, root_tag)
         notes: dict[str, tuple[ET.Element, str, Prefixes, dict[str, ET.Element]]] = {}
         dropped: dict[str, list[ET.Element]] = {kind: [] for kind in NOTES}  # w:id가 겹친 뒤 주석
         for kind, (root_tag, note_tag) in NOTES.items():
@@ -737,31 +735,14 @@ class DocxParser:
     @staticmethod
     def _graphics(doc: _Doc, ledgers: list[Ledger]) -> None:
         """차트·SmartArt 파트의 출처를 호스트 자리마다 따로 올린다(같은 파트를 두 호스트가 가리키면 두 번 연다).
-        관계는 호스트 파트의 것이다. SmartArt는 그려진 파트가 있으면 그것, 없으면 데이터 파트를 읽고 고르지 않은 파트
-        글자는 범위 밖(alternate_content_skipped에 센다). 호스트가 범위 밖·숨김이면 파트 글자도 그 표시다."""
-        package = doc.package
+        관계는 호스트 파트의 것이다(drawing.graphic_parts). SmartArt는 그려진 파트가 있으면 그것, 없으면 데이터 파트를
+        읽고 고르지 않은 파트 글자는 범위 밖(alternate_content_skipped에 센다). 호스트가 범위 밖·숨김이면 파트 글자도 그
+        표시다. 풀 수 없거나 깨진 파트는 건너뛴다: 그 자리는 이미지 없는 그림만."""
         for section, anchor, host, element, out in doc.walker.graphics:
-            rels = package.rels(host)
-            if element.tag == CHART:
-                rel = rels.get(element.get(R_ID, ""))
-                if rel is None or rel.type != f"{R}/chart" or rel.target is None or not package.has(rel.target):
-                    continue  # 풀 수 없거나 종류가 다른 관계: 이 자리는 이미지 없는 그림만
-                root, prefixes = package.part(rel.target, CHART_ROOT)
-                doc.charts[id(element)] = root
-                read = [(root, prefixes, out)]
-            else:
-                rel = rels.get(element.get(R_DM, ""))
-                if rel is None or rel.type != f"{R}/diagramData" or rel.target is None or not package.has(rel.target):
-                    continue
-                data, data_prefixes = package.part(rel.target, DATA_ROOT)
-                drawn = rels.get(drawn_rel(data) or "")
-                read = [(data, data_prefixes, out)]
-                if drawn is not None and drawn.type == DRAWN_TYPE and drawn.target is not None \
-                        and package.has(drawn.target):
-                    root, prefixes = package.part(drawn.target, DRAWN_ROOT)
-                    # 고르지 않은 데이터 파트는 호스트가 숨김이어도 항상 범위 밖(스펙 §9)
-                    read = [(root, prefixes, out), (data, data_prefixes, "alt" if out in (None, "hidden") else out)]
-                doc.smartart[id(element)] = read[0][0]
+            read = graphic_parts(doc.package, host, element, out)
+            if not read:
+                continue
+            (doc.charts if element.tag == CHART else doc.smartart)[id(element)] = read[0][0]
             for root, prefixes, forced in read:
                 doc.held.append(root)
-                doc.walker.walk(root, prefixes, ledgers[section], section, anchor, Story(), (root,), forced=forced)
+                doc.walker.walk(root, prefixes, ledgers[section], section, anchor, Story(), forced=forced)

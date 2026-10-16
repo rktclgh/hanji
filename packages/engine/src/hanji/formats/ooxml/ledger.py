@@ -1,20 +1,21 @@
 """OOXML 출처 열거와 표시(스펙 §9). 블록 조립과 따로, 이야기(본문·머리말 파트·주석 하나·글상자 내용)를 명시적 스택으로
 훑어 출처 요소(w:t·w:instrText·w:sym·m:t·a:t)를 모두 장부에 올리고, 그때 조상과 필드 상태를 보고 출처마다 표시를 단다:
-보통(보이는 글자), 숨김(w:vanish, 숨긴 그림 틀 wp:docPr@hidden 안), 범위 밖(고르지 않은 mc 쪽·무시한 요소·필드 명령 구간·w:moveFrom·w:del·
-특수 주석). 블록 조립은
-표시가 보통인 출처만 넣는다. 숨김·범위 밖 출처는 장부에 숨은 출처로 올라 살리지 않고, 블록에 들어가면 불일치다.
-처리 이력 재료(Note)도 여기서 센다: alternate_content_skipped·tracked_deletion_skipped·special_note_skipped(문서),
-field_unterminated(이야기), hidden_text·symbol_char·equation_text(문단)."""
+보통(보이는 글자), 숨김(w:vanish, 숨긴 그림 틀 wp:docPr@hidden 안), 범위 밖(고르지 않은 mc 쪽·무시한 요소·필드 명령
+구간·w:moveFrom·w:del·특수 주석). 블록 조립은 표시가 보통인 출처만 넣는다. 숨김·범위 밖 출처는 장부에 숨은 출처로 올라
+살리지 않고, 블록에 들어가면 불일치다. 처리 이력 재료(Note)도 여기서 센다: alternate_content_skipped·
+tracked_deletion_skipped·special_note_skipped(문서), field_unterminated(이야기), hidden_text·symbol_char·
+equation_text(문단)."""
 
 import xml.etree.ElementTree as ET
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 
+from ...errors import ParseError
 from ..flowledger import Ledger, ink
 from ..zipxml import Prefixes
 from .docx.styles import Styles
 from .drawing import A_P, A_T, CHART, FRAMES, R_DM, R_ID, SMARTART, hidden_frame
-from .package import MC, choose, ignorable
+from .package import MC, Package, choose, ignorable
 
 W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 M = "{http://schemas.openxmlformats.org/officeDocument/2006/math}"
@@ -53,6 +54,15 @@ def source_text(element: ET.Element) -> str:
 def part_chars(root: ET.Element) -> int:
     """파트 안 출처 요소의 공백 아닌 글자 합(장부 밖 파트의 처리 이력 숫자: 메모 등)."""
     return sum(ink(source_text(e)) for e in root.iter() if e.tag in SOURCES)
+
+
+def counted(package: Package, member: str, root: str) -> int:
+    """수만 세는 장부 밖 파트(참조 안 된 머리말·꼬리말, 메모, 노트 등)의 출처 글자. 깨진 파트(ParseError)는 세지 않고
+    넘어간다: 읽지 않는 파트가 문서를 실패시키지 않는다."""
+    try:
+        return part_chars(package.part(member, root)[0])
+    except ParseError:
+        return 0
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,16 +1,34 @@
-"""흐름 문서(쪽 없음: HWPX·DOCX) 블록 명세를 마무리하는 공용 도우미. 블록 명세는 내부 키(_anchor·_late·_sizes 등)를
-달고 모이고, finish가 제목(개요 수준이 없으면 PDF와 같은 글꼴 크기 규칙)·제목 경로·FlowLocator를 채워 계약 블록 명세와
-처리 이력으로 바꾼다."""
+"""흐름 문서(쪽 없음: HWPX·DOCX·PPTX) 블록 명세를 마무리하는 공용 도우미. 블록 명세는 내부 키(_anchor·_late·_sizes 등)를
+달고 모이고, finish가 제목(개요 수준이 없으면 PDF와 같은 글꼴 크기 규칙)·제목 경로·위치(기본 FlowLocator, PPTX는 자기
+Places)를 채워 계약 블록 명세와 처리 이력으로 바꾼다."""
 
 import bisect
 from collections import Counter
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
-from hanji_contracts import Attempt, FlowLocator, GateCheck, GateResult, RegionRecord
+from hanji_contracts import Attempt, FlowLocator, GateCheck, GateResult, Locator, RegionRecord
 
 from .flowledger import Counts
 from .pdf.group import BOLD_HEADING_RATIO, CONFIDENCE, HEADING_MAX_LINES, HEADING_RATIO, MAX_LEVEL
+
+
+class Places(Protocol):
+    """닻 → 위치(locator)와 처리 이력 id 앞부분(region, 뒤에 -{순번}이 붙는다)."""
+
+    def locator(self, path: tuple[str, ...], anchor: int) -> Locator: ...
+
+    def region(self, section: int, anchor: int, tag: str) -> str: ...
+
+
+class Flow:
+    """HWPX·DOCX: 닻 = 본문 항목 순번(FlowLocator), 처리 이력 id는 s{구역}-p{닻}-{꼬리표}."""
+
+    def locator(self, path: tuple[str, ...], anchor: int) -> Locator:
+        return FlowLocator(section_path=path, paragraph_index=anchor)
+
+    def region(self, section: int, anchor: int, tag: str) -> str:
+        return f"s{section}-p{anchor}-{tag}"
 
 
 @dataclass(slots=True)
@@ -64,9 +82,10 @@ def headings_by_size(specs: list[dict[str, Any]]) -> None:
                     text=" ".join(spec["text"].split()), confidence=CONFIDENCE["heading"])
 
 
-def finish(specs: list[dict[str, Any]], regions: list[Region], outline: bool,
+def finish(specs: list[dict[str, Any]], regions: list[Region], outline: bool, places: Places = Flow(),
            ) -> tuple[tuple[dict[str, Any], ...], tuple[RegionRecord, ...]]:
-    """제목을 정하고 제목 경로를 채운다. 구역 끝 블록(_late)과 처리 이력은 닻 문단 자리의 제목 경로를 쓴다."""
+    """제목을 정하고 제목 경로를 채운다. 구역 끝 블록(_late)과 처리 이력은 닻 문단 자리의 제목 경로를 쓴다. places가
+    닻으로 위치와 처리 이력 id를 짓는다(닻은 블록 차례대로 줄지 않는 정수여야 한다: 제목 경로를 이분 탐색으로 찾는다)."""
     if not outline:
         headings_by_size(specs)
     index = {id(spec): k for k, spec in enumerate(specs)}
@@ -89,20 +108,19 @@ def finish(specs: list[dict[str, Any]], regions: list[Region], outline: bool,
         if "_caption" in spec:  # 짝 캡션 명세의 순번(core/build.py가 caption_block_id로 바꾼다)
             block["figure"] = {**block["figure"], "caption_ref": index[id(spec["_caption"])]}
         block["section_path"] = path
-        block["locator"] = FlowLocator(section_path=path, paragraph_index=anchor)
+        block["locator"] = places.locator(path, anchor)
         blocks.append(block)
-    seen = Counter[tuple[int, int, str]]()
+    seen = Counter[str]()
     records = []
     for region in regions:
         region_id = region.region_id
         if region_id is None:
-            key = (region.section, region.anchor, region.tag)
-            region_id = f"s{region.section}-p{region.anchor}-{region.tag}-{seen[key]}"
+            key = places.region(region.section, region.anchor, region.tag)
+            region_id = f"{key}-{seen[key]}"
             seen[key] += 1
         records.append(RegionRecord(region_id=region_id, kind=region.kind, chosen="det",
                                     attempts=(Attempt(layer="det"),), fallback_reason=region.reason, gate=region.gate,
-                                    locator=FlowLocator(section_path=path_at(marks, region.anchor),
-                                                        paragraph_index=region.anchor)))
+                                    locator=places.locator(path_at(marks, region.anchor), region.anchor)))
     return tuple(blocks), tuple(records)
 
 
