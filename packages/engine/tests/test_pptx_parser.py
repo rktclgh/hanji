@@ -208,3 +208,61 @@ def test_slide_order_follows_sld_id_list_not_file_numbering():
     assert shown(parsed) == [("paragraph", "파일 둘째 슬라이드 글", 1, 0), ("paragraph", "파일 첫째 슬라이드 글", 2, 0)]
     assert [b["locator"] for b in parsed.blocks] == [SlideLocator(slide=1, shape_index=0),
                                                      SlideLocator(slide=2, shape_index=0)]
+
+
+def test_notes_layout_and_master_text_and_comments_are_counted_not_read():
+    notes = ("ppt/notesSlides/notesSlide1.xml", B.notes_part("지어낸 발표자 노트", "둘째 줄"))
+    old = ("ppt/comments/comment1.xml", f'{B.DECL}<p:cmLst{B.xmlns("p")}><p:cm><p:text>옛 메모 글</p:text></p:cm>'
+                                        "</p:cmLst>")
+    new = ("ppt/comments/modernComment1.xml", f'{B.DECL}<p188:cmLst xmlns:p188="urn:p188" {B.xmlns("a")[1:]}>'
+                                              f"<p188:cm><p188:txBody>{B.para('새 메모')}</p188:txBody></p188:cm>"
+                                              "</p188:cmLst>")
+    links = [("rIdN", B.PREL["notesSlide"], "../notesSlides/notesSlide1.xml"),
+             ("rIdC", B.PREL["comments"], "../comments/comment1.xml"),
+             ("rIdM", "http://schemas.microsoft.com/office/2018/10/relationships/comments",
+              "../comments/modernComment1.xml")]
+    master = B.sp("마스터 안내 문구", ph="title") + B.sp("마스터 로고 글") + B.sp("숨긴 장식", hidden=True)
+    layout = B.sp("레이아웃 본문 안내", ph="body") + B.grp(B.sp("레이아웃 장식 글"))
+    parsed, counts = parse(B.slide(B.sp("슬라이드 글")), B.slide(B.sp("노트 없는 슬라이드")), slide_rels=[links],
+                           extra=[notes, old, new], master_shapes=master, layout_shapes=layout)
+    assert shown(parsed) == [("paragraph", "슬라이드 글", 1, 0), ("paragraph", "노트 없는 슬라이드", 2, 0)]
+    assert reasons(parsed) == [("speaker_notes_skipped", "slide1-sh0-speaker-notes-0", 11),
+                               ("master_text_skipped", "doc-master-text", 13), ("comments_skipped", "doc-comments", 7)]
+    assert all(c.ok for c in counts)
+
+
+def test_broken_notes_comments_and_master_parts_do_not_fail_the_document():
+    links = [("rIdN", B.PREL["notesSlide"], "../notesSlides/notesSlide1.xml"),
+             ("rIdC", B.PREL["comments"], "../comments/comment1.xml")]
+    data = B.pptx(B.slide(B.sp("지어낸 본문 문단은 크기 규칙의 본문 크기를 정할 만큼 길다"),
+                          B.sp(B.para(B.a_r("크기 사슬 글", sz=2400)), y=0)), slide_rels=[links],
+                  extra=[("ppt/notesSlides/notesSlide1.xml", B.DECL + "<p:notes><broken"),
+                         ("ppt/comments/comment1.xml", B.DECL + "<p:cmLst><broken")])
+    data = B.zip_bytes([(n, B.DECL + "<p:sldMaster><broken" if n == "ppt/slideMasters/slideMaster1.xml" else d)
+                        for n, d in _members(data)])
+    parsed, counts = PptxParser()._parse(data, "a.pptx")
+    assert shown(parsed)[1] == ("heading", "크기 사슬 글", 1, 1) and parsed.regions == () and counts[0].ok
+
+
+def test_a_broken_master_still_lets_the_layout_text_be_counted():
+    layout = B.sp("레이아웃 안내", ph="body") + B.sp("레이아웃 장식 글")
+    data = B.pptx(B.slide(B.sp("슬라이드 글")), master_shapes=B.sp("마스터 로고 글"), layout_shapes=layout)
+    data = B.zip_bytes([(n, B.DECL + "<p:sldMaster><broken" if n == "ppt/slideMasters/slideMaster1.xml" else d)
+                        for n, d in _members(data)])
+    parsed, counts = PptxParser()._parse(data, "a.pptx")
+    assert shown(parsed) == [("paragraph", "슬라이드 글", 1, 0)]
+    assert reasons(parsed) == [("master_text_skipped", "doc-master-text", 7)] and counts[0].ok
+
+
+def test_a_broken_layout_relationship_part_does_not_fail_the_document():
+    shapes = dict(master_shapes=B.sp("마스터 로고 글"), layout_shapes=B.sp("레이아웃 장식 글"))
+    data = B.pptx(B.slide(B.sp("슬라이드 글")), **shapes)
+    plain, _ = PptxParser()._parse(data, "a.pptx")
+    twice = B.rels(("rIdM", B.PREL["slideMaster"], "../slideMasters/slideMaster1.xml"),
+                   ("rIdM", B.PREL["slideMaster"], "../slideMasters/slideMaster1.xml"))
+    broken = B.zip_bytes([(n, twice if n == "ppt/slideLayouts/_rels/slideLayout1.xml.rels" else d)
+                          for n, d in _members(data)])
+    parsed, counts = PptxParser()._parse(broken, "a.pptx")
+    assert shown(parsed) == shown(plain) == [("paragraph", "슬라이드 글", 1, 0)] and counts[0].ok
+    assert reasons(plain) == [("master_text_skipped", "doc-master-text", 13)]
+    assert reasons(parsed) == [("master_text_skipped", "doc-master-text", 7)]  # 마스터 쪽은 닿지 못해 레이아웃 글자만

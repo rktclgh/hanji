@@ -738,7 +738,7 @@ class DocxParser:
         관계는 호스트 파트의 것이다(drawing.graphic_parts). SmartArt는 그려진 파트가 있으면 그것, 없으면 데이터 파트를
         읽고 고르지 않은 파트 글자는 범위 밖(alternate_content_skipped에 센다). 호스트가 범위 밖·숨김이면 파트 글자도 그
         표시다. 풀 수 없거나 깨진 파트는 건너뛴다: 그 자리는 이미지 없는 그림만."""
-        for section, anchor, host, element, out in doc.walker.graphics:
+        for section, anchor, host, element, out in list(doc.walker.graphics):  # 훑는 중 늘어나므로 사본(자기를 가리키는 파트)
             read = graphic_parts(doc.package, host, element, out)
             if not read:
                 continue

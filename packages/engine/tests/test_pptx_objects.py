@@ -72,6 +72,28 @@ def test_charts_give_a_figure_and_rich_text_per_host_and_count_values():
     assert all(c.ok and c.rescued == 0 for c in counts) and counts[0].hidden == 11
 
 
+def test_chart_text_follows_the_part_own_prefixes_for_alternate_content():
+    c14 = ' xmlns:c14="http://schemas.microsoft.com/office/drawing/2007/8/2/chart"'  # 슬라이드는 c14를 선언하지 않는다
+    alternate = ("<mc:AlternateContent><mc:Choice Requires=\"c14\"><a:r><a:t>선택 쪽 글</a:t></a:r></mc:Choice>"
+                 "<mc:Fallback><a:r><a:t>대체 쪽 글</a:t></a:r></mc:Fallback></mc:AlternateContent>")
+    chart = (f'{B.DECL}<c:chartSpace{B.xmlns("c", "a", "r", "mc")}{c14}><c:chart><c:title><c:tx><c:rich><a:bodyPr/>'
+             f"<a:p>{alternate}</a:p></c:rich></c:tx></c:title></c:chart></c:chartSpace>")
+    rels = (("rIdC", B.PREL["chart"], "../charts/chart1.xml"),)
+    parsed, counts = parse(B.slide(B.gframe(B.chart_ref("rIdC"), B.CHART_URI)), rels=rels,
+                           extra=(("ppt/charts/chart1.xml", chart),))
+    assert [(k, t) for k, t, *_ in shown(parsed)] == [("figure", ""), ("paragraph", "선택 쪽 글")]
+    assert "unassigned_text" not in [r[0] for r in reasons(parsed)] and counts[0].ok and counts[0].rescued == 0
+
+
+def test_a_chart_part_that_references_itself_is_read_once():
+    chart = B.chart_part("지어낸 차트 제목").replace("<c:chart>", '<c:chart r:id="rIdC">')
+    rels = (("rIdC", B.PREL["chart"], "../charts/chart1.xml"),)
+    parsed, counts = parse(B.slide(B.gframe(B.chart_ref("rIdC"), B.CHART_URI)), rels=rels,
+                           extra=(("ppt/charts/chart1.xml", chart),))
+    assert [(k, t) for k, t, *_ in shown(parsed)] == [("figure", ""), ("paragraph", "지어낸 차트 제목")]
+    assert counts[0].ok and counts[0].rescued == 0
+
+
 def test_smartart_drawn_part_through_the_slide_relationships_data_only_and_unresolved():
     rels = (("rIdDm", B.PREL["diagramData"], "../diagrams/data1.xml"), ("rIdDr", DRAWN, "../diagrams/drawing1.xml"),
             ("rIdD2", B.PREL["diagramData"], "../diagrams/data2.xml"))

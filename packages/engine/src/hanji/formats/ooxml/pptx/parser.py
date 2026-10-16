@@ -9,6 +9,7 @@ dt·ftr·sldNum 자리는 꼬리말·hdr는 머리말 블록 하나, 그 밖은 
 PNG 자산(drawing.Images, 동영상·소리 미리보기는 embedded_object), 차트는 이미지 없는 그림과 풍부한 글자 문단(chart_text),
 SmartArt는 도형 글자 문단(smartart_text), OLE는 미리보기 그림(없으면 이미지 없는 그림)과 embedded_object, 그 밖 개체는
 이미지 없는 그림과 embedded_object. 숨긴 도형(p:cNvPr@hidden, 그룹이면 그 아래 전부)은 블록이 없고 글자는 장부 숨김이다.
+발표자 노트·쓰인 레이아웃과 마스터의 자리 표시자 아닌 도형·메모 글자는 읽지 않고 수만 남긴다(스펙 §8.5).
 슬라이드가 장부 단위다: ooxml/ledger.py의 Walker가 출처를 따로 열거해 보통·숨김·범위 밖으로 표시하고, 블록에는 보통 출처만
 넣는다. 한 번도 넣지 않은 보통 출처는 슬라이드 끝 구조 문단(신뢰도 0.3, unassigned_text)으로 살린다."""
 
@@ -30,8 +31,8 @@ from ...pdf.parser import COVERAGE_MISMATCH, UNASSIGNED_TEXT
 from ...zipxml import Prefixes
 from ..drawing import (A, A_BR, A_P, A_T, CHART, CHART_TEXT, P, R_EMBED, R_LINK, SHAPES, SMARTART, SMARTART_TEXT,
                        Images, cache_chars, emu, graphic_parts, hidden_shape, smartart_shapes)
-from ..ledger import NORMAL, Note, Story, Walker
-from ..package import MC, READ, R, Package, choose
+from ..ledger import NORMAL, SOURCES, Note, Story, Walker, counted, part_chars
+from ..package import MC, READ, R, Package, Rel, choose
 from . import tables
 from .shapes import Sizes, headings, top
 
@@ -47,6 +48,11 @@ MARGINS = {"dt": "page_footer", "ftr": "page_footer", "sldNum": "page_footer", "
 LISTED = frozenset({"body", "obj"})  # 글머리 표시가 없으면 목록 항목인 자리 표시자(마스터 기본 글머리)
 BULLETS = frozenset({f"{A}buChar", f"{A}buAutoNum", f"{A}buBlip"})
 HIDDEN_SLIDE = "hidden_slide"  # 발표에서 감춘 슬라이드(글자는 블록에 넣는다)
+SPEAKER_NOTES = "speaker_notes_skipped"  # 발표자 노트(인쇄 슬라이드에 없다)는 범위 밖
+MASTER_TEXT = "master_text_skipped"  # 쓰인 레이아웃·마스터의 자리 표시자 아닌 도형 글자(v1은 읽지 않는다)
+COMMENTS_SKIPPED = "comments_skipped"  # 메모는 범위 밖
+COMMENTS = (f"{R}/comments", "http://schemas.microsoft.com/office/2018/10/relationships/comments")  # 옛·새 메모 관계
+COMMENT_TEXT = f"{P}text"  # 옛 메모(p:cm/p:text) 글자. 새 메모는 a:t
 MERGED_TEXT = "merged_cell_text_kept"  # 이어진 칸의 글자를 시작 칸 글자 뒤에 이었다
 TBL, OLE = f"{A}tbl", f"{P}oleObj"
 # 동영상·소리 그림(p:nvPicPr/p:nvPr 아래): 미리보기 그림을 내고 embedded_object
@@ -154,26 +160,47 @@ class _Doc:
     counts: list[Counts] = field(default_factory=list)
     # 슬라이드 뿌리: Walker·장부가 id(a:p)로 문단을 가리키므로 파싱이 끝날 때까지 붙잡아 id 재사용을 막는다
     held: list[ET.Element] = field(default_factory=list)
-    charts: dict[int, ET.Element] = field(default_factory=dict)  # id(c:chart) → 그 호스트 자리에서 연 차트 파트 뿌리
-    smartart: dict[int, ET.Element] = field(default_factory=dict)  # id(dgm:relIds) → 고른 파트(그려진 파트·데이터) 뿌리
+    # id(c:chart) → 그 호스트 자리에서 연 차트 파트 (뿌리, 접두어)
+    charts: dict[int, tuple[ET.Element, Prefixes]] = field(default_factory=dict)
+    # id(dgm:relIds) → 고른 파트(그려진 파트·데이터) (뿌리, 접두어)
+    smartart: dict[int, tuple[ET.Element, Prefixes]] = field(default_factory=dict)
     sizes: Counter[float] = field(default_factory=Counter)  # 자리 표시자가 아닌 도형 런 크기(0.5pt)별 글자 수
-    parts: dict[str, ET.Element | None] = field(default_factory=dict)  # 읽은 레이아웃·마스터 등(한 번만 읽는다)
+    # 읽은 레이아웃·마스터(한 번만 읽는다: 읽은 바이트가 XML 합 상한에 든다)
+    parts: dict[str, tuple[ET.Element, Prefixes] | None] = field(default_factory=dict)
+    links: dict[str, dict[str, Rel]] = field(default_factory=dict)  # 읽은 관계(파트 멤버 → Id → 관계)
 
-    def read(self, member: str, root: str) -> ET.Element | None:
+    def read(self, member: str, root: str) -> tuple[ET.Element, Prefixes] | None:
         """보조 파트(레이아웃·마스터)를 한 번만 읽는다. 깨졌거나 뿌리가 다르면 None(그 단계를 건너뛴다)."""
         if member not in self.parts:
             try:
-                self.parts[member] = self.package.part(member, root)[0]
+                self.parts[member] = self.package.part(member, root)
             except ParseError:
                 self.parts[member] = None
         return self.parts[member]
 
-    def master(self, slide: str) -> ET.Element | None:
-        """슬라이드 → 레이아웃 → 마스터 파트 뿌리(관계가 없거나 깨졌으면 None)."""
-        for layout in self.package.related(slide, "slideLayout")[:1]:
+    def rels(self, member: str) -> dict[str, Rel]:
+        """파트의 관계를 한 번만 읽는다. 관계 멤버가 깨졌거나 Id가 겹치면 빈 사전(그 파트에서 따라갈 곳이 없다)."""
+        if member not in self.links:
+            try:
+                self.links[member] = self.package.rels(member)
+            except ParseError:
+                self.links[member] = {}
+        return self.links[member]
+
+    def related(self, member: str, kind: str) -> list[str]:
+        """Package.related와 같되 깨진 관계 멤버는 빈 목록이다(읽지 않는 파트가 문서를 실패시키지 않는다)."""
+        return [rel.target for rel in self.rels(member).values()
+                if rel.type == f"{R}/{kind}" and rel.target is not None and self.package.has(rel.target)]
+
+    def master(self, slide: str) -> tuple[str, str | None] | None:
+        """슬라이드 → (레이아웃, 마스터 또는 None) 멤버. 레이아웃이 없거나 깨졌으면 None, 마스터만 없거나 깨졌으면 레이아웃만
+        있는 쌍이다(레이아웃 글자는 그래도 센다)."""
+        for layout in self.related(slide, "slideLayout")[:1]:
             if self.read(layout, f"{P}sldLayout") is not None:
-                for master in self.package.related(layout, "slideMaster")[:1]:
-                    return self.read(master, f"{P}sldMaster")
+                for master in self.related(layout, "slideMaster")[:1]:
+                    if self.read(master, f"{P}sldMaster") is not None:
+                        return layout, master
+                return layout, None
         return None
 
 
@@ -209,9 +236,12 @@ class _Slide:
         self.ledger.put(bundles)
         return True
 
-    def runs(self, p: ET.Element, title: bool = False) -> tuple[list[Bundle], list[tuple[ET.Element | None, int]], int]:
+    def runs(self, p: ET.Element, title: bool = False, prefixes: Prefixes | None = None,
+             ) -> tuple[list[Bundle], list[tuple[ET.Element | None, int]], int]:
         """a:p 글자(스펙 §8.2): 묶음, (런 요소, 공백 아닌 글자 수)들, 줄 수(a:br + 1). 보통 출처(a:t·m:t)만 넣고,
-        a:br은 \\n(제목이면 공백), 고른 mc 쪽만 본다."""
+        a:br은 \\n(제목이면 공백), 고른 mc 쪽만 본다. 고르는 접두어는 그 문단이 든 파트의 것이다(Walker가 표시한 쪽과
+        같아야 한다: 차트·SmartArt 파트는 prefixes로 자기 것을 넘긴다)."""
+        prefixes = prefixes or self.prefixes
         out: list[Bundle] = []
         weights: list[tuple[ET.Element | None, int]] = []
         lines = 1
@@ -228,7 +258,7 @@ class _Slide:
                 out.append((None, " " if title else "\n"))
                 lines += 1
             elif tag == ALTERNATE:
-                chosen = choose(element, self.prefixes)
+                chosen = choose(element, prefixes)
                 stack.extend((c, run) for c in reversed(chosen if chosen is not None else ()))
             elif tag in RUNS:
                 stack.extend((c, element) for c in reversed(element))
@@ -291,24 +321,26 @@ class _Slide:
         chart_text(근거 cache_chars)."""
         self.figure(None, anchor)
         self.region("object", "figure", EMBEDDED_OBJECT, anchor)
-        root = self.doc.charts.get(id(element))
-        if root is None:
+        part = self.doc.charts.get(id(element))
+        if part is None:
             return
+        root, prefixes = part
         bundles: list[Bundle] = []
-        for paragraph in (self.runs(p)[0] for p in root.iter(A_P)):
+        for paragraph in (self.runs(p, prefixes=prefixes)[0] for p in root.iter(A_P)):
             if sum(ink(text) for _, text in paragraph):
                 bundles += [(None, "\n")] * bool(bundles) + paragraph
         self.emit("paragraph", bundles, anchor)
         self.region("chart", "paragraph", CHART_TEXT, anchor, gate("cache_chars", cache_chars(root), None))
 
-    def smartart(self, root: ET.Element, anchor: int) -> None:
+    def smartart(self, part: tuple[ET.Element, Prefixes], anchor: int) -> None:
         """SmartArt: 고른 파트의 도형(글 몸통)마다 a:p 문단 블록, 보통 글자가 있는 도형마다 smartart_text."""
+        root, prefixes = part
         for body in smartart_shapes(root):
             if any(self.ledger.sources[k].n and not self.ledger.sources[k].hidden for e in body.iter()
                    if (k := self.ledger.index.get(id(e))) is not None):
                 self.region("smartart", "paragraph", SMARTART_TEXT, anchor)
             for p in body.iterfind(A_P):
-                self.emit("paragraph", self.runs(p)[0], anchor)
+                self.emit("paragraph", self.runs(p, prefixes=prefixes)[0], anchor)
 
     def frame(self, shape: Shape) -> None:
         """p:graphicFrame/a:graphic/a:graphicData 아래 개체(고른 mc 쪽만): 표, 차트, SmartArt, OLE, 그 밖."""
@@ -487,24 +519,55 @@ class PptxParser:
             if slide.get("show", "").lower() in ("0", "false"):
                 doc.regions.append(Region("hidden-slide", "paragraph", HIDDEN_SLIDE, number - 1,
                                           anchor_of(number, 0, True)))
-            master = doc.master(member)
-            other = master.find(f"{P}txStyles/{P}otherStyle") if master is not None else None
+            used = doc.master(member)
+            master = doc.parts[used[1]] if used is not None and used[1] is not None else None
+            other = master[0].find(f"{P}txStyles/{P}otherStyle") if master is not None else None
             _Slide(doc, number, slide, prefixes, member, shapes, ledger, Sizes(other, default)).build()
         headings(doc.specs, doc.sizes, lambda anchor: anchor >> SHIFT)
         doc.regions.extend(_region(note) for note in doc.walker.notes)
+        self._skipped(doc, [member for _, _, _, member, _, _ in slides])
         blocks, regions = finish(doc.specs, doc.regions, True, Slides())
         parsed = ParsedSource(mime=MIME, blocks=blocks, assets=doc.images.budget.assets, regions=regions)
         return parsed, tuple(doc.counts)
 
     @staticmethod
+    def _skipped(doc: _Doc, members: list[str]) -> None:
+        """범위 밖 글자 수(스펙 §8.5): 슬라이드마다 발표자 노트(speaker_notes_skipped), 문서마다 쓰인 레이아웃·마스터의
+        자리 표시자 아닌 보이는 도형 글자(master_text_skipped)와 메모(comments_skipped). 깨진 파트는 세지 않는다."""
+        package = doc.package
+        for number, member in enumerate(members, start=1):
+            chars = sum(counted(package, m, f"{P}notes") for m in doc.related(member, "notesSlide"))
+            if chars:
+                doc.regions.append(Region("speaker-notes", "paragraph", SPEAKER_NOTES, number - 1,
+                                          anchor_of(number, 0, True), gate("chars", chars, None)))
+        used = dict.fromkeys(m for member in members if (pair := doc.master(member)) is not None for m in pair if m)
+        chars = 0
+        for root, prefixes in (part for m in used if (part := doc.parts[m]) is not None):
+            chars += sum(part_chars(s.element) for s in layout(root, prefixes)[0]
+                         if s.element.tag != GROUP and not s.hidden and placeholder(s.element) is None)
+        comments = dict.fromkeys(rel.target for member in members for rel in doc.rels(member).values()
+                                 if rel.type in COMMENTS and rel.target is not None and package.has(rel.target))
+        found = 0
+        for member in comments:
+            try:
+                root = package.tree(member, None)[0]
+            except ParseError:
+                continue
+            found += sum(ink("".join(e.itertext())) for e in root.iter() if e.tag in SOURCES or e.tag == COMMENT_TEXT)
+        for tag, reason, value in (("master-text", MASTER_TEXT, chars), ("comments", COMMENTS_SKIPPED, found)):
+            if value:
+                doc.regions.append(Region(tag, "paragraph", reason, 0, DOC_ANCHOR, gate("chars", value, None),
+                                          f"doc-{tag}"))
+
+    @staticmethod
     def _graphics(doc: _Doc, ledgers: list[Ledger]) -> None:
         """차트·SmartArt 파트의 출처를 호스트 자리마다 따로 올린다(같은 파트를 두 슬라이드가 가리키면 두 번 연다). 관계는
         슬라이드 파트의 것이다(drawing.graphic_parts). 풀 수 없거나 깨진 파트는 건너뛴다: 그 자리는 이미지 없는 그림만."""
-        for section, anchor, host, element, out in doc.walker.graphics:
+        for section, anchor, host, element, out in list(doc.walker.graphics):  # 훑는 중 늘어나므로 사본(자기를 가리키는 파트)
             read = graphic_parts(doc.package, host, element, out)
             if not read:
                 continue
-            (doc.charts if element.tag == CHART else doc.smartart)[id(element)] = read[0][0]
+            (doc.charts if element.tag == CHART else doc.smartart)[id(element)] = read[0][:2]
             for root, prefixes, forced in read:
                 doc.held.append(root)
                 doc.walker.walk(root, prefixes, ledgers[section], section, anchor, Story(), forced=forced)
