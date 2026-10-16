@@ -31,7 +31,7 @@ from ...pdf.parser import COVERAGE_MISMATCH, UNASSIGNED_TEXT
 from ...zipxml import Prefixes
 from ..drawing import (A, A_BR, A_P, A_T, CHART, CHART_TEXT, P, R_EMBED, R_LINK, SHAPES, SMARTART, SMARTART_TEXT,
                        Images, cache_chars, emu, graphic_parts, hidden_shape, smartart_shapes)
-from ..ledger import NORMAL, SOURCES, Note, Story, Walker, counted, part_chars
+from ..ledger import NORMAL, SOURCES, Note, Story, Walker, part_chars
 from ..package import MC, READ, R, Package, Rel, choose
 from . import tables
 from .shapes import Sizes, headings, top
@@ -53,6 +53,7 @@ MASTER_TEXT = "master_text_skipped"  # 쓰인 레이아웃·마스터의 자리 
 COMMENTS_SKIPPED = "comments_skipped"  # 메모는 범위 밖
 COMMENTS = (f"{R}/comments", "http://schemas.microsoft.com/office/2018/10/relationships/comments")  # 옛·새 메모 관계
 COMMENT_TEXT = f"{P}text"  # 옛 메모(p:cm/p:text) 글자. 새 메모는 a:t
+NOTE_FURNITURE = frozenset({"sldImg", "sldNum", "dt", "ftr", "hdr"})  # 노트 파트의 글이 아닌 자리(쪽 번호 필드 등)
 MERGED_TEXT = "merged_cell_text_kept"  # 이어진 칸의 글자를 시작 칸 글자 뒤에 이었다
 TBL, OLE = f"{A}tbl", f"{P}oleObj"
 # 동영상·소리 그림(p:nvPicPr/p:nvPr 아래): 미리보기 그림을 내고 embedded_object
@@ -179,7 +180,8 @@ class _Doc:
         return self.parts[member]
 
     def rels(self, member: str) -> dict[str, Rel]:
-        """파트의 관계를 한 번만 읽는다. 관계 멤버가 깨졌거나 Id가 겹치면 빈 사전(그 파트에서 따라갈 곳이 없다)."""
+        """레이아웃·마스터 파트의 관계를 한 번만 읽는다. 관계 멤버가 깨졌거나 Id가 겹치면 빈 사전(따라갈 곳이 없다).
+        슬라이드의 관계는 여기로 읽지 않는다: package.rels가 엄격해 깨지면 문서가 실패한다(스펙 §4.2-4)."""
         if member not in self.links:
             try:
                 self.links[member] = self.package.rels(member)
@@ -195,7 +197,7 @@ class _Doc:
     def master(self, slide: str) -> tuple[str, str | None] | None:
         """슬라이드 → (레이아웃, 마스터 또는 None) 멤버. 레이아웃이 없거나 깨졌으면 None, 마스터만 없거나 깨졌으면 레이아웃만
         있는 쌍이다(레이아웃 글자는 그래도 센다)."""
-        for layout in self.related(slide, "slideLayout")[:1]:
+        for layout in self.package.related(slide, "slideLayout")[:1]:  # 슬라이드의 관계는 엄격하다(깨지면 문서 실패)
             if self.read(layout, f"{P}sldLayout") is not None:
                 for master in self.related(layout, "slideMaster")[:1]:
                     if self.read(master, f"{P}sldMaster") is not None:
@@ -479,6 +481,17 @@ def listed(p: ET.Element, kind: str | None) -> bool:
     return kind in LISTED
 
 
+def notes_chars(package: Package, member: str) -> int:
+    """발표자 노트 파트의 글 글자 수: 쪽 번호 필드·날짜·꼬리말·머리말·슬라이드 그림 자리는 노트 글이 아니라 뺀다. 깨진
+    파트는 세지 않는다."""
+    try:
+        root, prefixes = package.part(member, f"{P}notes")
+    except ParseError:
+        return 0
+    return sum(part_chars(s.element) for s in layout(root, prefixes)[0]
+               if s.element.tag != GROUP and placeholder(s.element) not in NOTE_FURNITURE)
+
+
 def _region(note: Note) -> Region:
     """Walker 기록 → 처리 이력. 문서 단위 기록(닻 None)의 위치는 첫 슬라이드 첫 자리다."""
     result = gate(note.name, note.value, None) if note.name is not None else None
@@ -536,7 +549,7 @@ class PptxParser:
         자리 표시자 아닌 보이는 도형 글자(master_text_skipped)와 메모(comments_skipped). 깨진 파트는 세지 않는다."""
         package = doc.package
         for number, member in enumerate(members, start=1):
-            chars = sum(counted(package, m, f"{P}notes") for m in doc.related(member, "notesSlide"))
+            chars = sum(notes_chars(package, m) for m in package.related(member, "notesSlide"))
             if chars:
                 doc.regions.append(Region("speaker-notes", "paragraph", SPEAKER_NOTES, number - 1,
                                           anchor_of(number, 0, True), gate("chars", chars, None)))
@@ -545,7 +558,7 @@ class PptxParser:
         for root, prefixes in (part for m in used if (part := doc.parts[m]) is not None):
             chars += sum(part_chars(s.element) for s in layout(root, prefixes)[0]
                          if s.element.tag != GROUP and not s.hidden and placeholder(s.element) is None)
-        comments = dict.fromkeys(rel.target for member in members for rel in doc.rels(member).values()
+        comments = dict.fromkeys(rel.target for member in members for rel in package.rels(member).values()
                                  if rel.type in COMMENTS and rel.target is not None and package.has(rel.target))
         found = 0
         for member in comments:

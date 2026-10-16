@@ -448,10 +448,11 @@ def ole(preview: str | None, alternate: bool = False) -> str:
     return gframe(plain, OLE_URI, name="OLE")
 
 
-def notes_part(*texts: str) -> str:
-    """발표자 노트 파트(p:notes): 본문 자리 도형 하나에 글자마다 문단."""
+def notes_part(*texts: str, shapes: str = "") -> str:
+    """발표자 노트 파트(p:notes): 글자가 있으면 본문 자리 도형 하나에 글자마다 문단, 뒤에 shapes(다른 자리 도형들)."""
+    body = sp(*texts, ph="body") if texts else ""
     return (f"{DECL}<p:notes{xmlns('p', 'a', 'r')}><p:cSld><p:spTree>{nv('GrpSp', '', False)}<p:grpSpPr/>"
-            f"{sp(*texts, ph='body')}</p:spTree></p:cSld></p:notes>")
+            f"{body}{shapes}</p:spTree></p:cSld></p:notes>")
 
 
 def levels(sz: int | None = None, b: str | None = None, lvl: int = 1) -> str:

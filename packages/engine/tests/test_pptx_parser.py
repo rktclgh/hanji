@@ -266,3 +266,29 @@ def test_a_broken_layout_relationship_part_does_not_fail_the_document():
     assert shown(parsed) == shown(plain) == [("paragraph", "슬라이드 글", 1, 0)] and counts[0].ok
     assert reasons(plain) == [("master_text_skipped", "doc-master-text", 13)]
     assert reasons(parsed) == [("master_text_skipped", "doc-master-text", 7)]  # 마스터 쪽은 닿지 못해 레이아웃 글자만
+
+
+def test_a_slide_relationship_part_with_a_duplicate_id_still_fails_the_document():
+    data = B.pptx(B.slide(B.sp("슬라이드 글")))
+    twice = B.rels(("rIdL", B.PREL["slideLayout"], "../slideLayouts/slideLayout1.xml"),
+                   ("rIdL", B.PREL["slideLayout"], "../slideLayouts/slideLayout1.xml"))
+    broken = B.zip_bytes([(n, twice if n == "ppt/slides/_rels/slide1.xml.rels" else d) for n, d in _members(data)])
+    with pytest.raises(ParseError, match="duplicate relationship id"):
+        PptxParser()._parse(broken, "a.pptx")
+
+
+def _notes_chars(notes: str) -> list[tuple]:
+    links = [("rIdN", B.PREL["notesSlide"], "../notesSlides/notesSlide1.xml")]
+    parsed, counts = parse(B.slide(B.sp("슬라이드 글")), slide_rels=[links],
+                           extra=[("ppt/notesSlides/notesSlide1.xml", notes)])
+    assert shown(parsed) == [("paragraph", "슬라이드 글", 1, 0)] and all(c.ok for c in counts)
+    return reasons(parsed)
+
+
+def test_speaker_notes_count_skips_the_slide_image_number_date_footer_and_header_places():
+    furniture = (B.sp(ph="sldImg") + B.sp(B.para(B.a_r("1", fld="slidenum")), ph="sldNum")
+                 + B.sp(B.para(B.a_r("2026-10-16", fld="datetime1")), ph="dt") + B.sp("노트 꼬리말", ph="ftr")
+                 + B.sp("노트 머리말", ph="hdr"))
+    assert _notes_chars(B.notes_part(shapes=furniture)) == []
+    assert _notes_chars(B.notes_part("지어낸 노트", shapes=furniture + B.sp("노트 글상자"))) == [
+        ("speaker_notes_skipped", "slide1-sh0-speaker-notes-0", 10)]
