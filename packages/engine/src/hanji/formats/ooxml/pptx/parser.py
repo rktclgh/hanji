@@ -5,8 +5,10 @@ p:spTree의 도형 트리 앞 순회 차례(그룹은 펼친다, 좌표로 다�
 순번: 그룹 자신도 하나로 센다). 도형 글 몸통의 a:p 하나가 블록 하나다: 제목 자리는 문단을 공백으로 이은 제목(단계 1),
 dt·ftr·sldNum 자리는 꼬리말·hdr는 머리말 블록 하나, 그 밖은 글머리(a:buChar·a:buAutoNum·a:buBlip, 없으면 body·obj
 자리)면 목록 항목, 아니면 문단. 제목 자리가 없는 슬라이드는 자리 표시자가 아닌 도형 문단에 크기 규칙(shapes.py)을 써서
-가장 위 문단 하나를 제목으로 고른다. 표(a:tbl)는 물리 격자로 table 블록(1×1은 상자라 푼다, tables.py). 숨긴
-도형(p:cNvPr@hidden, 그룹이면 그 아래 전부)은 블록이 없고 글자는 장부 숨김이다.
+가장 위 문단 하나를 제목으로 고른다. 표(a:tbl)는 물리 격자로 table 블록(1×1은 상자라 푼다, tables.py). 그림(p:pic)은
+PNG 자산(drawing.Images, 동영상·소리 미리보기는 embedded_object), 차트는 이미지 없는 그림과 풍부한 글자 문단(chart_text),
+SmartArt는 도형 글자 문단(smartart_text), OLE는 미리보기 그림(없으면 이미지 없는 그림)과 embedded_object, 그 밖 개체는
+이미지 없는 그림과 embedded_object. 숨긴 도형(p:cNvPr@hidden, 그룹이면 그 아래 전부)은 블록이 없고 글자는 장부 숨김이다.
 슬라이드가 장부 단위다: ooxml/ledger.py의 Walker가 출처를 따로 열거해 보통·숨김·범위 밖으로 표시하고, 블록에는 보통 출처만
 넣는다. 한 번도 넣지 않은 보통 출처는 슬라이드 끝 구조 문단(신뢰도 0.3, unassigned_text)으로 살린다."""
 
@@ -21,11 +23,13 @@ from ....errors import ParseError
 from ...base import ParsedSource
 from ...flowdoc import Region, finish, gate, ledger_gate
 from ...flowledger import Bundle, Counts, Ledger, ink
+from ...hwpx.parser import EMBEDDED_OBJECT
 from ...hwpx.tables import RawCell, build
 from ...pdf.group import RESCUED_CONFIDENCE, step
 from ...pdf.parser import COVERAGE_MISMATCH, UNASSIGNED_TEXT
 from ...zipxml import Prefixes
-from ..drawing import A, A_BR, A_P, A_T, P, SHAPES, Images, hidden_shape
+from ..drawing import (A, A_BR, A_P, A_T, CHART, CHART_TEXT, P, R_EMBED, R_LINK, SHAPES, SMARTART, SMARTART_TEXT,
+                       Images, cache_chars, emu, graphic_parts, hidden_shape, smartart_shapes)
 from ..ledger import NORMAL, Note, Story, Walker
 from ..package import MC, READ, R, Package, choose
 from . import tables
@@ -44,7 +48,10 @@ LISTED = frozenset({"body", "obj"})  # 글머리 표시가 없으면 목록 항�
 BULLETS = frozenset({f"{A}buChar", f"{A}buAutoNum", f"{A}buBlip"})
 HIDDEN_SLIDE = "hidden_slide"  # 발표에서 감춘 슬라이드(글자는 블록에 넣는다)
 MERGED_TEXT = "merged_cell_text_kept"  # 이어진 칸의 글자를 시작 칸 글자 뒤에 이었다
-TBL = f"{A}tbl"
+TBL, OLE = f"{A}tbl", f"{P}oleObj"
+# 동영상·소리 그림(p:nvPicPr/p:nvPr 아래): 미리보기 그림을 내고 embedded_object
+MEDIA = frozenset({*(f"{A}{n}" for n in ("videoFile", "audioFile", "wavAudioFile", "quickTimeFile")),
+                   "{http://schemas.microsoft.com/office/powerpoint/2010/main}media"})
 SHIFT = 26  # 닻 = 슬라이드 << SHIFT | (제목 자리가 아니면 OTHER) | 도형 순번: 블록 차례대로 커진다
 OTHER = 1 << (SHIFT - 1)
 MASK = OTHER - 1
@@ -147,6 +154,8 @@ class _Doc:
     counts: list[Counts] = field(default_factory=list)
     # 슬라이드 뿌리: Walker·장부가 id(a:p)로 문단을 가리키므로 파싱이 끝날 때까지 붙잡아 id 재사용을 막는다
     held: list[ET.Element] = field(default_factory=list)
+    charts: dict[int, ET.Element] = field(default_factory=dict)  # id(c:chart) → 그 호스트 자리에서 연 차트 파트 뿌리
+    smartart: dict[int, ET.Element] = field(default_factory=dict)  # id(dgm:relIds) → 고른 파트(그려진 파트·데이터) 뿌리
     sizes: Counter[float] = field(default_factory=Counter)  # 자리 표시자가 아닌 도형 런 크기(0.5pt)별 글자 수
     parts: dict[str, ET.Element | None] = field(default_factory=dict)  # 읽은 레이아웃·마스터 등(한 번만 읽는다)
 
@@ -244,11 +253,65 @@ class _Slide:
         """도형 하나의 블록(그룹 자신과 잉크 p:contentPart는 블록이 없다)."""
         if shape.element.tag in (SP, CXN):
             self.text(shape)
+        elif shape.element.tag == PIC:
+            self.picture(shape.element, self.anchor(shape))
         elif shape.element.tag == FRAME:
             self.frame(shape)
 
+    def picture(self, pic: ET.Element, anchor: int, ole: bool = False) -> None:
+        """그림(p:blipFill/a:blip, SVG 확장은 보지 않는다: r:embed가 대체 그림). dpi는 p:spPr/a:xfrm/a:ext@cx(그룹 변환은
+        적용하지 않는다). 동영상·소리·OLE 미리보기면 embedded_object."""
+        found = pic.find(f"{P}blipFill/{A}blip")
+        embed, link = (found.get(R_EMBED), found.get(R_LINK)) if found is not None else (None, None)
+        ext = pic.find(f"{P}spPr/{A}xfrm/{A}ext")
+        self.image(self.doc.images.figure(self.host, embed, link, emu(ext.get("cx")) if ext is not None else None),
+                   anchor)
+        nvpr = pic.find(f"{P}nvPicPr/{P}nvPr")
+        if ole or (nvpr is not None and any(e.tag in MEDIA for e in nvpr.iter())):
+            self.region("object", "figure", EMBEDDED_OBJECT, anchor)
+
+    def image(self, result: dict[str, Any] | str, anchor: int) -> None:
+        """그림 블록(figure 값) 또는 이미지 없는 그림과 그 사유."""
+        if isinstance(result, str):
+            self.figure(None, anchor)
+            self.region("figure", "figure", result, anchor)
+        else:
+            self.figure(result, anchor)
+
+    def figure(self, figure: dict[str, Any] | None, anchor: int) -> None:
+        """그림 블록(글자 없음). figure가 None이면 이미지 없는 그림."""
+        spec: dict[str, Any] = {"kind": "figure", "text": "", "confidence": 1.0, "state": "det",
+                                "text_source": "native", "_anchor": anchor, "_late": self.late}
+        if figure is not None:
+            spec["figure"] = figure
+        self.doc.specs.append(spec)
+
+    def chart(self, element: ET.Element, anchor: int) -> None:
+        """차트: 이미지 없는 그림 + embedded_object, 차트 파트가 있으면 풍부한 글자(글자 있는 a:p를 \n으로) 문단 하나와
+        chart_text(근거 cache_chars)."""
+        self.figure(None, anchor)
+        self.region("object", "figure", EMBEDDED_OBJECT, anchor)
+        root = self.doc.charts.get(id(element))
+        if root is None:
+            return
+        bundles: list[Bundle] = []
+        for paragraph in (self.runs(p)[0] for p in root.iter(A_P)):
+            if sum(ink(text) for _, text in paragraph):
+                bundles += [(None, "\n")] * bool(bundles) + paragraph
+        self.emit("paragraph", bundles, anchor)
+        self.region("chart", "paragraph", CHART_TEXT, anchor, gate("cache_chars", cache_chars(root), None))
+
+    def smartart(self, root: ET.Element, anchor: int) -> None:
+        """SmartArt: 고른 파트의 도형(글 몸통)마다 a:p 문단 블록, 보통 글자가 있는 도형마다 smartart_text."""
+        for body in smartart_shapes(root):
+            if any(self.ledger.sources[k].n and not self.ledger.sources[k].hidden for e in body.iter()
+                   if (k := self.ledger.index.get(id(e))) is not None):
+                self.region("smartart", "paragraph", SMARTART_TEXT, anchor)
+            for p in body.iterfind(A_P):
+                self.emit("paragraph", self.runs(p)[0], anchor)
+
     def frame(self, shape: Shape) -> None:
-        """p:graphicFrame/a:graphic/a:graphicData 아래 개체(고른 mc 쪽만): 표."""
+        """p:graphicFrame/a:graphic/a:graphicData 아래 개체(고른 mc 쪽만): 표, 차트, SmartArt, OLE, 그 밖."""
         data = shape.element.find(f"{A}graphic/{A}graphicData")
         anchor = self.anchor(shape)
         stack = list(reversed(data)) if data is not None else []
@@ -259,6 +322,15 @@ class _Slide:
                 stack.extend(reversed(chosen) if chosen is not None else ())
             elif child.tag == TBL:
                 self.table(child, anchor)
+            elif child.tag == CHART:
+                self.chart(child, anchor)
+            elif child.tag == SMARTART and id(child) in self.doc.smartart:
+                self.smartart(self.doc.smartart[id(child)], anchor)
+            elif child.tag == OLE and child.find(f"{P}pic") is not None:
+                self.picture(child.find(f"{P}pic"), anchor, ole=True)
+            else:
+                self.figure(None, anchor)
+                self.region("object", "figure", EMBEDDED_OBJECT, anchor)
 
     def table(self, tbl: ET.Element, anchor: int) -> None:
         """표(스펙 §6.2): 1×1은 상자라 칸 문단을 문단·목록 항목 블록으로, 그 밖은 table 블록(이어진 칸 글자는 시작 칸 뒤에
@@ -409,6 +481,7 @@ class PptxParser:
                 anchor = anchor_of(number, index if index is not None else 0, title or index is None)
                 doc.walker.walk(element, prefixes, ledger, number - 1, anchor, Story(), chain)
             slides.append((number, slide, prefixes, member, shapes, ledger))
+        self._graphics(doc, [ledger for *_, ledger in slides])
         doc.walker.finish()
         for number, slide, prefixes, member, shapes, ledger in slides:
             if slide.get("show", "").lower() in ("0", "false"):
@@ -422,6 +495,19 @@ class PptxParser:
         blocks, regions = finish(doc.specs, doc.regions, True, Slides())
         parsed = ParsedSource(mime=MIME, blocks=blocks, assets=doc.images.budget.assets, regions=regions)
         return parsed, tuple(doc.counts)
+
+    @staticmethod
+    def _graphics(doc: _Doc, ledgers: list[Ledger]) -> None:
+        """차트·SmartArt 파트의 출처를 호스트 자리마다 따로 올린다(같은 파트를 두 슬라이드가 가리키면 두 번 연다). 관계는
+        슬라이드 파트의 것이다(drawing.graphic_parts). 풀 수 없거나 깨진 파트는 건너뛴다: 그 자리는 이미지 없는 그림만."""
+        for section, anchor, host, element, out in doc.walker.graphics:
+            read = graphic_parts(doc.package, host, element, out)
+            if not read:
+                continue
+            (doc.charts if element.tag == CHART else doc.smartart)[id(element)] = read[0][0]
+            for root, prefixes, forced in read:
+                doc.held.append(root)
+                doc.walker.walk(root, prefixes, ledgers[section], section, anchor, Story(), forced=forced)
 
     @staticmethod
     def _slides(package: Package, root: ET.Element) -> list[str]:

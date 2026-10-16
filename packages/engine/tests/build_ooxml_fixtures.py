@@ -421,6 +421,33 @@ def a_tbl(*rows: str, cols: int, first: bool = False, hidden: bool = False) -> s
                   f'{"".join(rows)}</a:tbl>', TABLE_URI, hidden, "표")
 
 
+CHART_URI = "http://schemas.openxmlformats.org/drawingml/2006/chart"
+DIAGRAM_URI = "http://schemas.openxmlformats.org/drawingml/2006/diagram"
+OLE_URI = "http://schemas.openxmlformats.org/presentationml/2006/ole"
+
+
+def ppic(embed: str | None = None, link: str | None = None, cx: int = EMU, svg: str | None = None,
+         hidden: bool = False, video: bool = False) -> str:
+    """p:pic(p:blipFill/a:blip@r:embed·r:link, 표시 너비 cx). svg는 asvg:svgBlip 관계 id, video면 a:videoFile."""
+    ext = (f'<a:extLst><a:ext uri="{{96DAC541-7B7A-43D3-8B79-37D633B846F1}}"><asvg:svgBlip{xmlns("asvg")} '
+           f'r:embed="{svg}"/></a:ext></a:extLst>') if svg else ""
+    movie = '<a:videoFile r:link="rIdV"/>' if video else ""
+    return (f"<p:pic>{nv('Pic', '그림', hidden, extra=movie)}<p:blipFill><a:blip{attrs(r__embed=embed, r__link=link)}>"
+            f'{ext}</a:blip><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr><a:xfrm><a:off x="0" y="0"/>'
+            f'<a:ext cx="{cx}" cy="{EMU}"/></a:xfrm></p:spPr></p:pic>')
+
+
+def ole(preview: str | None, alternate: bool = False) -> str:
+    """OLE 개체 틀. preview는 미리보기 p:pic. alternate면 PowerPoint 2010 꼴(Choice Requires="v"는 미리보기 없이,
+    Fallback에 미리보기)."""
+    plain = f'<p:oleObj{attrs(progId="Package", r__id="rIdO")}><p:embed/>{preview or ""}</p:oleObj>'
+    if alternate:
+        choice = '<p:oleObj progId="Package" r:id="rIdO" spid="_x0000_s1026"><p:embed/></p:oleObj>'
+        plain = (f'<mc:AlternateContent{xmlns("mc", "v")}><mc:Choice Requires="v">{choice}</mc:Choice>'
+                 f"<mc:Fallback>{plain}</mc:Fallback></mc:AlternateContent>")
+    return gframe(plain, OLE_URI, name="OLE")
+
+
 def levels(sz: int | None = None, b: str | None = None, lvl: int = 1) -> str:
     """목록 스타일 수준 하나(a:lvlNpPr/a:defRPr)."""
     return f"<a:lvl{lvl}pPr><a:defRPr{attrs(sz=sz, b=b)}/></a:lvl{lvl}pPr>"
