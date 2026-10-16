@@ -122,3 +122,13 @@ def test_ole_previews_and_unknown_graphic_data():
         ("embedded_object", "slide1-sh0-object-0", None), ("embedded_object", "slide1-sh1-object-0", None),
         ("embedded_object", "slide1-sh2-object-0", None), ("embedded_object", "slide1-sh3-object-0", None)]
     assert counts[0].ok
+
+
+def test_empty_graphic_data_and_unchosen_alternate_content_are_still_an_embedded_object():
+    alternate = ('<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">'
+                 '<mc:Choice Requires="zz" xmlns:zz="urn:hanji:test:unknown"><x:thing/></mc:Choice></mc:AlternateContent>')
+    parsed, counts = parse(B.slide(B.gframe("", "urn:hanji:test:empty"), B.gframe(alternate, "urn:hanji:test:alt")))
+    assert [(k, f, i) for k, _, f, _, i in shown(parsed)] == [("figure", None, 0), ("figure", None, 1)]
+    assert reasons(parsed) == [("embedded_object", "slide1-sh0-object-0", None),
+                               ("embedded_object", "slide1-sh1-object-0", None)]
+    assert counts[0].ok

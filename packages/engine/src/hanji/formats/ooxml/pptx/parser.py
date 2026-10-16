@@ -349,12 +349,15 @@ class _Slide:
         data = shape.element.find(f"{A}graphic/{A}graphicData")
         anchor = self.anchor(shape)
         stack = list(reversed(data)) if data is not None else []
+        handled = False
         while stack:
             child = stack.pop()
             if child.tag == ALTERNATE:
                 chosen = choose(child, self.prefixes)
                 stack.extend(reversed(chosen) if chosen is not None else ())
-            elif child.tag == TBL:
+                continue
+            handled = True
+            if child.tag == TBL:
                 self.table(child, anchor)
             elif child.tag == CHART:
                 self.chart(child, anchor)
@@ -365,6 +368,9 @@ class _Slide:
             else:
                 self.figure(None, anchor)
                 self.region("object", "figure", EMBEDDED_OBJECT, anchor)
+        if not handled:  # 빈 graphicData·고른 쪽이 없는 mc:AlternateContent: 그 밖(스펙 §8.4)
+            self.figure(None, anchor)
+            self.region("object", "figure", EMBEDDED_OBJECT, anchor)
 
     def table(self, tbl: ET.Element, anchor: int) -> None:
         """표(스펙 §6.2): 1×1은 상자라 칸 문단을 문단·목록 항목 블록으로, 그 밖은 table 블록(이어진 칸 글자는 시작 칸 뒤에
@@ -427,7 +433,9 @@ class _Slide:
                 if any(ink(t) for _, t in more):
                     bundles += [(None, " " if kind in TITLES else "\n")] * bool(bundles) + more
             if kind in TITLES:
-                self.emit("heading", bundles, anchor, level=1)
+                if self.emit("heading", bundles, anchor, level=1):  # 문단을 공백 하나로 잇고 앞뒤 공백을 뗀다(스펙 §8.3)
+                    spec = self.doc.specs[-1]
+                    spec["text"] = " ".join(spec["text"].split())
             else:
                 self.emit(MARGINS[kind], bundles, anchor)
             return

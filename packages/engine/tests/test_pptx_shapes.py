@@ -65,6 +65,11 @@ def test_one_topmost_paragraph_per_slide_with_group_transforms_and_exclusions():
                               ("자리 제목", 5, 1.0)]
 
 
+def test_title_placeholder_paragraphs_join_with_one_space_and_trim():
+    slide = B.slide(BODY, B.sp(B.para(B.a_r("  앞  글 ")), B.para(B.a_r("\t뒤   글  ")), ph="title"))
+    assert heads(slide) == [("앞 글 뒤 글", 1, 1.0)]
+
+
 def test_hidden_title_placeholder_does_not_count_as_a_title_and_stays_hidden():
     big = 3200
     slide = B.slide(BODY, B.sp("숨긴 자리 제목", ph="title", hidden=True), B.sp(B.para(B.a_r("보이는 큰 글", sz=big)), y=0))
