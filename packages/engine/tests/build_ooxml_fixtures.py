@@ -23,6 +23,7 @@ from PIL import Image
 
 from hanji.core import build_tree
 from hanji.formats.ooxml.docx.parser import DocxParser
+from hanji.formats.ooxml.pptx.parser import PptxParser
 from hanji_contracts import DocumentTree, ProcessingHistory, SourceInfo
 
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -664,6 +665,66 @@ NOTES = document(
     p(r("같은 각주를 다시 참조"), note_ref("footnote", "2"), extra=NOTE_SECT),
     p("둘째 구역 문단이다."),
     final=sect_refs(("header", "default", "rIdH1"), ("footer", "default", "rIdF1")))
+# ---- PPTX 골든 예제 ----
+BASIC_SLIDES = [
+    slide(sp("지어낸 발표 본문 글상자"), sp("2026년 지어낸 발표", ph="ctrTitle"), sp("합성 예제 부제", ph="subTitle"),
+          sp(para(a_r("2026-10-16", fld="datetime1")), ph="dt"), sp("지어낸 꼬리말", ph="ftr"),
+          sp(para(a_r("1", fld="slidenum")), ph="sldNum")),
+    slide(sp("1. 추진 배경", ph="title"), sp("기본 글머리 항목", para("글머리 없앤 문단", bullet="none"),
+                                         para("기호 글머리 항목", bullet="char"), ph="body"),
+          sp("종류 없는 자리 항목", ph=""),
+          sp("총액 1,234.5억원, 증가율 12.3%, 면적 84㎡, 변동 △0.5, GDP 대비 2.1%p(OECD 평균)"),
+          sp("숨긴 도형 글", hidden=True), grp(sp("숨긴 그룹 글"), hidden=True), sp(para("줄 바꾼", "", "본문"))),
+    slide(sp("감춘 슬라이드 제목", ph="title"), sp("감춘 슬라이드 본문"), show="0"),
+]
+BASIC_LINKS = [[("rIdN", PREL["notesSlide"], "../notesSlides/notesSlide1.xml")]]
+BASIC_EXTRA = [("ppt/notesSlides/notesSlide1.xml", notes_part("지어낸 발표자 노트 글"))]
+BASIC_MASTER = sp("마스터 안내 문구", ph="title") + sp("지어낸 마스터 로고")
+BASIC_LAYOUT = sp("레이아웃 본문 안내 문구", ph="body")
+NOPH_BODY = sp("지어낸 본문 문단은 크기 규칙의 본문 크기를 정할 만큼 길게 쓴다")
+NOPH_SLIDES = [
+    slide(NOPH_BODY, sp(para(a_r("아래쪽 큰 글", sz=3200)), y=3_000_000), sp(para(a_r("위쪽 큰 글", sz=3200)), y=500_000)),
+    slide(NOPH_BODY, sp(para(a_r("같은 높이 앞 글", sz=3200)), y=800_000),
+          sp(para(a_r("같은 높이 뒤 글", sz=3200)), y=800_000)),
+    slide(NOPH_BODY, sp(para(a_r("그룹 밖 큰 글", sz=3200)), y=1_000_000),
+          grp(sp(para(a_r("그룹 안 큰 글", sz=3200)), y=1_800_000), ch_ext=2 * EMU)),
+    slide(NOPH_BODY, sp(para("문단 기본 크기 제목", def_sz=2800), y=0)),
+    slide(NOPH_BODY, sp("도형 목록 스타일 제목", lst=levels(sz=2800), y=0)),
+    slide(NOPH_BODY, sp(para("마스터 둘째 수준 제목", lvl=1), y=0)),
+    slide(NOPH_BODY, sp(para("발표 셋째 수준 제목", lvl=2), y=0)),
+    slide(NOPH_BODY, sp(para("문단 기본이 목록 스타일보다 앞", def_sz=1800), lst=levels(sz=2800), y=0)),
+]
+OBJ_MEDIA = {"rIdP": ("media/gray.png", GRAY_PNG), "rIdA": ("media/alpha.png", RGBA_PNG),
+             "rIdE": ("media/fake.emf", FAKE_EMF), "rIdS": ("media/vector.svg", b"<svg/>")}
+OBJ_LINKS = [*((rid, PREL["image"], f"../{m}") for rid, (m, _) in OBJ_MEDIA.items()),
+             ("rIdC", PREL["chart"], "../charts/chart1.xml"),
+             ("rIdDm", PREL["diagramData"], "../diagrams/data1.xml"),
+             ("rIdDr", "http://schemas.microsoft.com/office/2007/relationships/diagramDrawing",
+              "../diagrams/drawing1.xml"),
+             ("rIdD2", PREL["diagramData"], "../diagrams/data2.xml")]
+OBJ_EXTRA = [*((f"ppt/{m}", raw) for m, raw in OBJ_MEDIA.values()),
+             ("ppt/charts/chart1.xml", chart_part("지어낸 발표 차트", "단위: 건", cache=("상반기", "12"))),
+             ("ppt/diagrams/data1.xml", smartart_data("데이터 쪽 글", drawn="rIdDr")),
+             ("ppt/diagrams/drawing1.xml", smartart_drawn(["그린 첫 도형"], ["그린 둘째 도형", "둘째 문단"])),
+             ("ppt/diagrams/data2.xml", smartart_data("데이터만 있는 글"))]
+OBJ_DEEP = sp("서른 겹 그룹 안 글")
+for _ in range(30):
+    OBJ_DEEP = grp(OBJ_DEEP)
+OBJ_MATH = ('<a:p><a:r><a:t>수식 </a:t></a:r><mc:AlternateContent><mc:Choice Requires="a14"><a14:m '
+            'xmlns:a14="http://schemas.microsoft.com/office/drawing/2010/main"><m:oMathPara><m:oMath><m:r><m:t>x=12'
+            "</m:t></m:r></m:oMath></m:oMathPara></a14:m></mc:Choice><mc:Fallback><a:r><a:t>그림 대체</a:t></a:r>"
+            "</mc:Fallback></mc:AlternateContent></a:p>")
+OBJ_SLIDES = [
+    slide(a_tbl(a_tr(a_tc("구분"), a_tc("가로 둘", span=2), a_tc(h="1"), a_tc("넷째")),
+                a_tr(a_tc("세로 둘", rows=2), a_tc("네모", span=2, rows=2), a_tc(h="true"), a_tc("값 1")),
+                a_tr(a_tc("이어진 칸 글", v="1"), a_tc(v="true"), a_tc(h="1", v="1"), a_tc("값 2")), cols=4, first=True),
+          a_tbl(a_tr(a_tc("가"), a_tc("고아 칸", h="1")), a_tr(a_tc("다"), a_tc("라")), cols=2),
+          a_tbl(a_tr(a_tc("상자 안 글")), cols=1), OBJ_DEEP),
+    slide(ppic("rIdP", cx=EMU // 12), ppic("rIdE"), ppic("rIdA", svg="rIdS"), gframe(chart_ref("rIdC"), CHART_URI),
+          ole(ppic("rIdP"), alternate=True), ole(ppic("rIdA")), sp(OBJ_MATH)),
+    slide(gframe(chart_ref("rIdC"), CHART_URI), gframe(smartart_ref("rIdDm"), DIAGRAM_URI),
+          gframe(smartart_ref("rIdD2"), DIAGRAM_URI)),
+]
 SAMPLES: dict[str, bytes] = {
     "basic.docx": docx(BASIC, BASIC_STYLES, numbering("1", "2")),
     "headings.docx": docx(HEADINGS, HEAD_STYLES),
@@ -674,17 +735,27 @@ SAMPLES: dict[str, bytes] = {
                        extra=[*((f"word/{member}", xml) for _, _, member, xml in NOTE_PARTS),
                               ("word/_rels/footer1.xml.rels", rels(("rId1", f"{R}/image", "media/image1.png"))),
                               ("word/media/image1.png", GRAY_PNG)]),
+    "basic.pptx": pptx(*BASIC_SLIDES, slide_rels=BASIC_LINKS, extra=BASIC_EXTRA, master_shapes=BASIC_MASTER,
+                       layout_shapes=BASIC_LAYOUT),
+    "noplaceholder.pptx": pptx(*NOPH_SLIDES, other_style=levels(sz=2800, lvl=2), default_style=levels(sz=2800, lvl=3)),
+    "objects.pptx": pptx(*OBJ_SLIDES, slide_rels=[OBJ_LINKS] * len(OBJ_SLIDES), extra=OBJ_EXTRA),
 }
 ROOT = Path(__file__).resolve().parent / "fixtures" / "ooxml"
 
 
+def key(name: str) -> str:
+    """기대값 파일 이름 줄기: DOCX는 이름 줄기(basic), PPTX는 줄기-pptx(basic-pptx: 같은 줄기의 DOCX와 겹치지 않게)."""
+    stem = Path(name).stem
+    return f"{stem}-pptx" if name.endswith(".pptx") else stem
+
+
 def document_id(name: str) -> str:
-    return "fx-ooxml-" + Path(name).stem
+    return "fx-ooxml-" + key(name)
 
 
 def golden(name: str, data: bytes) -> tuple[DocumentTree, ProcessingHistory, list[dict[str, object]]]:
     """엔진 ingest와 같은 SourceInfo(쪽 없음 → page_count None). 셋째는 그림 자산의 화소 정보(처음 나온 차례)."""
-    parsed = DocxParser().parse(data, name)
+    parsed = (PptxParser() if name.endswith(".pptx") else DocxParser()).parse(data, name)
     source = SourceInfo(name=name, mime=parsed.mime, content_hash="sha256:" + hashlib.sha256(data).hexdigest())
     tree = build_tree(parsed, document_id(name), 1, source)
     order = list(dict.fromkeys(b.figure.asset for b in tree.blocks if b.figure is not None))
@@ -739,9 +810,9 @@ def build_all() -> dict[str, bytes]:
     for name, data in SAMPLES.items():
         tree, history, shown = golden(name, data)
         out[f"inputs/{name}"] = data
-        out[f"expected/{Path(name).stem}.json"] = _json(tree)
-        out[f"expected/{Path(name).stem}.history.json"] = _json(history)
-        out[f"expected/{Path(name).stem}.pixels.json"] = (json.dumps(shown, indent=2) + "\n").encode("utf-8")
+        out[f"expected/{key(name)}.json"] = _json(tree)
+        out[f"expected/{key(name)}.history.json"] = _json(history)
+        out[f"expected/{key(name)}.pixels.json"] = (json.dumps(shown, indent=2) + "\n").encode("utf-8")
     return out
 
 
