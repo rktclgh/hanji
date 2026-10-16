@@ -138,8 +138,8 @@ def test_comments_are_counted_but_not_read():
         ("comments_skipped", "doc-comments", 5)]
 
 
-def test_text_boxes_headers_and_footnotes_are_rescued_until_they_get_blocks():
-    """OX-A: 글상자·머리말·각주 글자는 블록이 없어 구역 끝 구조 문단으로 살아남는다(OX-B가 블록으로 낸다)."""
+def test_text_boxes_headers_and_footnotes_get_blocks_and_nothing_is_rescued():
+    """글상자·머리말·각주 글자가 블록이다(OX-A에서는 살리기로 나왔다). 글자 있는 구분선 주석은 범위 밖."""
     box = ("<w:r><w:drawing><wp:inline><a:graphic><a:graphicData><wps:wsp><wps:txbx><w:txbxContent>"
            + B.p("글상자 글") + "</w:txbxContent></wps:txbx></wps:wsp></a:graphicData></a:graphic></wp:inline>"
            "</w:drawing></w:r>")
@@ -153,11 +153,11 @@ def test_text_boxes_headers_and_footnotes_are_rescued_until_they_get_blocks():
                            doc_rels=[("rIdH", B.REL["header"], "header1.xml"),
                                      ("rIdF", B.REL["footnotes"], "footnotes.xml")])
     assert [(b["kind"], b["text"], b["confidence"], b["locator"].paragraph_index) for b in parsed.blocks] == [
-        ("paragraph", "본문", 1.0, 0), ("paragraph", "참조", 1.0, 1), ("paragraph", "글상자 글\n머리말 글", 0.3, 0),
-        ("paragraph", "각주 글", 0.3, 1), ("paragraph", "둘째 구역", 1.0, 2)]
+        ("page_header", "머리말 글", 1.0, 0), ("paragraph", "본문", 1.0, 0), ("paragraph", "글상자 글", 1.0, 0),
+        ("paragraph", "참조", 1.0, 1), ("paragraph", "각주 글", 1.0, 1), ("paragraph", "둘째 구역", 1.0, 2)]
     assert [(r.fallback_reason, r.region_id) for r in parsed.regions] == [
-        ("unassigned_text", "s0-p0-unassigned-text-0")]
-    assert [c.ok for c in counts] == [True, True] and counts[0].rescued == 11
+        ("shape_text", "s0-p0-shape-0"), ("special_note_skipped", "doc-special-note")]
+    assert [c.ok for c in counts] == [True, True] and counts[0].rescued == 0 and counts[0].hidden == 2
 
 
 SAMPLE = [B.p("첫째 문단"), B.p(B.r("가", "<w:tab/>", "나"), B.r("둘째"))]
@@ -286,14 +286,14 @@ def test_story_part_roots_are_held_until_parsing_ends(monkeypatch):
 
 def test_body_level_alternate_content_and_unknown_wrappers_give_body_items():
     """본문 층 mc:AlternateContent는 고른 쪽 문단이 항목이고 버린 쪽 글자는 범위 밖, 모르는 감싼 요소는 벗긴다(무시
-    표시 요소 안 문단은 항목이지만 글자는 범위 밖)."""
+    표시 요소는 통째로 항목이 아니고 글자는 범위 밖)."""
     alternate = (f'<mc:AlternateContent><mc:Choice Requires="w14">{B.p("고른 문단")}</mc:Choice>'
                  f'<mc:Fallback>{B.p("버린 문단")}</mc:Fallback></mc:AlternateContent>')
     data = B.docx(B.document(alternate, f'<w14:wrap>{B.p("감싼 문단")}</w14:wrap>', f'<x:box>{B.p("무시한 문단")}</x:box>',
                              B.p("끝 문단"), ignorable="w14 x"), styles_xml=STYLES)
     parsed, counts = DocxParser()._parse(data, "a.docx")
     assert [(b["text"], b["locator"].paragraph_index) for b in parsed.blocks] == [
-        ("고른 문단", 0), ("감싼 문단", 1), ("끝 문단", 3)]
+        ("고른 문단", 0), ("감싼 문단", 1), ("끝 문단", 2)]
     assert [(r.fallback_reason, r.region_id, r.gate.checks[0].value) for r in parsed.regions] == [
         ("alternate_content_skipped", "doc-alternate-content", 9)]
     assert counts[0].ok and counts[0].hidden == 9
@@ -306,12 +306,13 @@ def test_a_symbol_with_code_zero_puts_no_nul_into_blocks():
     assert all("\x00" not in b["text"] for b in parsed.blocks) and counts[0].ok
 
 
-def test_a_header_shared_by_two_sections_is_rescued_once():
-    """구역 둘이 같은 머리말 파트를 참조해도 그 글자는 한 번(처음 참조한 구역에서)만 살린다(스펙 §7.2)."""
+def test_a_header_shared_by_two_sections_is_emitted_once():
+    """구역 둘이 같은 머리말 파트를 참조해도 처음 참조한 구역에서 한 번만 낸다(스펙 §7.2)."""
     parsed, counts = parse(B.p("첫 구역", extra=SHARED), B.p("둘째 구역", extra=SHARED), B.p("셋째 구역"),
                            **_margin_and_note_parts())
-    assert [b["text"] for b in parsed.blocks].count("공유 머리말") == 1
-    assert [c.rescued for c in counts] == [5, 0, 0] and all(c.ok for c in counts)
+    assert [(b["kind"], b["locator"].paragraph_index) for b in parsed.blocks if b["text"] == "공유 머리말"] == [
+        ("page_header", 0)]
+    assert [c.rescued for c in counts] == [0, 0, 0] and all(c.ok for c in counts)
 
 
 def test_a_toc_field_continues_across_sections():
@@ -320,3 +321,28 @@ def test_a_toc_field_continues_across_sections():
     parsed, counts = parse(first, B.p(B.r("2. 둘째 줄"), B.fld("end")), B.p("본문"))
     assert texts(parsed) == [("paragraph", "1. 첫 줄"), ("paragraph", "2. 둘째 줄"), ("paragraph", "본문")]
     assert reasons(parsed) == [] and len(counts) == 2 and all(c.ok for c in counts)
+
+
+def test_ignored_body_elements_are_not_items_and_do_not_split_sections():
+    """무시 표시 요소(ProcessContent 아님)는 통째로 항목이 아니다: 순번 공백·빈 표 블록·안 w:sectPr의 구역 나눔이 없다."""
+    ignored = (f'<x:box>{B.p("무시한 문단", extra=B.sect())}{B.tbl(B.tr(B.tc("가"), B.tc("나")), B.tr(B.tc("다"), B.tc("라")))}'
+               "</x:box>")
+    kept = f'<x:keep>{B.p("벗긴 문단")}</x:keep>'
+    body = B.document(B.p("앞 문단"), ignored, kept, B.p("뒤 문단"), ignorable="w14 x").replace(
+        "<w:body>", '<w:body mc:ProcessContent="x:keep">')
+    parsed, counts = DocxParser()._parse(B.docx(body, styles_xml=STYLES), "a.docx")
+    assert [(b["kind"], b["text"], b["locator"].paragraph_index) for b in parsed.blocks] == [
+        ("paragraph", "앞 문단", 0), ("paragraph", "벗긴 문단", 1), ("paragraph", "뒤 문단", 2)]
+    assert [(r.fallback_reason, r.gate.checks[0].value) for r in parsed.regions] == [("alternate_content_skipped", 9)]
+    assert len(counts) == 1 and counts[0].ok
+
+
+def test_math_keeps_wrapped_runs_in_place():
+    """m:oMath 안 w:ins·w:hyperlink·w:sdt로 감싼 런도 문서 순서 그 자리에 든다(살리기로 밀려나지 않는다)."""
+    math = ("<m:oMath><m:r><m:t>a</m:t></m:r><w:ins><m:r><m:t>+</m:t></m:r></w:ins>"
+            '<w:hyperlink r:id="rId9"><w:r><w:t>b</w:t></w:r></w:hyperlink>'
+            "<w:sdt><w:sdtContent><m:r><m:t>=c</m:t></m:r></w:sdtContent></w:sdt>"
+            "<w:del><m:r><m:t>지움</m:t></m:r></w:del></m:oMath>")
+    parsed, counts = parse(B.p(B.r("식 "), math, B.r(" 끝")))
+    assert texts(parsed) == [("paragraph", "식 a+b=c 끝")]
+    assert reasons(parsed) == ["equation_text", "tracked_deletion_skipped"] and counts[0].ok

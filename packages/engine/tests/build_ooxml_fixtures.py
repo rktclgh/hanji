@@ -4,7 +4,9 @@
     uv run python packages/engine/tests/build_ooxml_fixtures.py --check  # 최신인지 확인(바이트 비교)
 
 zip은 ZIP_STORED(zlib 판 차이 회피), 고정 시각, 고정 멤버 순서, create_system=3이다. 테스트는 이 파일을 importlib로 읽어
-쓰기 도구(p·r·t·document·styles·docx 등)를 쓴다.
+쓰기 도구(p·r·t·document·styles·docx 등)를 쓴다. 그림 골든은 HWPX와 같은 화소 비교 대체를 쓴다: 트리는 그림 자산 키에서
+나온 값을 가려 비교하고(portable), 그림은 디코드한 화소 정보(pixels.json)를 바이트로 비교한다(OS마다 PNG 압축 바이트가 달라도
+같다).
 """
 
 import argparse
@@ -16,6 +18,8 @@ from collections.abc import Sequence
 from io import BytesIO
 from pathlib import Path
 from xml.sax.saxutils import escape, quoteattr
+
+from PIL import Image
 
 from hanji.core import build_tree
 from hanji.formats.ooxml.docx.parser import DocxParser
@@ -34,6 +38,19 @@ NS = {
     "w14": "http://schemas.microsoft.com/office/word/2010/wordml",
     "x": "urn:hanji:test:future",  # S에 없는 이름공간(모르는 Requires·무시 표시)
 }
+# 개체 쓰기 도구가 그 요소 자리에서 선언하는 접두어(문서 뿌리 선언을 바꾸지 않아 OX-A 골든 입력 바이트가 그대로다)
+LOCAL = {
+    "pic": "http://schemas.openxmlformats.org/drawingml/2006/picture",
+    "wpg": "http://schemas.microsoft.com/office/word/2010/wordprocessingGroup",
+    "wpc": "http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas",
+    "o": "urn:schemas-microsoft-com:office:office",
+    "asvg": "http://schemas.microsoft.com/office/drawing/2016/SVG/main",
+    "c": "http://schemas.openxmlformats.org/drawingml/2006/chart",
+    "dgm": "http://schemas.openxmlformats.org/drawingml/2006/diagram",
+    "dsp": "http://schemas.microsoft.com/office/drawing/2008/diagram",
+}
+EMU = 914400  # 1인치
+PIC_URI = "http://schemas.openxmlformats.org/drawingml/2006/picture"
 DECL = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
 WHEN = (1980, 1, 1, 0, 0, 0)
 DOCX_MAIN = "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"
@@ -47,7 +64,7 @@ def attrs(**values: object) -> str:
 
 
 def xmlns(*prefixes: str) -> str:
-    return "".join(f' xmlns:{p}="{NS[p]}"' for p in prefixes)
+    return "".join(f' xmlns:{p}="{NS[p] if p in NS else LOCAL[p]}"' for p in prefixes)
 
 
 def t(text: str) -> str:
@@ -121,10 +138,34 @@ def instr(text: str) -> str:
     return f'<w:r><w:instrText xml:space="preserve">{escape(text)}</w:instrText></w:r>'
 
 
-def document(*items: str, ignorable: str = "w14") -> str:
-    """w:document(본문 항목들 + 마지막 구역 속성). 모든 테스트 접두어를 뿌리에서 선언한다."""
-    return (f'{DECL}<w:document{xmlns(*NS)} mc:Ignorable="{ignorable}"><w:body>{"".join(items)}{sect()}'
+def document(*items: str, ignorable: str = "w14", final: str | None = None) -> str:
+    """w:document(본문 항목들 + 마지막 구역 속성, final이 있으면 그것). 모든 테스트 접두어를 뿌리에서 선언한다."""
+    return (f'{DECL}<w:document{xmlns(*NS)} mc:Ignorable="{ignorable}"><w:body>{"".join(items)}{final or sect()}'
             "</w:body></w:document>")
+
+
+def margin(root: str, *items: str) -> str:
+    """머리말(root "hdr")·꼬리말("ftr") 파트. 꺾쇠로 시작하지 않는 항목은 문단 하나."""
+    inner = "".join(item if item.startswith("<") else p(item) for item in items)
+    return f"{DECL}<w:{root}{xmlns(*NS)}>{inner}</w:{root}>"
+
+
+def notes(kind: str, *entries: tuple[str, str | None, str]) -> str:
+    """각주(kind "footnotes")·미주("endnotes") 파트. 항목은 (w:id, w:type 또는 None, 안 XML)."""
+    tag = kind[:-1]
+    inner = "".join(f"<w:{tag}{attrs(w__type=kind_, w__id=key)}>{body}</w:{tag}>" for key, kind_, body in entries)
+    return f"{DECL}<w:{kind}{xmlns(*NS)}>{inner}</w:{kind}>"
+
+
+def note_ref(kind: str, key: str, vanish: bool = False) -> str:
+    """각주(kind "footnote")·미주("endnote") 참조 런."""
+    return f'<w:r>{rpr(vanish="" if vanish else None)}<w:{kind}Reference w:id="{key}"/></w:r>'
+
+
+def sect_refs(*refs: tuple[str, str, str]) -> str:
+    """머리말·꼬리말 참조를 단 구역 속성. 항목은 ("header"·"footer", w:type, 관계 id)."""
+    inner = "".join(f'<w:{kind}Reference w:type="{kind_}" r:id="{rid}"/>' for kind, kind_, rid in refs)
+    return f"<w:sectPr>{inner}</w:sectPr>"
 
 
 def style(key: str, name: str | None = None, kind: str = "paragraph", based: str | None = None,
@@ -200,6 +241,113 @@ def docx(document_xml: str, styles_xml: str | None = None, numbering_xml: str | 
         ("word/_rels/document.xml.rels", rels(*links, *doc_rels))]
     members += [(member, xml) for member, xml, _, _ in parts]
     return zip_bytes([*members, *extra], deflated)
+
+
+def pic(embed: str | None = None, link: str | None = None, cx: int | None = None, svg: str | None = None) -> str:
+    """pic:pic(a:blip@r:embed·r:link). cx가 있으면 그림 자신의 표시 너비(a:xfrm), svg는 asvg:svgBlip 관계 id."""
+    ext = (f'<a:extLst><a:ext uri="{{96DAC541-7B7A-43D3-8B79-37D633B846F1}}"><asvg:svgBlip{xmlns("asvg")}'
+           f'{attrs(r__embed=svg)}/></a:ext></a:extLst>') if svg else ""
+    xfrm = f'<a:xfrm><a:off x="0" y="0"/><a:ext cx="{cx}" cy="{cx}"/></a:xfrm>' if cx else ""
+    return (f'<pic:pic{xmlns("pic")}><pic:nvPicPr><pic:cNvPr id="1" name="p"/><pic:cNvPicPr/></pic:nvPicPr>'
+            f"<pic:blipFill><a:blip{attrs(r__embed=embed, r__link=link)}>{ext}</a:blip></pic:blipFill>"
+            f"<pic:spPr>{xfrm}</pic:spPr></pic:pic>")
+
+
+def drawing(*graphic: str, cx: int = EMU, anchor: bool = False, hidden: bool = False, uri: str = PIC_URI) -> str:
+    """w:drawing 런: wp:inline(anchor면 wp:anchor)/a:graphic/a:graphicData 아래 graphic들."""
+    frame = "anchor" if anchor else "inline"
+    return (f'<w:r><w:drawing><wp:{frame}><wp:extent cx="{cx}" cy="{cx}"/>'
+            f'<wp:docPr id="1" name="d"{attrs(hidden="1" if hidden else None)}/><a:graphic>'
+            f'<a:graphicData uri="{uri}">{"".join(graphic)}</a:graphicData></a:graphic></wp:{frame}></w:drawing></w:r>')
+
+
+def wsp(*items: str) -> str:
+    """DrawingML 글상자 도형(wps:wsp/wps:txbx/w:txbxContent). 꺾쇠로 시작하지 않는 항목은 문단 하나."""
+    inner = "".join(item if item.startswith("<") else p(item) for item in items)
+    return f"<wps:wsp><wps:spPr/><wps:txbx><w:txbxContent>{inner}</w:txbxContent></wps:txbx><wps:bodyPr/></wps:wsp>"
+
+
+def wgp(*children: str) -> str:
+    return f'<wpg:wgp{xmlns("wpg")}><wpg:cNvGrpSpPr/><wpg:grpSpPr/>{"".join(children)}</wpg:wgp>'
+
+
+def vshape(image: str | None = None, *items: str) -> str:
+    """VML 도형: image는 v:imagedata@r:id, items가 있으면 v:textbox 글상자(꺾쇠로 시작하지 않으면 문단)."""
+    data = f"<v:imagedata{attrs(r__id=image)}/>" if image else ""
+    inner = "".join(item if item.startswith("<") else p(item) for item in items)
+    box = f"<v:textbox><w:txbxContent>{inner}</w:txbxContent></v:textbox>" if items else ""
+    return f'<v:shape style="width:20pt;height:20pt">{data}{box}</v:shape>'
+
+
+def vpict(*shapes: str, ole: bool = False) -> str:
+    """w:pict(ole면 w:object와 o:OLEObject) 런."""
+    if ole:
+        return f'<w:r><w:object>{"".join(shapes)}<o:OLEObject{xmlns("o")} ProgID="Excel.Sheet.12"/></w:object></w:r>'
+    return f'<w:r><w:pict>{"".join(shapes)}</w:pict></w:r>'
+
+
+def a_p(*texts: str) -> str:
+    """DrawingML 문단(a:p): 글자마다 런, 빈 문자열은 a:br."""
+    return "<a:p>" + "".join(f"<a:r><a:t>{escape(x)}</a:t></a:r>" if x else "<a:br/>" for x in texts) + "</a:p>"
+
+
+def chart_ref(rid: str) -> str:
+    return f'<c:chart{xmlns("c")}{attrs(r__id=rid)}/>'
+
+
+def chart_part(*titles: str, cache: Sequence[str] = ()) -> str:
+    """차트 파트: 풍부한 글자 제목들(a:p 하나씩)과 캐시 문자열 값들(c:strCache), 제목·차트마다 빈 a:p만 든 c:txPr."""
+    empty = '<c:txPr><a:bodyPr/><a:p><a:pPr/><a:endParaRPr lang="ko-KR"/></a:p></c:txPr>'
+    rich = "".join(f"<c:title><c:tx><c:rich><a:bodyPr/>{a_p(x)}</c:rich></c:tx>{empty}</c:title>" for x in titles)
+    points = "".join(f'<c:pt idx="{k}"><c:v>{escape(v)}</c:v></c:pt>' for k, v in enumerate(cache))
+    return (f'{DECL}<c:chartSpace{xmlns("c", "a", "r")}><c:chart>{rich}<c:plotArea><c:barChart><c:ser><c:cat><c:strRef>'
+            f"<c:f>Sheet1!$A$2</c:f><c:strCache>{points}</c:strCache></c:strRef></c:cat></c:ser></c:barChart>"
+            f"</c:plotArea></c:chart>{empty}</c:chartSpace>")
+
+
+def smartart_ref(dm: str) -> str:
+    return f'<dgm:relIds{xmlns("dgm")}{attrs(r__dm=dm, r__lo="rIdLo", r__qs="rIdQs", r__cs="rIdCs")}/>'
+
+
+def smartart_data(*texts: str, drawn: str | None = None) -> str:
+    """SmartArt 데이터 파트: 점마다 dgm:t 글자, drawn은 그려진 파트 관계 id(데이터 파트 확장, 호스트 관계로 푼다)."""
+    points = "".join(f'<dgm:pt modelId="{k + 1}"><dgm:t><a:bodyPr/>{a_p(x)}</dgm:t></dgm:pt>'
+                     for k, x in enumerate(texts))
+    ext = (f'<dgm:extLst><a:ext uri="http://schemas.microsoft.com/office/drawing/2008/diagram"><dsp:dataModelExt'
+           f'{xmlns("dsp")} relId="{drawn}" minVer="http://schemas.openxmlformats.org/drawingml/2006/diagram"/></a:ext>'
+           "</dgm:extLst>") if drawn else ""
+    return f'{DECL}<dgm:dataModel{xmlns("dgm", "a")}><dgm:ptLst>{points}</dgm:ptLst>{ext}</dgm:dataModel>'
+
+
+def smartart_drawn(*shapes: Sequence[str]) -> str:
+    """SmartArt 그려진 파트: 도형마다 dsp:txBody의 a:p들(항목마다 하나)."""
+    body = "".join(f'<dsp:sp modelId="{k}"><dsp:txBody><a:bodyPr/>{"".join(a_p(x) for x in shape)}'
+                   "</dsp:txBody></dsp:sp>" for k, shape in enumerate(shapes))
+    return f'{DECL}<dsp:drawing{xmlns("dsp", "a")}><dsp:spTree>{body}</dsp:spTree></dsp:drawing>'
+
+
+# 그림 원본: HWPX 골든과 같은 고정 바이트(6×6 회색 PNG, 4×4 반투명 RGBA PNG, 8×8 CMYK JPEG). 가짜 EMF는 머리만 있다
+GRAY_PNG = bytes.fromhex(
+    "89504e470d0a1a0a0000000d4948445200000006000000060800000000c5a7b094000000134944415478da638c626060606060622048"
+    "01000f900066ffa59b760000000049454e44ae426082")
+RGBA_PNG = bytes.fromhex(
+    "89504e470d0a1a0a0000000d4948445200000004000000040806000000a9f19e7e000000154944415478da633c2127d7c080049818d0"
+    "006101006506018c5f1704320000000049454e44ae426082")
+CMYK_JPEG = bytes.fromhex(
+    "ffd8ffee000e41646f626500640000000000ffdb004300080606070605080707070909080a0c140d0c0b0b0c1912130f141d1a1f1e1d"
+    "1a1c1c20242e2720222c231c1c2837292c30313434341f27393d38323c2e333432ffc000140800080008044311004d11005911004b11"
+    "00ffc4001f0000010501010101010100000000000000000102030405060708090a0bffc400b510000201030302040305050404000001"
+    "7d01020300041105122131410613516107227114328191a1082342b1c11552d1f02433627282090a161718191a25262728292a343536"
+    "3738393a434445464748494a535455565758595a636465666768696a737475767778797a838485868788898a92939495969798999aa2"
+    "a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae1e2e3e4e5e6e7e8e9eaf1f2f3f4f5f6f7f8f9"
+    "faffda000e0443004d0059004b00003f00f7fa4af9febdfebfffd9")
+FAKE_EMF = bytes.fromhex("01000000") + bytes(36) + b" EMF" + bytes(40)
+
+
+def media(**files: tuple[str, bytes]) -> dict[str, list[tuple[str, ...]] | list[tuple[str, bytes | str]]]:
+    """관계 id → (word/ 아래 멤버, 바이트)들 → docx()의 doc_rels·extra 인자."""
+    return {"doc_rels": [(rid, f"{R}/image", member) for rid, (member, _) in files.items()],
+            "extra": [(f"word/{member}", data) for member, data in files.values()]}
 
 
 # ---- 골든 예제 ----
@@ -288,11 +436,73 @@ FIELDS = document(
       process="x:box"),
     p(r("끝나지 않은 "), fld("begin"), instr(" HYPERLINK 끝 ")),
     ignorable="w14 x")
+FIGURE_MEDIA = media(rId11=("media/image1.png", RGBA_PNG), rId12=("media/image2.jpeg", CMYK_JPEG),
+                     rId13=("media/image3.emf", FAKE_EMF), rId15=("media/image5.png", GRAY_PNG),
+                     rId14=("media/image4.svg", b'<svg xmlns="http://www.w3.org/2000/svg"/>'))
+FIGURE_RELS = [("rId16", f"{R}/image", "http://example.invalid/linked.png", "External"),
+               ("rId17", f"{R}/image", "media/missing.png")]
+FIGURES = document(
+    p("그림 예제 문단이다."),
+    p(r("그림 1. 지어낸 막대 그림 "), drawing(pic("rId11"), cx=EMU // 24)),
+    p(drawing(pic("rId12"), anchor=True, cx=EMU // 12)),
+    p(drawing(pic("rId13"))),
+    p(drawing(pic(link="rId16"))),
+    p(drawing(pic("rId17"))),
+    p(drawing(pic("rId99"))),
+    p(drawing(pic("rId15", svg="rId14"), cx=EMU // 16)),
+    p(vpict(vshape("rId15"))),
+    p(drawing(pic("rId11"), cx=EMU // 24)),
+    tbl(tr(tc(p(r("칸 속 그림"), drawing(pic("rId15")))), tc("옆 칸")), tr(tc("아래 칸"), tc("끝 칸"))),
+    p("그림 뒤 문단이다."))
+
+
+def _alt_box(new: str, old: str) -> str:
+    """새 형식(wps) 글상자와 옛 형식(VML) 글상자의 mc:AlternateContent 짝 런."""
+    return ('<w:r><mc:AlternateContent><mc:Choice Requires="wps">' + drawing(wsp(new))[5:-6]
+            + "</mc:Choice><mc:Fallback>" + vpict(vshape(None, old))[5:-6]
+            + "</mc:Fallback></mc:AlternateContent></w:r>")
+
+
+NOTE_PARTS = [
+    ("rIdH1", "header", "header1.xml", margin("hdr", "지어낸 머리말",
+                                              p(r("머리말 둘째 줄"), _alt_box("머리말 글상자", "머리말 옛 글상자")))),
+    ("rIdH2", "header", "header2.xml", margin("hdr", "첫 쪽 머리말")),
+    ("rIdH3", "header", "header3.xml", margin("hdr", "쓰지 않는 머리말")),
+    ("rIdF1", "footer", "footer1.xml", margin("ftr", p(r("쪽 "), fld("begin"), instr(" PAGE "), fld("separate"), r("1"),
+                                                      fld("end")), p(drawing(pic("rId1"))))),
+    ("rIdFN", "footnotes", "footnotes.xml", notes(
+        "footnotes", ("-1", "separator", p("<w:r><w:separator/></w:r>")),
+        ("0", "continuationSeparator", p("<w:r><w:continuationSeparator/></w:r>")),
+        ("1", "continuationNotice", p("다음 쪽에 계속")),
+        ("2", None, p('<w:r><w:footnoteRef/></w:r>', r(" 첫째 각주 글"))), ("3", None, p("칸 속 각주")),
+        ("4", None, p("참조 없는 각주")))),
+    ("rIdEN", "endnotes", "endnotes.xml", notes(
+        "endnotes", ("-1", "separator", p("<w:r><w:separator/></w:r>")),
+        ("1", None, p('<w:r><w:endnoteRef/></w:r>', r(" 첫째 미주 글"))))),
+]
+NOTE_SECT = sect_refs(("header", "default", "rIdH1"), ("header", "first", "rIdH2"), ("footer", "default", "rIdF1"))
+NOTES = document(
+    p("머리말을 둔 첫 문단이다."),
+    p(r("각주가 달린 문단"), note_ref("footnote", "2"), r(" 이어지는 글")),
+    tbl(tr(tc(p(r("각주 든 칸"), note_ref("footnote", "3"))), tc("둘째 칸")),
+        tr(tc("셋째 칸"), tc(p(drawing(wsp("칸 속 글상자")))))),
+    p(drawing(wsp("본문 글상자 첫째", "본문 글상자 둘째"))),
+    p(_alt_box("짝 글상자 새 형식", "짝 글상자 옛 형식")),
+    p(drawing(wgp(wsp("묶음 속 글상자"), wgp(wsp("안 묶음 글상자"))))),
+    p(r("미주가 달린 문단"), note_ref("endnote", "1")),
+    p(r("같은 각주를 다시 참조"), note_ref("footnote", "2"), extra=NOTE_SECT),
+    p("둘째 구역 문단이다."),
+    final=sect_refs(("header", "default", "rIdH1"), ("footer", "default", "rIdF1")))
 SAMPLES: dict[str, bytes] = {
     "basic.docx": docx(BASIC, BASIC_STYLES, numbering("1", "2")),
     "headings.docx": docx(HEADINGS, HEAD_STYLES),
     "table.docx": docx(TABLE, TABLE_STYLES),
     "fields.docx": docx(FIELDS),
+    "figures.docx": docx(FIGURES, doc_rels=[*FIGURE_MEDIA["doc_rels"], *FIGURE_RELS], extra=FIGURE_MEDIA["extra"]),
+    "notes.docx": docx(NOTES, doc_rels=[(rid, REL[kind], member) for rid, kind, member, _ in NOTE_PARTS],
+                       extra=[*((f"word/{member}", xml) for _, _, member, xml in NOTE_PARTS),
+                              ("word/_rels/footer1.xml.rels", rels(("rId1", f"{R}/image", "media/image1.png"))),
+                              ("word/media/image1.png", GRAY_PNG)]),
 }
 ROOT = Path(__file__).resolve().parent / "fixtures" / "ooxml"
 
@@ -301,12 +511,52 @@ def document_id(name: str) -> str:
     return "fx-ooxml-" + Path(name).stem
 
 
-def golden(name: str, data: bytes) -> tuple[DocumentTree, ProcessingHistory]:
-    """엔진 ingest와 같은 SourceInfo(쪽 없음 → page_count None)."""
+def golden(name: str, data: bytes) -> tuple[DocumentTree, ProcessingHistory, list[dict[str, object]]]:
+    """엔진 ingest와 같은 SourceInfo(쪽 없음 → page_count None). 셋째는 그림 자산의 화소 정보(처음 나온 차례)."""
     parsed = DocxParser().parse(data, name)
     source = SourceInfo(name=name, mime=parsed.mime, content_hash="sha256:" + hashlib.sha256(data).hexdigest())
     tree = build_tree(parsed, document_id(name), 1, source)
-    return tree, ProcessingHistory(document_id=tree.document_id, version=1, regions=parsed.regions)
+    order = list(dict.fromkeys(b.figure.asset for b in tree.blocks if b.figure is not None))
+    return (tree, ProcessingHistory(document_id=tree.document_id, version=1, regions=parsed.regions),
+            [pixels(parsed.assets[key]) for key in order])
+
+
+def pixels(png: bytes) -> dict[str, object]:
+    """PNG를 디코드한 화소 정보(압축 바이트와 상관없다): 모드, 크기, 원시 화소의 sha256."""
+    with Image.open(BytesIO(png)) as image:
+        return {"mode": image.mode, "size": list(image.size), "sha256": hashlib.sha256(image.tobytes()).hexdigest()}
+
+
+def portable(tree: dict) -> dict:
+    """그림 자산 키를 처음 나온 차례의 자리표(asset-1, …)로 바꾸고 그 키에서 나온 값(그림 블록의 figure.asset·
+    content_hash·block_id와 그 값을 가리키는 곳)을 가린 트리(HWPX 골든과 같은 규칙)."""
+    masks: dict[str, str] = {}
+    for block in tree["blocks"]:
+        figure = block.get("figure")
+        if figure is None:
+            continue
+        mark = masks.setdefault(figure["asset"], f"asset-{sum(m.startswith('asset-') for m in masks.values()) + 1}")
+        masks[block["content_hash"]] = f"hash-of-{mark}"
+        masks[block["block_id"]] = f"block-{block['order']}"
+
+    def walk(value: object) -> object:
+        if isinstance(value, dict):
+            return {k: walk(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [walk(v) for v in value]
+        return masks.get(value, value) if isinstance(value, str) else value
+
+    return walk(tree)  # type: ignore[return-value]
+
+
+def same(rel: str, built: bytes, path: Path) -> bool:
+    """골든 비교: 트리는 portable로(그림 자산 키에서 나온 값만 가린다), 입력·처리 이력·화소 정보는 바이트 그대로."""
+    if not path.exists():
+        return False
+    old = path.read_bytes()
+    if rel.startswith("expected/") and not rel.endswith((".history.json", ".pixels.json")):
+        return portable(json.loads(old)) == portable(json.loads(built))
+    return old == built
 
 
 def _json(model: DocumentTree | ProcessingHistory) -> bytes:
@@ -316,10 +566,11 @@ def _json(model: DocumentTree | ProcessingHistory) -> bytes:
 def build_all() -> dict[str, bytes]:
     out: dict[str, bytes] = {}
     for name, data in SAMPLES.items():
-        tree, history = golden(name, data)
+        tree, history, shown = golden(name, data)
         out[f"inputs/{name}"] = data
         out[f"expected/{Path(name).stem}.json"] = _json(tree)
         out[f"expected/{Path(name).stem}.history.json"] = _json(history)
+        out[f"expected/{Path(name).stem}.pixels.json"] = (json.dumps(shown, indent=2) + "\n").encode("utf-8")
     return out
 
 
@@ -331,7 +582,7 @@ def main(argv: list[str] | None = None) -> int:
     for rel, data in build_all().items():
         path = ROOT / rel
         if args.check:
-            if not path.exists() or path.read_bytes() != data:
+            if not same(rel, data, path):
                 stale.append(rel)
         else:
             path.parent.mkdir(parents=True, exist_ok=True)

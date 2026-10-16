@@ -279,8 +279,9 @@ COSTS: dict[Config, Cost] = {
 }
 # 입력 바이트마다. 큰 MD는 입력의 약 20배를 쓴다. HWPX는 압축을 풀고 XML 트리·그림 디코드가 함께 있어 더 크다: lab
 # 12건(2026-10-14 macOS arm64, 문서마다 새 프로세스, 새 SqliteStore에 force 수집 전후 최대 메모리 차이) 최대 137.0배 × 1.5를
-# 올림. 잰 세트를 덮는 값이지 새 문서의 상한이 아니다
-BYTES_FACTOR = {"pdf": 2, "hwpx": 206, "other": 20}
+# 올림. DOCX도 같은 방법으로 lab 14건(2026-10-15 macOS arm64, 여섯 번 잰 가운데 최대 285.5배) × 1.5를 올림. 작은 문서는
+# 고정 몫이 커서 배수가 크다. 잰 세트를 덮는 값이지 새 문서의 상한이 아니다
+BYTES_FACTOR = {"pdf": 2, "hwpx": 206, "docx": 429, "other": 20}
 
 
 def config_of(ocr: bool, layout: bool) -> Config:
@@ -290,7 +291,7 @@ def config_of(ocr: bool, layout: bool) -> Config:
 
 def byte_kind(path: str) -> str:
     """파일 확장자(대소문자 무시) → BYTES_FACTOR 키."""
-    return {".pdf": "pdf", ".hwpx": "hwpx"}.get(os.path.splitext(path)[1].lower(), "other")
+    return {".pdf": "pdf", ".hwpx": "hwpx", ".docx": "docx"}.get(os.path.splitext(path)[1].lower(), "other")
 
 
 def estimate(cost: Cost, pages: int, size: int, kind: str) -> int:

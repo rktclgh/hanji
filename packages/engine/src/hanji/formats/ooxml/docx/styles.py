@@ -1,6 +1,6 @@
 """styles.xml·numbering.xml에서 파서가 쓰는 작은 표만 뽑는다(스펙 §5.3): 스타일 id → basedOn·개요 수준·numId·이름·
 런 크기·굵기·숨김. basedOn 사슬은 64단까지, 순환이면 그 자리에서 끊는다. docDefaults의 런 속성이 맨 아래 기본값이다.
-문단에 pStyle이 없으면 기본 문단 스타일(w:default="1")의 사슬을 쓴다(Word와 같다)."""
+문단에 pStyle이 없거나 모르는 id면 기본 문단 스타일(w:default="1")의 사슬을 쓴다(Word와 같다)."""
 
 import re
 import xml.etree.ElementTree as ET
@@ -73,8 +73,10 @@ class Styles:
         return out
 
     def paragraph_chain(self, p: ET.Element) -> list[Style]:
+        """문단 스타일 사슬. pStyle이 없거나 styles.xml에 없는 id면 기본 문단 스타일의 사슬(Word와 같다)."""
         style = p.find(f"{W}pPr/{W}pStyle")
-        return self.chain(style.get(f"{W}val") if style is not None else self.default_paragraph)
+        key = style.get(f"{W}val") if style is not None else None
+        return self.chain(key if key in self.styles else self.default_paragraph)
 
     def heading(self, p: ET.Element) -> int | None:
         """제목 단계(스펙 §5.3) 또는 None. 개요 수준(문단 직접, 없으면 스타일 사슬에서 처음 나오는 정수)이 있으면 0~8만

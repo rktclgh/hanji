@@ -1,0 +1,99 @@
+{
+  "schema_version": "0.4",
+  "document_id": "fx-ooxml-figures",
+  "version": 1,
+  "regions": [
+    {
+      "region_id": "s0-p3-figure-0",
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 3
+      },
+      "kind": "figure",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "figure_image_unsupported"
+    },
+    {
+      "region_id": "s0-p4-figure-0",
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 4
+      },
+      "kind": "figure",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "figure_image_linked"
+    },
+    {
+      "region_id": "s0-p5-figure-0",
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 5
+      },
+      "kind": "figure",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "figure_image_missing"
+    },
+    {
+      "region_id": "s0-p6-figure-0",
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 6
+      },
+      "kind": "figure",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "figure_image_missing"
+    }
+  ]
+}

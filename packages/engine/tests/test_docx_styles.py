@@ -90,3 +90,11 @@ def test_spec_vanish_is_not_hidden_and_missing_parts_give_defaults():
     empty = read_styles(None, None)
     assert empty.run(p, p.find(f"{{{B.W}}}r")) == (10.0, False, False)
     assert empty.heading(p) is None and not empty.listed(para(B.p("가", num="1")))
+
+
+def test_an_unknown_pstyle_falls_back_to_the_default_paragraph_style():
+    styles = load(B.style("Normal", "Normal", default=True, rpr_xml=B.rpr(sz=24),
+                          ppr_xml='<w:pPr><w:numPr><w:numId w:val="2"/></w:numPr></w:pPr>'), nums=("2",))
+    p = para(B.p("가", style="NoSuchStyle"))
+    assert [s.name for s in styles.paragraph_chain(p)] == ["Normal"]
+    assert styles.run(p, None)[0] == 12.0 and styles.listed(p)

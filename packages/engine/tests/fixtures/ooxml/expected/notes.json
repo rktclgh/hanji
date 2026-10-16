@@ -1,0 +1,464 @@
+{
+  "schema_version": "0.4",
+  "document_id": "fx-ooxml-notes",
+  "version": 1,
+  "layer_state": "det",
+  "source": {
+    "name": "notes.docx",
+    "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "content_hash": "sha256:361a3e7b6f41db28a4c4f726b449826589af3b31500962846870236b37f6e346",
+    "page_count": null
+  },
+  "pages": [],
+  "blocks": [
+    {
+      "block_id": "b_28b309ff5bbb027d0074afac",
+      "content_hash": "c_8972376cc1d3f99e470868a672b6a000",
+      "order": 0,
+      "kind": "page_header",
+      "text": "지어낸 머리말\n머리말 둘째 줄",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 0
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_fb13c681ba6f9dba844b4500",
+      "content_hash": "c_4c1f9f62a9052784805dbfd896ee70d3",
+      "order": 1,
+      "kind": "paragraph",
+      "text": "머리말 글상자",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 0
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_1f673c2e10ee041c2d911b30",
+      "content_hash": "c_5c7772e93286a95cbe32343863da7373",
+      "order": 2,
+      "kind": "page_header",
+      "text": "첫 쪽 머리말",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 0
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_0a5e6ab53399bbe921c19f51",
+      "content_hash": "c_b9bc135d97984f22febe523e6f2ba4bd",
+      "order": 3,
+      "kind": "page_footer",
+      "text": "쪽 1",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 0
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_e3e807258ad4f83c34c5d4ec",
+      "content_hash": "c_ee73e2aca982823d0d9547f46b565799",
+      "order": 4,
+      "kind": "figure",
+      "text": "",
+      "table": null,
+      "figure": {
+        "asset": "sha256:6b8d40db394e7dca197ea3ac1f2f7f276baf562693025be34e1d45cd5c7196b7",
+        "mime": "image/png",
+        "width_px": 6,
+        "height_px": 6,
+        "dpi": 6,
+        "category": "image",
+        "caption_block_id": null
+      },
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 0
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_b2a6b44e2388d0cb0be93e1d",
+      "content_hash": "c_fa716a02cfdc54b0a9a92235d17aba15",
+      "order": 5,
+      "kind": "paragraph",
+      "text": "머리말을 둔 첫 문단이다.",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 0
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_abd3b43ab9c137d08518f7ea",
+      "content_hash": "c_5b1abcb8d0302bae848fab5d48ffc709",
+      "order": 6,
+      "kind": "paragraph",
+      "text": "각주가 달린 문단 이어지는 글",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 1
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_bb8d6049170cb164b0fa9879",
+      "content_hash": "c_7516ad596313575bd13bde20a12db434",
+      "order": 7,
+      "kind": "table",
+      "text": "각주 든 칸\t둘째 칸\n셋째 칸\t",
+      "table": {
+        "n_rows": 2,
+        "n_cols": 2,
+        "cells": [
+          {
+            "row": 0,
+            "col": 0,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "각주 든 칸",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 0,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "둘째 칸",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 1,
+            "col": 0,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "셋째 칸",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 1,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "",
+            "header": "none",
+            "text_source": "native"
+          }
+        ]
+      },
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 2
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_72e94f76e0d822f4fe35793b",
+      "content_hash": "c_192ece04ce923353107c31386586b8fe",
+      "order": 8,
+      "kind": "paragraph",
+      "text": "칸 속 글상자",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 2
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_c815ee7f7176d75e0355336f",
+      "content_hash": "c_c6fa8d539fb68a4a56156aadf74cfecc",
+      "order": 9,
+      "kind": "paragraph",
+      "text": "본문 글상자 첫째",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 3
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_fb2ca5d155c986db2c459c72",
+      "content_hash": "c_b7f343dc1d0e9596066963e2958f420c",
+      "order": 10,
+      "kind": "paragraph",
+      "text": "본문 글상자 둘째",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 3
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_ec4f310f25f742f44a80787f",
+      "content_hash": "c_795b05262c510dab2087ccf92c0e4d75",
+      "order": 11,
+      "kind": "paragraph",
+      "text": "짝 글상자 새 형식",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 4
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_66d1a1cb8c9b6b08e7687ef8",
+      "content_hash": "c_538235af950927f6b76e67a4f88a7b36",
+      "order": 12,
+      "kind": "paragraph",
+      "text": "묶음 속 글상자",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 5
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_94f319d233b26c7d29d77b94",
+      "content_hash": "c_c17060c20cf9deb307dfaa07f2afbe76",
+      "order": 13,
+      "kind": "paragraph",
+      "text": "안 묶음 글상자",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 5
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_17740b32e18905e3e8773087",
+      "content_hash": "c_680b0524af8a85ff459fd3aba40a6564",
+      "order": 14,
+      "kind": "paragraph",
+      "text": "미주가 달린 문단",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 6
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_843f3bef0a13bd5884580daf",
+      "content_hash": "c_c66f1bb49737365bd11b581b73d19236",
+      "order": 15,
+      "kind": "paragraph",
+      "text": "같은 각주를 다시 참조",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 7
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_d5a92229210ca954fb279735",
+      "content_hash": "c_1e4be6b243595a93a913ca0bfc4e0cf1",
+      "order": 16,
+      "kind": "paragraph",
+      "text": "첫째 각주 글",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 1
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_50ed16d8d084fcbb91e6bfd7",
+      "content_hash": "c_ef4094abb8511090331e4ef4d9c2c2d0",
+      "order": 17,
+      "kind": "paragraph",
+      "text": "칸 속 각주",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 2
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_4417711a3a176f79f7ce5149",
+      "content_hash": "c_e565d3a1ce51aeee574dc0d0fbe75e0e",
+      "order": 18,
+      "kind": "paragraph",
+      "text": "첫째 미주 글",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 6
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_c17388146ea3070bc7abd708",
+      "content_hash": "c_2acf8dff93ae6e368bbd75984f8790bb",
+      "order": 19,
+      "kind": "paragraph",
+      "text": "둘째 구역 문단이다.",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 8
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    }
+  ]
+}
