@@ -392,6 +392,35 @@ def slide(*shapes: str, show: str | None = None) -> str:
             f"{''.join(shapes)}</p:spTree></p:cSld></p:sld>")
 
 
+TABLE_URI = "http://schemas.openxmlformats.org/drawingml/2006/table"
+
+
+def gframe(data: str, uri: str, hidden: bool = False, name: str = "개체") -> str:
+    """p:graphicFrame(a:graphic/a:graphicData@uri 아래 data)."""
+    return (f'<p:graphicFrame>{nv("GraphicFrame", name, hidden)}<p:xfrm><a:off x="0" y="0"/><a:ext cx="{EMU}" '
+            f'cy="{EMU}"/></p:xfrm><a:graphic><a:graphicData uri="{uri}">{data}</a:graphicData></a:graphic>'
+            "</p:graphicFrame>")
+
+
+def a_tc(*paras: str, span: int | str | None = None, rows: int | str | None = None, h: str | None = None,
+         v: str | None = None) -> str:
+    """표 칸(a:tc). 꺾쇠로 시작하지 않는 항목은 문단 하나(항목이 없으면 빈 a:p). h·v는 hMerge·vMerge 값."""
+    body = "".join(x if x.startswith("<") else para(x) for x in paras) or "<a:p/>"
+    props = attrs(gridSpan=span, rowSpan=rows, hMerge=h, vMerge=v)
+    return f"<a:tc{props}><a:txBody><a:bodyPr/>{body}</a:txBody></a:tc>"
+
+
+def a_tr(*cells: str) -> str:
+    return f'<a:tr h="370840">{"".join(cells)}</a:tr>'
+
+
+def a_tbl(*rows: str, cols: int, first: bool = False, hidden: bool = False) -> str:
+    """표 개체 틀(a:tblGrid의 열 cols개). first면 a:tblPr@firstRow."""
+    grid = f'<a:gridCol w="{EMU}"/>' * cols
+    return gframe(f'<a:tbl><a:tblPr{attrs(firstRow="1" if first else None)}/><a:tblGrid>{grid}</a:tblGrid>'
+                  f'{"".join(rows)}</a:tbl>', TABLE_URI, hidden, "표")
+
+
 def levels(sz: int | None = None, b: str | None = None, lvl: int = 1) -> str:
     """목록 스타일 수준 하나(a:lvlNpPr/a:defRPr)."""
     return f"<a:lvl{lvl}pPr><a:defRPr{attrs(sz=sz, b=b)}/></a:lvl{lvl}pPr>"

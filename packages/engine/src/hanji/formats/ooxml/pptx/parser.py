@@ -5,7 +5,8 @@ p:spTree의 도형 트리 앞 순회 차례(그룹은 펼친다, 좌표로 다�
 순번: 그룹 자신도 하나로 센다). 도형 글 몸통의 a:p 하나가 블록 하나다: 제목 자리는 문단을 공백으로 이은 제목(단계 1),
 dt·ftr·sldNum 자리는 꼬리말·hdr는 머리말 블록 하나, 그 밖은 글머리(a:buChar·a:buAutoNum·a:buBlip, 없으면 body·obj
 자리)면 목록 항목, 아니면 문단. 제목 자리가 없는 슬라이드는 자리 표시자가 아닌 도형 문단에 크기 규칙(shapes.py)을 써서
-가장 위 문단 하나를 제목으로 고른다. 숨긴 도형(p:cNvPr@hidden, 그룹이면 그 아래 전부)은 블록이 없고 글자는 장부 숨김이다.
+가장 위 문단 하나를 제목으로 고른다. 표(a:tbl)는 물리 격자로 table 블록(1×1은 상자라 푼다, tables.py). 숨긴
+도형(p:cNvPr@hidden, 그룹이면 그 아래 전부)은 블록이 없고 글자는 장부 숨김이다.
 슬라이드가 장부 단위다: ooxml/ledger.py의 Walker가 출처를 따로 열거해 보통·숨김·범위 밖으로 표시하고, 블록에는 보통 출처만
 넣는다. 한 번도 넣지 않은 보통 출처는 슬라이드 끝 구조 문단(신뢰도 0.3, unassigned_text)으로 살린다."""
 
@@ -14,18 +15,20 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
-from hanji_contracts import SlideLocator
+from hanji_contracts import SlideLocator, Table
 
 from ....errors import ParseError
 from ...base import ParsedSource
 from ...flowdoc import Region, finish, gate, ledger_gate
 from ...flowledger import Bundle, Counts, Ledger, ink
+from ...hwpx.tables import RawCell, build
 from ...pdf.group import RESCUED_CONFIDENCE, step
 from ...pdf.parser import COVERAGE_MISMATCH, UNASSIGNED_TEXT
 from ...zipxml import Prefixes
 from ..drawing import A, A_BR, A_P, A_T, P, SHAPES, Images, hidden_shape
 from ..ledger import NORMAL, Note, Story, Walker
 from ..package import MC, READ, R, Package, choose
+from . import tables
 from .shapes import Sizes, headings, top
 
 MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
@@ -40,6 +43,8 @@ MARGINS = {"dt": "page_footer", "ftr": "page_footer", "sldNum": "page_footer", "
 LISTED = frozenset({"body", "obj"})  # 글머리 표시가 없으면 목록 항목인 자리 표시자(마스터 기본 글머리)
 BULLETS = frozenset({f"{A}buChar", f"{A}buAutoNum", f"{A}buBlip"})
 HIDDEN_SLIDE = "hidden_slide"  # 발표에서 감춘 슬라이드(글자는 블록에 넣는다)
+MERGED_TEXT = "merged_cell_text_kept"  # 이어진 칸의 글자를 시작 칸 글자 뒤에 이었다
+TBL = f"{A}tbl"
 SHIFT = 26  # 닻 = 슬라이드 << SHIFT | (제목 자리가 아니면 OTHER) | 도형 순번: 블록 차례대로 커진다
 OTHER = 1 << (SHIFT - 1)
 MASK = OTHER - 1
@@ -239,6 +244,67 @@ class _Slide:
         """도형 하나의 블록(그룹 자신과 잉크 p:contentPart는 블록이 없다)."""
         if shape.element.tag in (SP, CXN):
             self.text(shape)
+        elif shape.element.tag == FRAME:
+            self.frame(shape)
+
+    def frame(self, shape: Shape) -> None:
+        """p:graphicFrame/a:graphic/a:graphicData 아래 개체(고른 mc 쪽만): 표."""
+        data = shape.element.find(f"{A}graphic/{A}graphicData")
+        anchor = self.anchor(shape)
+        stack = list(reversed(data)) if data is not None else []
+        while stack:
+            child = stack.pop()
+            if child.tag == ALTERNATE:
+                chosen = choose(child, self.prefixes)
+                stack.extend(reversed(chosen) if chosen is not None else ())
+            elif child.tag == TBL:
+                self.table(child, anchor)
+
+    def table(self, tbl: ET.Element, anchor: int) -> None:
+        """표(스펙 §6.2): 1×1은 상자라 칸 문단을 문단·목록 항목 블록으로, 그 밖은 table 블록(이어진 칸 글자는 시작 칸 뒤에
+        \n으로 잇고 merged_cell_text_kept), 격자 검증 실패·상한 초과·계약 검증 실패는 칸 글자를 \n으로 이은 문단과 사유."""
+        shape = tables.grid(tbl)
+        tcs = [tc for tr in tbl.iterfind(f"{A}tr") for tc in tr.iterfind(f"{A}tc")]
+        if not isinstance(shape, str) and shape.rows == shape.cols == 1:
+            for p in tcs[0].iterfind(f"{A}txBody/{A_P}"):
+                self.emit("list_item" if listed(p, None) else "paragraph", self.runs(p)[0], anchor)
+            return
+        parts = {id(tc): self.cell(tc) for tc in tcs}
+        kept = False
+        if isinstance(shape, str):
+            result: Table | str = shape
+        else:
+            cells = []
+            for slot in shape.slots:
+                text = "".join(t for _, t in parts[id(slot.tc)]).strip()
+                for tc in slot.merged:
+                    more = "".join(t for _, t in parts[id(tc)]).strip()
+                    if more:
+                        kept = True
+                        text = f"{text}\n{more}" if text else more
+                cells.append(RawCell(slot.row, slot.col, slot.rowspan, slot.colspan, shape.header and slot.row == 0,
+                                     False, text))
+            result = build(shape.rows, shape.cols, cells)
+        if isinstance(result, Table):
+            self.doc.specs.append({"kind": "table", "table": result, "text": result.plain_text(), "confidence": 1.0,
+                                   "state": "det", "text_source": "native", "_anchor": anchor, "_late": self.late})
+            for tc in tcs:
+                self.ledger.put(parts[id(tc)])
+            if kept:
+                self.region("table", "table", MERGED_TEXT, anchor)
+            return
+        joined: list[Bundle] = []
+        for i, tc in enumerate(tcs):
+            joined += [(None, "\n")] * bool(i) + parts[id(tc)]
+        self.emit("paragraph", joined, anchor)
+        self.region("table", "table", str(result), anchor)
+
+    def cell(self, tc: ET.Element) -> list[Bundle]:
+        """칸 글자: a:txBody의 a:p들을 \n으로."""
+        out: list[Bundle] = []
+        for i, p in enumerate(tc.iterfind(f"{A}txBody/{A_P}")):
+            out += [(None, "\n")] * bool(i) + self.runs(p)[0]
+        return out
 
     def text(self, shape: Shape) -> None:
         """도형 글 몸통: 제목 자리는 제목 하나, dt·ftr·sldNum·hdr 자리는 꼬리말·머리말 하나, 그 밖은 문단마다."""
