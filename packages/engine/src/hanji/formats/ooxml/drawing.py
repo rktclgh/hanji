@@ -16,6 +16,9 @@ from ..zipxml import OverBudget, Prefixes, TooLarge
 from .package import R, Package
 
 A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+P = "{http://schemas.openxmlformats.org/presentationml/2006/main}"
+# PPTX 도형 요소(그룹 포함). 첫 자식 p:nv*Pr/p:cNvPr@hidden이 참이면 숨긴 도형이다(그룹이면 그 아래 전부, 스펙 §8.2)
+SHAPES = frozenset(f"{P}{n}" for n in ("sp", "grpSp", "pic", "graphicFrame", "cxnSp", "contentPart"))
 PIC = "{http://schemas.openxmlformats.org/drawingml/2006/picture}"
 WP = "{http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing}"
 FRAMES = frozenset({f"{WP}inline", f"{WP}anchor"})  # w:drawing 아래 그림 틀
@@ -52,6 +55,15 @@ def hidden_frame(frame: ET.Element) -> bool:
     """wp:inline·wp:anchor의 wp:docPr@hidden이 참이면 그 개체를 내지 않는다(스펙 §7.1)."""
     pr = frame.find(f"{WP}docPr")
     return pr is not None and pr.get("hidden", "").lower() in ("1", "true")
+
+
+def hidden_shape(shape: ET.Element) -> bool:
+    """PPTX 도형의 p:nv*Pr/p:cNvPr@hidden이 참인가."""
+    for nv in shape:
+        if nv.tag.startswith(f"{P}nv"):
+            pr = nv.find(f"{P}cNvPr")
+            return pr is not None and pr.get("hidden", "").lower() in ("1", "true")
+    return False
 
 
 def blip(pic: ET.Element) -> tuple[str | None, str | None]:

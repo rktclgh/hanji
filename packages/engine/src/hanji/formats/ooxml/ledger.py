@@ -1,10 +1,10 @@
 """OOXML 출처 열거와 표시(스펙 §9). 블록 조립과 따로, 이야기(본문·머리말 파트·주석 하나·글상자 내용)를 명시적 스택으로
 훑어 출처 요소(w:t·w:instrText·w:sym·m:t·a:t)를 모두 장부에 올리고, 그때 조상과 필드 상태를 보고 출처마다 표시를 단다:
-보통(보이는 글자), 숨김(w:vanish, 숨긴 그림 틀 wp:docPr@hidden 안), 범위 밖(고르지 않은 mc 쪽·무시한 요소·필드 명령
-구간·w:moveFrom·w:del·특수 주석). 블록 조립은 표시가 보통인 출처만 넣는다. 숨김·범위 밖 출처는 장부에 숨은 출처로 올라
-살리지 않고, 블록에 들어가면 불일치다. 처리 이력 재료(Note)도 여기서 센다: alternate_content_skipped·
-tracked_deletion_skipped·special_note_skipped(문서), field_unterminated(이야기), hidden_text·symbol_char·
-equation_text(문단)."""
+보통(보이는 글자), 숨김(w:vanish, 숨긴 그림 틀 wp:docPr@hidden 안, PPTX 숨긴 도형 p:cNvPr@hidden 안), 범위 밖(고르지
+않은 mc 쪽·무시한 요소·필드 명령 구간·w:moveFrom·w:del·특수 주석). 블록 조립은 표시가 보통인 출처만 넣는다. 숨김·범위
+밖 출처는 장부에 숨은 출처로 올라 살리지 않고, 블록에 들어가면 불일치다. 처리 이력 재료(Note)도 여기서 센다:
+alternate_content_skipped·tracked_deletion_skipped·special_note_skipped(문서), field_unterminated(이야기),
+hidden_text·symbol_char·equation_text(문단)."""
 
 import xml.etree.ElementTree as ET
 from collections.abc import Sequence
@@ -14,7 +14,7 @@ from ...errors import ParseError
 from ..flowledger import Ledger, ink
 from ..zipxml import Prefixes
 from .docx.styles import Styles
-from .drawing import A_P, A_T, CHART, FRAMES, R_DM, R_ID, SMARTART, hidden_frame
+from .drawing import A_P, A_T, CHART, FRAMES, R_DM, R_ID, SHAPES, SMARTART, hidden_frame, hidden_shape
 from .package import MC, Package, choose, ignorable
 
 W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
@@ -103,7 +103,7 @@ class _Para:
 
 @dataclass(frozen=True, slots=True)
 class _Ctx:
-    out: str | None  # None, "alt"(고르지 않은 mc·무시한 요소), "deleted", "hidden"(숨긴 그림 틀 안), "special"(특수 주석)
+    out: str | None  # None, "alt"(고르지 않은 mc·무시한 요소), "deleted", "hidden"(숨긴 그림 틀·도형 안), "special"(특수 주석)
     ignored: frozenset[str]
     process: frozenset[tuple[str, str]]
     para: ET.Element | None
@@ -120,9 +120,10 @@ class Walker:
     """문서 하나의 출처를 표시한다. marks는 id(출처 요소) → 표시, notes는 처리 이력 재료(문서 순서), refs는 보이는
     각주·미주 참조 (구역, 닻, 참조 요소 이름, w:id)(문서 순서: 범위 밖·필드 명령 구간·숨긴 런의 참조는 들지 않는다),
     graphics는 차트·SmartArt 참조 (구역, 닻, 호스트 파트, 참조 요소, 범위 밖 종류 또는 None)(문서 순서). part는 지금 훑는
-    파트 멤버(부르는 쪽이 정한다). DrawingML 문단(a:p)도 w:p처럼 문단 단위다(차트·SmartArt 글자는 문단마다 기록)."""
+    파트 멤버(부르는 쪽이 정한다). DrawingML 문단(a:p)도 w:p처럼 문단 단위다(차트·SmartArt 글자는 문단마다 기록). styles가
+    None이면(PPTX) 숨긴 런(w:vanish)을 보지 않는다."""
 
-    def __init__(self, styles: Styles) -> None:
+    def __init__(self, styles: Styles | None) -> None:
         self.styles = styles
         self.marks: dict[int, str] = {}
         self.notes: list[Note] = []
@@ -157,6 +158,8 @@ class Walker:
                 out = "alt"
             elif element.tag in DELETED:
                 out = "deleted"
+            elif element.tag in SHAPES and hidden_shape(element):
+                out = "hidden"
         stack: list[tuple[ET.Element, _Ctx] | Story] = [(root, _Ctx(out, ignored, process, None, None, story))]
         while stack:
             item = stack.pop()
@@ -188,7 +191,7 @@ class Walker:
             elif element.tag == f"{W}fldChar" and ctx.out is None:
                 self.field(element, ctx.story, section, anchor)
             elif element.tag in NOTE_REFS and ctx.out is None and not any(f.instr for f in ctx.story.fields) \
-                    and not self.styles.run(ctx.para if ctx.para is not None else self._empty, ctx.run)[2]:
+                    and not self.vanish(ctx):
                 self.refs.append((section, anchor, element.tag, element.get(f"{W}id", "")))
             elif element.tag in (_PARA, A_P):
                 ctx = _Ctx(ctx.out, ctx.ignored, ctx.process, element, None, ctx.story)
@@ -196,7 +199,8 @@ class Walker:
                 ctx = _Ctx(ctx.out, ctx.ignored, ctx.process, ctx.para, element, ctx.story)
             elif (element.tag == CHART and element.get(R_ID)) or (element.tag == SMARTART and element.get(R_DM)):
                 self.graphics.append((section, anchor, self.part, element, ctx.out))
-            elif element.tag in FRAMES and ctx.out is None and hidden_frame(element):
+            elif ctx.out is None and ((element.tag in FRAMES and hidden_frame(element))
+                                      or (element.tag in SHAPES and hidden_shape(element))):
                 ctx = _Ctx("hidden", ctx.ignored, ctx.process, ctx.para, ctx.run, ctx.story)
             elif element.tag == STORY:
                 inner = Story()
@@ -236,7 +240,7 @@ class Walker:
             mark = OUT  # 열린 필드 가운데 하나라도 명령 구간이면 보이지 않는다(처리 이력은 끝나지 않은 필드만)
             for f in blockers:
                 f.blocked[id(element)] = n
-        elif self.styles.run(para, ctx.run)[2]:
+        elif self.vanish(ctx):
             mark = HIDDEN
             self._para(para, section, anchor).hidden += n
         else:
@@ -247,6 +251,12 @@ class Walker:
                 self._para(para, section, anchor).equation = True
         self.marks[id(element)] = mark
         ledger.add(element, n, anchor, id(para), mark != NORMAL)
+
+    def vanish(self, ctx: _Ctx) -> bool:
+        """런이 숨김(w:vanish, 런·스타일 사슬)인가. 스타일이 없으면(PPTX) 거짓."""
+        if self.styles is None:
+            return False
+        return self.styles.run(ctx.para if ctx.para is not None else self._empty, ctx.run)[2]
 
     def _para(self, p: ET.Element, section: int, anchor: int) -> _Para:
         if id(p) not in self._paras:
