@@ -1,0 +1,415 @@
+{
+  "schema_version": "0.4",
+  "document_id": "fx-ooxml-noplaceholder-pptx",
+  "version": 1,
+  "layer_state": "det",
+  "source": {
+    "name": "noplaceholder.pptx",
+    "mime": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "content_hash": "sha256:ad399aacec904a1f5a26e570f27b32221be300773ed1c1f0ff71788d9119d055",
+    "page_count": null
+  },
+  "pages": [],
+  "blocks": [
+    {
+      "block_id": "b_04a4b3b7ad4c2bd8050af74a",
+      "content_hash": "c_621ccd2a48c7e9afdb88030d187408b7",
+      "order": 0,
+      "kind": "paragraph",
+      "text": "지어낸 본문 문단은 크기 규칙의 본문 크기를 정할 만큼 길게 쓴다",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "slide",
+        "slide": 1,
+        "shape_index": 0
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_741da543aff9f4f14b8b0169",
+      "content_hash": "c_b65bc99222f601a7d51721330d2d87bb",
+      "order": 1,
+      "kind": "paragraph",
+      "text": "아래쪽 큰 글",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "slide",
+        "slide": 1,
+        "shape_index": 1
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_a3bb936dd6e21cf5303ae272",
+      "content_hash": "c_706e16794c23ce869b224f00c030c8a9",
+      "order": 2,
+      "kind": "heading",
+      "text": "위쪽 큰 글",
+      "table": null,
+      "figure": null,
+      "level": 1,
+      "section_path": [],
+      "locator": {
+        "kind": "slide",
+        "slide": 1,
+        "shape_index": 2
+      },
+      "confidence": 0.6,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_b360bec11066b17d51cedee5",
+      "content_hash": "c_621ccd2a48c7e9afdb88030d187408b7",
+      "order": 3,
+      "kind": "paragraph",
+      "text": "지어낸 본문 문단은 크기 규칙의 본문 크기를 정할 만큼 길게 쓴다",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "위쪽 큰 글"
+      ],
+      "locator": {
+        "kind": "slide",
+        "slide": 2,
+        "shape_index": 0
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_30844c1d85ced48c2d44c0ae",
+      "content_hash": "c_a779338163e7e21c40a4916c6c4aa02a",
+      "order": 4,
+      "kind": "heading",
+      "text": "같은 높이 앞 글",
+      "table": null,
+      "figure": null,
+      "level": 1,
+      "section_path": [],
+      "locator": {
+        "kind": "slide",
+        "slide": 2,
+        "shape_index": 1
+      },
+      "confidence": 0.6,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_78ebdcf9f8b899250aef3699",
+      "content_hash": "c_cad5ec5d4d36a2a8793ecbe2296fc3ab",
+      "order": 5,
+      "kind": "paragraph",
+      "text": "같은 높이 뒤 글",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "같은 높이 앞 글"
+      ],
+      "locator": {
+        "kind": "slide",
+        "slide": 2,
+        "shape_index": 2
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_42a28d9dd1e7e7b622fd185d",
+      "content_hash": "c_621ccd2a48c7e9afdb88030d187408b7",
+      "order": 6,
+      "kind": "paragraph",
+      "text": "지어낸 본문 문단은 크기 규칙의 본문 크기를 정할 만큼 길게 쓴다",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "같은 높이 앞 글"
+      ],
+      "locator": {
+        "kind": "slide",
+        "slide": 3,
+        "shape_index": 0
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_a3fda57ccd44d6d48cac8140",
+      "content_hash": "c_5ab4b54bbb25c7ca34b60f2e3a58db43",
+      "order": 7,
+      "kind": "paragraph",
+      "text": "그룹 밖 큰 글",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "같은 높이 앞 글"
+      ],
+      "locator": {
+        "kind": "slide",
+        "slide": 3,
+        "shape_index": 1
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_d5673a0cafe7c69c3b1b155d",
+      "content_hash": "c_2b0a7f13b549e71ce00e7a98def71976",
+      "order": 8,
+      "kind": "heading",
+      "text": "그룹 안 큰 글",
+      "table": null,
+      "figure": null,
+      "level": 1,
+      "section_path": [],
+      "locator": {
+        "kind": "slide",
+        "slide": 3,
+        "shape_index": 3
+      },
+      "confidence": 0.6,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_3a7a6d36323560c21f5145cf",
+      "content_hash": "c_621ccd2a48c7e9afdb88030d187408b7",
+      "order": 9,
+      "kind": "paragraph",
+      "text": "지어낸 본문 문단은 크기 규칙의 본문 크기를 정할 만큼 길게 쓴다",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "그룹 안 큰 글"
+      ],
+      "locator": {
+        "kind": "slide",
+        "slide": 4,
+        "shape_index": 0
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_b3056b235dfc7c26e1e77a03",
+      "content_hash": "c_4acd9f057299b26d1d9d4714a9e2a013",
+      "order": 10,
+      "kind": "heading",
+      "text": "문단 기본 크기 제목",
+      "table": null,
+      "figure": null,
+      "level": 1,
+      "section_path": [],
+      "locator": {
+        "kind": "slide",
+        "slide": 4,
+        "shape_index": 1
+      },
+      "confidence": 0.6,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_6a5ddcec398b784f63b9ab68",
+      "content_hash": "c_621ccd2a48c7e9afdb88030d187408b7",
+      "order": 11,
+      "kind": "paragraph",
+      "text": "지어낸 본문 문단은 크기 규칙의 본문 크기를 정할 만큼 길게 쓴다",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "문단 기본 크기 제목"
+      ],
+      "locator": {
+        "kind": "slide",
+        "slide": 5,
+        "shape_index": 0
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_1edc43dc3b2e6856d6d741b3",
+      "content_hash": "c_7d8fc8b4ec417674aa51c5155937261b",
+      "order": 12,
+      "kind": "heading",
+      "text": "도형 목록 스타일 제목",
+      "table": null,
+      "figure": null,
+      "level": 1,
+      "section_path": [],
+      "locator": {
+        "kind": "slide",
+        "slide": 5,
+        "shape_index": 1
+      },
+      "confidence": 0.6,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_e9b5abea06cf909a3aba28ad",
+      "content_hash": "c_621ccd2a48c7e9afdb88030d187408b7",
+      "order": 13,
+      "kind": "paragraph",
+      "text": "지어낸 본문 문단은 크기 규칙의 본문 크기를 정할 만큼 길게 쓴다",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "도형 목록 스타일 제목"
+      ],
+      "locator": {
+        "kind": "slide",
+        "slide": 6,
+        "shape_index": 0
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_d033e74b1ed912b52e81749e",
+      "content_hash": "c_8cd7d13b01a8132fb11a9bbceda658b4",
+      "order": 14,
+      "kind": "heading",
+      "text": "마스터 둘째 수준 제목",
+      "table": null,
+      "figure": null,
+      "level": 1,
+      "section_path": [],
+      "locator": {
+        "kind": "slide",
+        "slide": 6,
+        "shape_index": 1
+      },
+      "confidence": 0.6,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_2286cf6ccc5466f25deb34cb",
+      "content_hash": "c_621ccd2a48c7e9afdb88030d187408b7",
+      "order": 15,
+      "kind": "paragraph",
+      "text": "지어낸 본문 문단은 크기 규칙의 본문 크기를 정할 만큼 길게 쓴다",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "마스터 둘째 수준 제목"
+      ],
+      "locator": {
+        "kind": "slide",
+        "slide": 7,
+        "shape_index": 0
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_1fb8fee4c65888ccd596d25b",
+      "content_hash": "c_094d0278ad6aa021959d3c5661ce2b61",
+      "order": 16,
+      "kind": "heading",
+      "text": "발표 셋째 수준 제목",
+      "table": null,
+      "figure": null,
+      "level": 1,
+      "section_path": [],
+      "locator": {
+        "kind": "slide",
+        "slide": 7,
+        "shape_index": 1
+      },
+      "confidence": 0.6,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_1338dad24bbecd296f8d7cbb",
+      "content_hash": "c_621ccd2a48c7e9afdb88030d187408b7",
+      "order": 17,
+      "kind": "paragraph",
+      "text": "지어낸 본문 문단은 크기 규칙의 본문 크기를 정할 만큼 길게 쓴다",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "발표 셋째 수준 제목"
+      ],
+      "locator": {
+        "kind": "slide",
+        "slide": 8,
+        "shape_index": 0
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_a8ade5531b527c60b4440954",
+      "content_hash": "c_68cccee43c97355bee4c56e5eae818fd",
+      "order": 18,
+      "kind": "paragraph",
+      "text": "문단 기본이 목록 스타일보다 앞",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "발표 셋째 수준 제목"
+      ],
+      "locator": {
+        "kind": "slide",
+        "slide": 8,
+        "shape_index": 1
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    }
+  ]
+}

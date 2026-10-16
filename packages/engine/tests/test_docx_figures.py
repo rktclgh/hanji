@@ -245,3 +245,33 @@ def test_only_reference_elements_are_recorded_as_graphics(monkeypatch):
     parse(B.p(B.drawing(B.chart_ref("rIdC"), uri=CHART_URI)), rels=(("rIdC", f"{B.R}/chart", "charts/chart1.xml"),),
           extra=(("word/charts/chart1.xml", B.chart_part("제목")),))
     assert seen == [1, 1]
+
+
+def test_broken_chart_and_smartart_parts_leave_figures_and_do_not_fail_the_document():
+    """깨진 차트 파트·뿌리가 다른 차트 파트 → 이미지 없는 그림만, 깨진 그려진 파트 → 데이터 파트를 읽는다(스펙 §16-1)."""
+    rels = (("rIdC1", f"{B.R}/chart", "charts/chart1.xml"), ("rIdC2", f"{B.R}/chart", "charts/chart2.xml"),
+            ("rIdDm", f"{B.R}/diagramData", "diagrams/data1.xml"),
+            ("rIdDr", "http://schemas.microsoft.com/office/2007/relationships/diagramDrawing", "diagrams/drawing1.xml"))
+    parsed, counts = parse(B.p(B.drawing(B.chart_ref("rIdC1"), uri=CHART_URI)),
+                           B.p(B.drawing(B.chart_ref("rIdC2"), uri=CHART_URI)),
+                           B.p(B.drawing(B.smartart_ref("rIdDm"), uri=DIAGRAM_URI)), rels=rels,
+                           extra=(("word/charts/chart1.xml", B.DECL + "<c:chartSpace><broken"),
+                                  ("word/charts/chart2.xml", B.smartart_data("뿌리 다른 글")),
+                                  ("word/diagrams/data1.xml", B.smartart_data("데이터 쪽 글", drawn="rIdDr")),
+                                  ("word/diagrams/drawing1.xml", B.DECL + "<dsp:drawing><broken")))
+    assert [(k, t, a) for k, t, _, a in shown(parsed)] == [("figure", "", 0), ("figure", "", 1),
+                                                          ("paragraph", "데이터 쪽 글", 2)]
+    assert [r.fallback_reason for r in parsed.regions] == ["embedded_object", "embedded_object", "smartart_text"]
+    assert counts[0].ok and counts[0].rescued == 0
+
+
+def test_chart_value_count_includes_literals_multi_level_caches_and_series_names():
+    """cache_chars는 차트 파트의 c:v 전부다: 캐시·리터럴·다단 범주·계열 이름(스펙 §16-7)."""
+    extra_values = ('<c:ser><c:tx><c:v>계열명</c:v></c:tx><c:val><c:numLit><c:pt idx="0"><c:v>7.5</c:v></c:pt>'
+                    '</c:numLit></c:val><c:cat><c:multiLvlStrRef><c:multiLvlStrCache><c:lvl><c:pt idx="0"><c:v>상위</c:v>'
+                    "</c:pt></c:lvl></c:multiLvlStrCache></c:multiLvlStrRef></c:cat></c:ser>")
+    chart = B.chart_part("값 세는 차트", cache=("1분기",)).replace("</c:barChart>", f"{extra_values}</c:barChart>")
+    parsed, _ = parse(B.p(B.drawing(B.chart_ref("rIdC"), uri=CHART_URI)),
+                      rels=(("rIdC", f"{B.R}/chart", "charts/chart1.xml"),), extra=(("word/charts/chart1.xml", chart),))
+    assert [(r.fallback_reason, r.gate.checks[0].value if r.gate else None) for r in parsed.regions] == [
+        ("embedded_object", None), ("chart_text", 3 + 3 + 3 + 2)]

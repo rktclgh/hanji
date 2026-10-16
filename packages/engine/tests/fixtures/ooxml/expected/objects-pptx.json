@@ -1,0 +1,467 @@
+{
+  "schema_version": "0.4",
+  "document_id": "fx-ooxml-objects-pptx",
+  "version": 1,
+  "layer_state": "det",
+  "source": {
+    "name": "objects.pptx",
+    "mime": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "content_hash": "sha256:a7eb6bcd6276fb5f5fa3907febad8cf9449ba17770d8a3480aefb39536706dce",
+    "page_count": null
+  },
+  "pages": [],
+  "blocks": [
+    {
+      "block_id": "b_0589166d86fb9461a6bafde9",
+      "content_hash": "c_ded1ab550899bef15881ceb062c612b7",
+      "order": 0,
+      "kind": "table",
+      "text": "구분\t가로 둘\t넷째\n세로 둘\n이어진 칸 글\t네모\t값 1\n값 2",
+      "table": {
+        "n_rows": 3,
+        "n_cols": 4,
+        "cells": [
+          {
+            "row": 0,
+            "col": 0,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "구분",
+            "header": "column",
+            "text_source": "native"
+          },
+          {
+            "row": 0,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 2,
+            "text": "가로 둘",
+            "header": "column",
+            "text_source": "native"
+          },
+          {
+            "row": 0,
+            "col": 3,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "넷째",
+            "header": "column",
+            "text_source": "native"
+          },
+          {
+            "row": 1,
+            "col": 0,
+            "rowspan": 2,
+            "colspan": 1,
+            "text": "세로 둘\n이어진 칸 글",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 1,
+            "col": 1,
+            "rowspan": 2,
+            "colspan": 2,
+            "text": "네모",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 1,
+            "col": 3,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "값 1",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 2,
+            "col": 3,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "값 2",
+            "header": "none",
+            "text_source": "native"
+          }
+        ]
+      },
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "slide",
+        "slide": 1,
+        "shape_index": 0
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_d53db526f0ddfd603c89b564",
+      "content_hash": "c_f7990e1f6750305ce25df5ccf8a2fa20",
+      "order": 1,
+      "kind": "paragraph",
+      "text": "가\n고아 칸\n다\n라",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "slide",
+        "slide": 1,
+        "shape_index": 1
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_6f8b489ed87d1c5044340b75",
+      "content_hash": "c_f8d592faa15b615b6df0846b87d80af3",
+      "order": 2,
+      "kind": "paragraph",
+      "text": "상자 안 글",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "slide",
+        "slide": 1,
+        "shape_index": 2
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_7712c247419c86840e434767",
+      "content_hash": "c_fe72e21fa082c6067c2661571b979619",
+      "order": 3,
+      "kind": "paragraph",
+      "text": "서른 겹 그룹 안 글",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "slide",
+        "slide": 1,
+        "shape_index": 33
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_d9d5ca464c387050f4f1d1ff",
+      "content_hash": "c_ee73e2aca982823d0d9547f46b565799",
+      "order": 4,
+      "kind": "figure",
+      "text": "",
+      "table": null,
+      "figure": {
+        "asset": "sha256:6b8d40db394e7dca197ea3ac1f2f7f276baf562693025be34e1d45cd5c7196b7",
+        "mime": "image/png",
+        "width_px": 6,
+        "height_px": 6,
+        "dpi": 72,
+        "category": "image",
+        "caption_block_id": null
+      },
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "slide",
+        "slide": 2,
+        "shape_index": 0
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_0f0e1fc666ac593476bfb038",
+      "content_hash": "c_4b4a3456b4b3bcff05395b4db5c801ac",
+      "order": 5,
+      "kind": "figure",
+      "text": "",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "slide",
+        "slide": 2,
+        "shape_index": 1
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_c857156c6501560753627361",
+      "content_hash": "c_76f94942c3bb9b0e168340fc5b841c0c",
+      "order": 6,
+      "kind": "figure",
+      "text": "",
+      "table": null,
+      "figure": {
+        "asset": "sha256:ed9692b140af9e1357bacdaac21b364fa7e88d8f7f39da2086cfe0f85a5e260a",
+        "mime": "image/png",
+        "width_px": 4,
+        "height_px": 4,
+        "dpi": 4,
+        "category": "image",
+        "caption_block_id": null
+      },
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "slide",
+        "slide": 2,
+        "shape_index": 2
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_00ea84f41320807710980613",
+      "content_hash": "c_4b4a3456b4b3bcff05395b4db5c801ac",
+      "order": 7,
+      "kind": "figure",
+      "text": "",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "slide",
+        "slide": 2,
+        "shape_index": 3
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_dde2aa1f1f84c929174c4448",
+      "content_hash": "c_9a4b482ee40fd65c4975106de330b647",
+      "order": 8,
+      "kind": "paragraph",
+      "text": "지어낸 발표 차트\n단위: 건",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "slide",
+        "slide": 2,
+        "shape_index": 3
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_21fe4ca242ae46a2c3bdbaea",
+      "content_hash": "c_4b4a3456b4b3bcff05395b4db5c801ac",
+      "order": 9,
+      "kind": "figure",
+      "text": "",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "slide",
+        "slide": 2,
+        "shape_index": 4
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_f0c742631bbbcc049c5864b9",
+      "content_hash": "c_76f94942c3bb9b0e168340fc5b841c0c",
+      "order": 10,
+      "kind": "figure",
+      "text": "",
+      "table": null,
+      "figure": {
+        "asset": "sha256:ed9692b140af9e1357bacdaac21b364fa7e88d8f7f39da2086cfe0f85a5e260a",
+        "mime": "image/png",
+        "width_px": 4,
+        "height_px": 4,
+        "dpi": 4,
+        "category": "image",
+        "caption_block_id": null
+      },
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "slide",
+        "slide": 2,
+        "shape_index": 5
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_81fe77cb367fec7a70eaf001",
+      "content_hash": "c_df4d2605bbcd222eba46763d89bafdc7",
+      "order": 11,
+      "kind": "paragraph",
+      "text": "수식 x=12",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "slide",
+        "slide": 2,
+        "shape_index": 6
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_025ddafc6ca709448b8ca233",
+      "content_hash": "c_4b4a3456b4b3bcff05395b4db5c801ac",
+      "order": 12,
+      "kind": "figure",
+      "text": "",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "slide",
+        "slide": 3,
+        "shape_index": 0
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_16882a58d2b0c11ece1a5683",
+      "content_hash": "c_9a4b482ee40fd65c4975106de330b647",
+      "order": 13,
+      "kind": "paragraph",
+      "text": "지어낸 발표 차트\n단위: 건",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "slide",
+        "slide": 3,
+        "shape_index": 0
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_0e38ac8d2696e7e7ad9f6607",
+      "content_hash": "c_86abaa51b707fd18156b170b56efc336",
+      "order": 14,
+      "kind": "paragraph",
+      "text": "그린 첫 도형",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "slide",
+        "slide": 3,
+        "shape_index": 1
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_87271155594c6e6aed879021",
+      "content_hash": "c_81d899bd52961c63fd4c5e3ebdd29af5",
+      "order": 15,
+      "kind": "paragraph",
+      "text": "그린 둘째 도형",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "slide",
+        "slide": 3,
+        "shape_index": 1
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_5e845d69d5d1b2860f737701",
+      "content_hash": "c_02b5dc88a2dc23b8bc307eb4192ab71b",
+      "order": 16,
+      "kind": "paragraph",
+      "text": "둘째 문단",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "slide",
+        "slide": 3,
+        "shape_index": 1
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_782d2864f316a795a04d385a",
+      "content_hash": "c_47cba899fa1822949770cd2f9321d5ae",
+      "order": 17,
+      "kind": "paragraph",
+      "text": "데이터만 있는 글",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "slide",
+        "slide": 3,
+        "shape_index": 2
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    }
+  ]
+}

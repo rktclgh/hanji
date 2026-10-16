@@ -1,0 +1,339 @@
+{
+  "schema_version": "0.4",
+  "document_id": "fx-ooxml-basic-pptx",
+  "version": 1,
+  "layer_state": "det",
+  "source": {
+    "name": "basic.pptx",
+    "mime": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "content_hash": "sha256:e56578dbde612379f30b004ddb8cfb39acaa331ad6eabdc5fed17c81af870e6a",
+    "page_count": null
+  },
+  "pages": [],
+  "blocks": [
+    {
+      "block_id": "b_9346e7e04594070bb987d375",
+      "content_hash": "c_686a308738ba5e5434e8d02c7382bb49",
+      "order": 0,
+      "kind": "heading",
+      "text": "2026년 지어낸 발표",
+      "table": null,
+      "figure": null,
+      "level": 1,
+      "section_path": [],
+      "locator": {
+        "kind": "slide",
+        "slide": 1,
+        "shape_index": 1
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_c0c2508be6e32cf5ec33cd06",
+      "content_hash": "c_bc10780cfe9b5b4cfd896958b686b784",
+      "order": 1,
+      "kind": "paragraph",
+      "text": "지어낸 발표 본문 글상자",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "2026년 지어낸 발표"
+      ],
+      "locator": {
+        "kind": "slide",
+        "slide": 1,
+        "shape_index": 0
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_30b26eed71037f621df07853",
+      "content_hash": "c_5af05c28a55c3dbbcf183e679515a7ee",
+      "order": 2,
+      "kind": "paragraph",
+      "text": "합성 예제 부제",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "2026년 지어낸 발표"
+      ],
+      "locator": {
+        "kind": "slide",
+        "slide": 1,
+        "shape_index": 2
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_25bc971057d519aff0ff108e",
+      "content_hash": "c_17ac20445d6b600aeb47aa5034cb56c9",
+      "order": 3,
+      "kind": "page_footer",
+      "text": "2026-10-16",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "2026년 지어낸 발표"
+      ],
+      "locator": {
+        "kind": "slide",
+        "slide": 1,
+        "shape_index": 3
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_6bfc5ff14261ceb70d1bcc63",
+      "content_hash": "c_1479204b319d0a4071daf1d849d1ec69",
+      "order": 4,
+      "kind": "page_footer",
+      "text": "지어낸 꼬리말",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "2026년 지어낸 발표"
+      ],
+      "locator": {
+        "kind": "slide",
+        "slide": 1,
+        "shape_index": 4
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_0d7197bfb2b8749fe0aa7118",
+      "content_hash": "c_4a3de987f901d321a825952cf45a2283",
+      "order": 5,
+      "kind": "page_footer",
+      "text": "1",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "2026년 지어낸 발표"
+      ],
+      "locator": {
+        "kind": "slide",
+        "slide": 1,
+        "shape_index": 5
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_43f1307014687c485974527c",
+      "content_hash": "c_ef04dcd9b179b64b4e8c957204222036",
+      "order": 6,
+      "kind": "heading",
+      "text": "1. 추진 배경",
+      "table": null,
+      "figure": null,
+      "level": 1,
+      "section_path": [],
+      "locator": {
+        "kind": "slide",
+        "slide": 2,
+        "shape_index": 0
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_95c7adc691bd56c958854d00",
+      "content_hash": "c_4bb6bc313d29cff08188eaeeeac56c32",
+      "order": 7,
+      "kind": "list_item",
+      "text": "기본 글머리 항목",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "1. 추진 배경"
+      ],
+      "locator": {
+        "kind": "slide",
+        "slide": 2,
+        "shape_index": 1
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_9f41bc6959443ab40e10dce3",
+      "content_hash": "c_6f87d7b178d18f4e66396e74787eb22f",
+      "order": 8,
+      "kind": "paragraph",
+      "text": "글머리 없앤 문단",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "1. 추진 배경"
+      ],
+      "locator": {
+        "kind": "slide",
+        "slide": 2,
+        "shape_index": 1
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_67f7731c9b4a89a691a28ad9",
+      "content_hash": "c_cdd90dcfd32d1ca28160641198f1c0fa",
+      "order": 9,
+      "kind": "list_item",
+      "text": "기호 글머리 항목",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "1. 추진 배경"
+      ],
+      "locator": {
+        "kind": "slide",
+        "slide": 2,
+        "shape_index": 1
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_4bd8c5fd7e52cb3bd3126fa0",
+      "content_hash": "c_ca6b9074c0cb528dc6c7ca1e19e5e583",
+      "order": 10,
+      "kind": "list_item",
+      "text": "종류 없는 자리 항목",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "1. 추진 배경"
+      ],
+      "locator": {
+        "kind": "slide",
+        "slide": 2,
+        "shape_index": 2
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_043adf23c690649cfa385eab",
+      "content_hash": "c_b5160c499f05039c6a002df3c31570a9",
+      "order": 11,
+      "kind": "paragraph",
+      "text": "총액 1,234.5억원, 증가율 12.3%, 면적 84㎡, 변동 △0.5, GDP 대비 2.1%p(OECD 평균)",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "1. 추진 배경"
+      ],
+      "locator": {
+        "kind": "slide",
+        "slide": 2,
+        "shape_index": 3
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_0e7a31c6aa6d37aeac9574fc",
+      "content_hash": "c_963b5a650d4a19115f8fb3daf964a4b9",
+      "order": 12,
+      "kind": "paragraph",
+      "text": "줄 바꾼\n본문",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "1. 추진 배경"
+      ],
+      "locator": {
+        "kind": "slide",
+        "slide": 2,
+        "shape_index": 7
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_ff82887276d7e0173cbfca9c",
+      "content_hash": "c_4e660f0c6a528564f0f7b04507f10728",
+      "order": 13,
+      "kind": "heading",
+      "text": "감춘 슬라이드 제목",
+      "table": null,
+      "figure": null,
+      "level": 1,
+      "section_path": [],
+      "locator": {
+        "kind": "slide",
+        "slide": 3,
+        "shape_index": 0
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_0fc43479ee380915c0a906e1",
+      "content_hash": "c_f02ecf8a0ef42927a7e218f5d9cc1eeb",
+      "order": 14,
+      "kind": "paragraph",
+      "text": "감춘 슬라이드 본문",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [
+        "감춘 슬라이드 제목"
+      ],
+      "locator": {
+        "kind": "slide",
+        "slide": 3,
+        "shape_index": 1
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    }
+  ]
+}

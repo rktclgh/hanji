@@ -1,12 +1,12 @@
-"""OOXML(DOCX) 합성 문서 쓰기 도구와 골든 예제 생성기(지어낸 한국어·영어 글자만).
+"""OOXML(DOCX·PPTX) 합성 문서 쓰기 도구와 골든 예제 생성기(지어낸 한국어·영어 글자만).
 
     uv run python packages/engine/tests/build_ooxml_fixtures.py          # fixtures/ooxml/ 재생성
     uv run python packages/engine/tests/build_ooxml_fixtures.py --check  # 최신인지 확인(바이트 비교)
 
 zip은 ZIP_STORED(zlib 판 차이 회피), 고정 시각, 고정 멤버 순서, create_system=3이다. 테스트는 이 파일을 importlib로 읽어
-쓰기 도구(p·r·t·document·styles·docx 등)를 쓴다. 그림 골든은 HWPX와 같은 화소 비교 대체를 쓴다: 트리는 그림 자산 키에서
-나온 값을 가려 비교하고(portable), 그림은 디코드한 화소 정보(pixels.json)를 바이트로 비교한다(OS마다 PNG 압축 바이트가 달라도
-같다).
+쓰기 도구(DOCX는 p·r·t·document·styles·docx 등, PPTX는 sp·para·grp·slide·pptx 등)를 쓴다. 그림 골든은 HWPX와 같은
+화소 비교 대체를 쓴다: 트리는 그림 자산 키에서 나온 값을 가려 비교하고(portable), 그림은 디코드한 화소 정보(pixels.json)를
+바이트로 비교한다(OS마다 PNG 압축 바이트가 달라도 같다).
 """
 
 import argparse
@@ -23,6 +23,7 @@ from PIL import Image
 
 from hanji.core import build_tree
 from hanji.formats.ooxml.docx.parser import DocxParser
+from hanji.formats.ooxml.pptx.parser import PptxParser
 from hanji_contracts import DocumentTree, ProcessingHistory, SourceInfo
 
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -48,6 +49,7 @@ LOCAL = {
     "c": "http://schemas.openxmlformats.org/drawingml/2006/chart",
     "dgm": "http://schemas.openxmlformats.org/drawingml/2006/diagram",
     "dsp": "http://schemas.microsoft.com/office/drawing/2008/diagram",
+    "p": "http://schemas.openxmlformats.org/presentationml/2006/main",
 }
 EMU = 914400  # 1인치
 PIC_URI = "http://schemas.openxmlformats.org/drawingml/2006/picture"
@@ -326,6 +328,176 @@ def smartart_drawn(*shapes: Sequence[str]) -> str:
     return f'{DECL}<dsp:drawing{xmlns("dsp", "a")}><dsp:spTree>{body}</dsp:spTree></dsp:drawing>'
 
 
+# ---- PPTX 쓰기 도구 ----
+PPTX_MAIN = "application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"
+PML = "application/vnd.openxmlformats-officedocument.presentationml"
+SLIDE_NS = xmlns("p", "a", "r", "mc", "m") + ' mc:Ignorable="x"' + xmlns("x")
+PREL = {kind: f"{R}/{kind}" for kind in ("slide", "slideLayout", "slideMaster", "notesSlide", "comments", "image",
+                                         "chart", "diagramData")}
+
+
+def a_r(text: str, sz: int | None = None, b: str | None = None, fld: str | None = None) -> str:
+    """DrawingML 런(sz는 1/100pt, b는 "1"·"0"). fld가 있으면 그 종류의 필드(a:fld)."""
+    pr = f'<a:rPr lang="ko-KR"{attrs(sz=sz, b=b)}/>'
+    if fld is not None:
+        key = "{00000000-0000-0000-0000-000000000001}"
+        return f'<a:fld id="{key}" type="{fld}">{pr}<a:t>{escape(text)}</a:t></a:fld>'
+    return f"<a:r>{pr}<a:t>{escape(text)}</a:t></a:r>"
+
+
+def para(*items: str, lvl: int | None = None, bullet: str | None = None, def_sz: int | None = None,
+         def_b: str | None = None) -> str:
+    """a:p. 꺾쇠로 시작하지 않는 항목은 런 하나, 빈 문자열은 a:br. bullet은 "char"·"auto"·"none"(a:pPr 글머리),
+    def_sz·def_b는 문단 기본 런 속성(a:pPr/a:defRPr)."""
+    bu = {"char": '<a:buChar char="•"/>', "auto": '<a:buAutoNum type="arabicPeriod"/>', "none": "<a:buNone/>",
+          None: ""}[bullet]
+    default = f"<a:defRPr{attrs(sz=def_sz, b=def_b)}/>" if def_sz is not None or def_b is not None else ""
+    ppr = f"<a:pPr{attrs(lvl=lvl)}>{bu}{default}</a:pPr>" if bu or default or lvl is not None else ""
+    inner = "".join(x if x.startswith("<") else a_r(x) if x else "<a:br/>" for x in items)
+    return f"<a:p>{ppr}{inner}</a:p>"
+
+
+def xfrm(y: int | None, x: int = 0, cx: int = EMU, cy: int = EMU // 2, tag: str = "a:xfrm") -> str:
+    return "" if y is None else f'<{tag}><a:off x="{x}" y="{y}"/><a:ext cx="{cx}" cy="{cy}"/></{tag}>'
+
+
+def nv(kind: str, name: str, hidden: bool, ph: str | None = None, extra: str = "") -> str:
+    """p:nv*Pr(kind "Sp"·"GrpSp"·"Pic"·"GraphicFrame"·"CxnSp"). ph는 자리 표시자 종류("" = type 없음)."""
+    holder = "" if ph is None else f"<p:ph{attrs(type=ph or None)}/>"
+    return (f'<p:nv{kind}Pr><p:cNvPr id="2" name="{name}"{attrs(hidden="1" if hidden else None)}/><p:cNv{kind}Pr/>'
+            f"<p:nvPr>{holder}{extra}</p:nvPr></p:nv{kind}Pr>")
+
+
+def sp(*paras: str, ph: str | None = None, hidden: bool = False, y: int | None = None, lst: str = "",
+       tag: str = "sp") -> str:
+    """도형(tag "sp"·"cxnSp") 글 몸통. 꺾쇠로 시작하지 않는 항목은 문단 하나. y는 위쪽 좌표(a:off@y, EMU),
+    lst는 도형 목록 스타일(a:lstStyle 안 XML)."""
+    body = "".join(x if x.startswith("<") else para(x) for x in paras)
+    kind = "Sp" if tag == "sp" else "CxnSp"
+    return (f"<p:{tag}>{nv(kind, '도형', hidden, ph)}<p:spPr>{xfrm(y)}</p:spPr>"
+            f"<p:txBody><a:bodyPr/><a:lstStyle>{lst}</a:lstStyle>{body}</p:txBody></p:{tag}>")
+
+
+def grp(*children: str, hidden: bool = False, off: int = 0, ext: int = EMU, ch_off: int = 0,
+        ch_ext: int | None = EMU) -> str:
+    """그룹(세로 변환만 쓴다: off·ext·chOff·chExt의 y·cy). ch_ext가 None이면 a:chExt를 뺀다."""
+    child = f'<a:chExt cx="{EMU}" cy="{ch_ext}"/>' if ch_ext is not None else ""
+    frame = (f'<a:xfrm><a:off x="0" y="{off}"/><a:ext cx="{EMU}" cy="{ext}"/><a:chOff x="0" y="{ch_off}"/>{child}'
+             "</a:xfrm>")
+    return f"<p:grpSp>{nv('GrpSp', '그룹', hidden)}<p:grpSpPr>{frame}</p:grpSpPr>{''.join(children)}</p:grpSp>"
+
+
+def slide(*shapes: str, show: str | None = None) -> str:
+    """p:sld(도형 트리). show가 "0"이면 숨긴 슬라이드."""
+    return (f"{DECL}<p:sld{SLIDE_NS}{attrs(show=show)}><p:cSld><p:spTree>{nv('GrpSp', '', False)}<p:grpSpPr/>"
+            f"{''.join(shapes)}</p:spTree></p:cSld></p:sld>")
+
+
+TABLE_URI = "http://schemas.openxmlformats.org/drawingml/2006/table"
+
+
+def gframe(data: str, uri: str, hidden: bool = False, name: str = "개체") -> str:
+    """p:graphicFrame(a:graphic/a:graphicData@uri 아래 data)."""
+    return (f'<p:graphicFrame>{nv("GraphicFrame", name, hidden)}<p:xfrm><a:off x="0" y="0"/><a:ext cx="{EMU}" '
+            f'cy="{EMU}"/></p:xfrm><a:graphic><a:graphicData uri="{uri}">{data}</a:graphicData></a:graphic>'
+            "</p:graphicFrame>")
+
+
+def a_tc(*paras: str, span: int | str | None = None, rows: int | str | None = None, h: str | None = None,
+         v: str | None = None) -> str:
+    """표 칸(a:tc). 꺾쇠로 시작하지 않는 항목은 문단 하나(항목이 없으면 빈 a:p). h·v는 hMerge·vMerge 값."""
+    body = "".join(x if x.startswith("<") else para(x) for x in paras) or "<a:p/>"
+    props = attrs(gridSpan=span, rowSpan=rows, hMerge=h, vMerge=v)
+    return f"<a:tc{props}><a:txBody><a:bodyPr/>{body}</a:txBody></a:tc>"
+
+
+def a_tr(*cells: str) -> str:
+    return f'<a:tr h="370840">{"".join(cells)}</a:tr>'
+
+
+def a_tbl(*rows: str, cols: int, first: bool = False, hidden: bool = False) -> str:
+    """표 개체 틀(a:tblGrid의 열 cols개). first면 a:tblPr@firstRow."""
+    grid = f'<a:gridCol w="{EMU}"/>' * cols
+    return gframe(f'<a:tbl><a:tblPr{attrs(firstRow="1" if first else None)}/><a:tblGrid>{grid}</a:tblGrid>'
+                  f'{"".join(rows)}</a:tbl>', TABLE_URI, hidden, "표")
+
+
+CHART_URI = "http://schemas.openxmlformats.org/drawingml/2006/chart"
+DIAGRAM_URI = "http://schemas.openxmlformats.org/drawingml/2006/diagram"
+OLE_URI = "http://schemas.openxmlformats.org/presentationml/2006/ole"
+
+
+def ppic(embed: str | None = None, link: str | None = None, cx: int = EMU, svg: str | None = None,
+         hidden: bool = False, video: bool = False) -> str:
+    """p:pic(p:blipFill/a:blip@r:embed·r:link, 표시 너비 cx). svg는 asvg:svgBlip 관계 id, video면 a:videoFile."""
+    ext = (f'<a:extLst><a:ext uri="{{96DAC541-7B7A-43D3-8B79-37D633B846F1}}"><asvg:svgBlip{xmlns("asvg")} '
+           f'r:embed="{svg}"/></a:ext></a:extLst>') if svg else ""
+    movie = '<a:videoFile r:link="rIdV"/>' if video else ""
+    return (f"<p:pic>{nv('Pic', '그림', hidden, extra=movie)}<p:blipFill><a:blip{attrs(r__embed=embed, r__link=link)}>"
+            f'{ext}</a:blip><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr><a:xfrm><a:off x="0" y="0"/>'
+            f'<a:ext cx="{cx}" cy="{EMU}"/></a:xfrm></p:spPr></p:pic>')
+
+
+def ole(preview: str | None, alternate: bool = False) -> str:
+    """OLE 개체 틀. preview는 미리보기 p:pic. alternate면 PowerPoint 2010 꼴(Choice Requires="v"는 미리보기 없이,
+    Fallback에 미리보기)."""
+    plain = f'<p:oleObj{attrs(progId="Package", r__id="rIdO")}><p:embed/>{preview or ""}</p:oleObj>'
+    if alternate:
+        choice = '<p:oleObj progId="Package" r:id="rIdO" spid="_x0000_s1026"><p:embed/></p:oleObj>'
+        plain = (f'<mc:AlternateContent{xmlns("mc", "v")}><mc:Choice Requires="v">{choice}</mc:Choice>'
+                 f"<mc:Fallback>{plain}</mc:Fallback></mc:AlternateContent>")
+    return gframe(plain, OLE_URI, name="OLE")
+
+
+def notes_part(*texts: str, shapes: str = "") -> str:
+    """발표자 노트 파트(p:notes): 글자가 있으면 본문 자리 도형 하나에 글자마다 문단, 뒤에 shapes(다른 자리 도형들)."""
+    body = sp(*texts, ph="body") if texts else ""
+    return (f"{DECL}<p:notes{xmlns('p', 'a', 'r')}><p:cSld><p:spTree>{nv('GrpSp', '', False)}<p:grpSpPr/>"
+            f"{body}{shapes}</p:spTree></p:cSld></p:notes>")
+
+
+def levels(sz: int | None = None, b: str | None = None, lvl: int = 1) -> str:
+    """목록 스타일 수준 하나(a:lvlNpPr/a:defRPr)."""
+    return f"<a:lvl{lvl}pPr><a:defRPr{attrs(sz=sz, b=b)}/></a:lvl{lvl}pPr>"
+
+
+def pptx(*slides: str, slide_rels: Sequence[Sequence[tuple[str, ...]]] = (),
+         extra: Sequence[tuple[str, bytes | str]] = (), master_shapes: str = "", layout_shapes: str = "",
+         other_style: str = "", default_style: str = "", main_type: str = PPTX_MAIN,
+         pres_rels: Sequence[tuple[str, ...]] = ()) -> bytes:
+    """PPTX 바이트: 프레젠테이션, 슬라이드들(slide_rels는 슬라이드마다 더할 관계), 레이아웃·마스터 하나씩(그 도형과 마스터
+    p:otherStyle 수준들), 기본 글 스타일(p:defaultTextStyle 수준들)."""
+    ids = "".join(f'<p:sldId id="{256 + k}" r:id="rIdS{k + 1}"/>' for k in range(len(slides)))
+    pres = (f'{DECL}<p:presentation{xmlns("p", "a", "r")}><p:sldMasterIdLst><p:sldMasterId id="2147483648" '
+            f'r:id="rIdM"/></p:sldMasterIdLst><p:sldIdLst>{ids}</p:sldIdLst><p:sldSz cx="12192000" cy="6858000"/>'
+            f"<p:defaultTextStyle>{default_style}</p:defaultTextStyle></p:presentation>")
+    tree = f"<p:cSld><p:spTree>{nv('GrpSp', '', False)}<p:grpSpPr/>{{}}</p:spTree></p:cSld>"
+    master = (f'{DECL}<p:sldMaster{xmlns("p", "a", "r")}>{tree.format(master_shapes)}<p:txStyles><p:titleStyle/>'
+              f"<p:bodyStyle/><p:otherStyle>{other_style}</p:otherStyle></p:txStyles></p:sldMaster>")
+    layout = f'{DECL}<p:sldLayout{xmlns("p", "a", "r")}>{tree.format(layout_shapes)}</p:sldLayout>'
+    members: list[tuple[str, bytes | str]] = [
+        ("[Content_Types].xml", types([("/ppt/presentation.xml", main_type),
+                                       *((f"/ppt/slides/slide{k + 1}.xml", f"{PML}.slide+xml")
+                                         for k in range(len(slides)))])),
+        ("_rels/.rels", rels(("rId1", REL["officeDocument"], "ppt/presentation.xml"))),
+        ("ppt/presentation.xml", pres),
+        ("ppt/_rels/presentation.xml.rels", rels(("rIdM", PREL["slideMaster"], "slideMasters/slideMaster1.xml"),
+                                                 *((f"rIdS{k + 1}", PREL["slide"], f"slides/slide{k + 1}.xml")
+                                                   for k in range(len(slides))), *pres_rels)),
+        ("ppt/slideMasters/slideMaster1.xml", master),
+        ("ppt/slideMasters/_rels/slideMaster1.xml.rels", rels(("rIdL", PREL["slideLayout"],
+                                                               "../slideLayouts/slideLayout1.xml"))),
+        ("ppt/slideLayouts/slideLayout1.xml", layout),
+        ("ppt/slideLayouts/_rels/slideLayout1.xml.rels", rels(("rIdM", PREL["slideMaster"],
+                                                               "../slideMasters/slideMaster1.xml")))]
+    for k, xml in enumerate(slides):
+        more = slide_rels[k] if k < len(slide_rels) else ()
+        members += [(f"ppt/slides/slide{k + 1}.xml", xml),
+                    (f"ppt/slides/_rels/slide{k + 1}.xml.rels",
+                     rels(("rIdL", PREL["slideLayout"], "../slideLayouts/slideLayout1.xml"), *more))]
+    return zip_bytes([*members, *extra])
+
+
 # 그림 원본: HWPX 골든과 같은 고정 바이트(6×6 회색 PNG, 4×4 반투명 RGBA PNG, 8×8 CMYK JPEG). 가짜 EMF는 머리만 있다
 GRAY_PNG = bytes.fromhex(
     "89504e470d0a1a0a0000000d4948445200000006000000060800000000c5a7b094000000134944415478da638c626060606060622048"
@@ -493,6 +665,66 @@ NOTES = document(
     p(r("같은 각주를 다시 참조"), note_ref("footnote", "2"), extra=NOTE_SECT),
     p("둘째 구역 문단이다."),
     final=sect_refs(("header", "default", "rIdH1"), ("footer", "default", "rIdF1")))
+# ---- PPTX 골든 예제 ----
+BASIC_SLIDES = [
+    slide(sp("지어낸 발표 본문 글상자"), sp("2026년 지어낸 발표", ph="ctrTitle"), sp("합성 예제 부제", ph="subTitle"),
+          sp(para(a_r("2026-10-16", fld="datetime1")), ph="dt"), sp("지어낸 꼬리말", ph="ftr"),
+          sp(para(a_r("1", fld="slidenum")), ph="sldNum")),
+    slide(sp("1. 추진 배경", ph="title"), sp("기본 글머리 항목", para("글머리 없앤 문단", bullet="none"),
+                                         para("기호 글머리 항목", bullet="char"), ph="body"),
+          sp("종류 없는 자리 항목", ph=""),
+          sp("총액 1,234.5억원, 증가율 12.3%, 면적 84㎡, 변동 △0.5, GDP 대비 2.1%p(OECD 평균)"),
+          sp("숨긴 도형 글", hidden=True), grp(sp("숨긴 그룹 글"), hidden=True), sp(para("줄 바꾼", "", "본문"))),
+    slide(sp("감춘 슬라이드 제목", ph="title"), sp("감춘 슬라이드 본문"), show="0"),
+]
+BASIC_LINKS = [[("rIdN", PREL["notesSlide"], "../notesSlides/notesSlide1.xml")]]
+BASIC_EXTRA = [("ppt/notesSlides/notesSlide1.xml", notes_part("지어낸 발표자 노트 글"))]
+BASIC_MASTER = sp("마스터 안내 문구", ph="title") + sp("지어낸 마스터 로고")
+BASIC_LAYOUT = sp("레이아웃 본문 안내 문구", ph="body")
+NOPH_BODY = sp("지어낸 본문 문단은 크기 규칙의 본문 크기를 정할 만큼 길게 쓴다")
+NOPH_SLIDES = [
+    slide(NOPH_BODY, sp(para(a_r("아래쪽 큰 글", sz=3200)), y=3_000_000), sp(para(a_r("위쪽 큰 글", sz=3200)), y=500_000)),
+    slide(NOPH_BODY, sp(para(a_r("같은 높이 앞 글", sz=3200)), y=800_000),
+          sp(para(a_r("같은 높이 뒤 글", sz=3200)), y=800_000)),
+    slide(NOPH_BODY, sp(para(a_r("그룹 밖 큰 글", sz=3200)), y=1_000_000),
+          grp(sp(para(a_r("그룹 안 큰 글", sz=3200)), y=1_800_000), ch_ext=2 * EMU)),
+    slide(NOPH_BODY, sp(para("문단 기본 크기 제목", def_sz=2800), y=0)),
+    slide(NOPH_BODY, sp("도형 목록 스타일 제목", lst=levels(sz=2800), y=0)),
+    slide(NOPH_BODY, sp(para("마스터 둘째 수준 제목", lvl=1), y=0)),
+    slide(NOPH_BODY, sp(para("발표 셋째 수준 제목", lvl=2), y=0)),
+    slide(NOPH_BODY, sp(para("문단 기본이 목록 스타일보다 앞", def_sz=1800), lst=levels(sz=2800), y=0)),
+]
+OBJ_MEDIA = {"rIdP": ("media/gray.png", GRAY_PNG), "rIdA": ("media/alpha.png", RGBA_PNG),
+             "rIdE": ("media/fake.emf", FAKE_EMF), "rIdS": ("media/vector.svg", b"<svg/>")}
+OBJ_LINKS = [*((rid, PREL["image"], f"../{m}") for rid, (m, _) in OBJ_MEDIA.items()),
+             ("rIdC", PREL["chart"], "../charts/chart1.xml"),
+             ("rIdDm", PREL["diagramData"], "../diagrams/data1.xml"),
+             ("rIdDr", "http://schemas.microsoft.com/office/2007/relationships/diagramDrawing",
+              "../diagrams/drawing1.xml"),
+             ("rIdD2", PREL["diagramData"], "../diagrams/data2.xml")]
+OBJ_EXTRA = [*((f"ppt/{m}", raw) for m, raw in OBJ_MEDIA.values()),
+             ("ppt/charts/chart1.xml", chart_part("지어낸 발표 차트", "단위: 건", cache=("상반기", "12"))),
+             ("ppt/diagrams/data1.xml", smartart_data("데이터 쪽 글", drawn="rIdDr")),
+             ("ppt/diagrams/drawing1.xml", smartart_drawn(["그린 첫 도형"], ["그린 둘째 도형", "둘째 문단"])),
+             ("ppt/diagrams/data2.xml", smartart_data("데이터만 있는 글"))]
+OBJ_DEEP = sp("서른 겹 그룹 안 글")
+for _ in range(30):
+    OBJ_DEEP = grp(OBJ_DEEP)
+OBJ_MATH = ('<a:p><a:r><a:t>수식 </a:t></a:r><mc:AlternateContent><mc:Choice Requires="a14"><a14:m '
+            'xmlns:a14="http://schemas.microsoft.com/office/drawing/2010/main"><m:oMathPara><m:oMath><m:r><m:t>x=12'
+            "</m:t></m:r></m:oMath></m:oMathPara></a14:m></mc:Choice><mc:Fallback><a:r><a:t>그림 대체</a:t></a:r>"
+            "</mc:Fallback></mc:AlternateContent></a:p>")
+OBJ_SLIDES = [
+    slide(a_tbl(a_tr(a_tc("구분"), a_tc("가로 둘", span=2), a_tc(h="1"), a_tc("넷째")),
+                a_tr(a_tc("세로 둘", rows=2), a_tc("네모", span=2, rows=2), a_tc(h="true"), a_tc("값 1")),
+                a_tr(a_tc("이어진 칸 글", v="1"), a_tc(v="true"), a_tc(h="1", v="1"), a_tc("값 2")), cols=4, first=True),
+          a_tbl(a_tr(a_tc("가"), a_tc("고아 칸", h="1")), a_tr(a_tc("다"), a_tc("라")), cols=2),
+          a_tbl(a_tr(a_tc("상자 안 글")), cols=1), OBJ_DEEP),
+    slide(ppic("rIdP", cx=EMU // 12), ppic("rIdE"), ppic("rIdA", svg="rIdS"), gframe(chart_ref("rIdC"), CHART_URI),
+          ole(ppic("rIdP"), alternate=True), ole(ppic("rIdA")), sp(OBJ_MATH)),
+    slide(gframe(chart_ref("rIdC"), CHART_URI), gframe(smartart_ref("rIdDm"), DIAGRAM_URI),
+          gframe(smartart_ref("rIdD2"), DIAGRAM_URI)),
+]
 SAMPLES: dict[str, bytes] = {
     "basic.docx": docx(BASIC, BASIC_STYLES, numbering("1", "2")),
     "headings.docx": docx(HEADINGS, HEAD_STYLES),
@@ -503,17 +735,27 @@ SAMPLES: dict[str, bytes] = {
                        extra=[*((f"word/{member}", xml) for _, _, member, xml in NOTE_PARTS),
                               ("word/_rels/footer1.xml.rels", rels(("rId1", f"{R}/image", "media/image1.png"))),
                               ("word/media/image1.png", GRAY_PNG)]),
+    "basic.pptx": pptx(*BASIC_SLIDES, slide_rels=BASIC_LINKS, extra=BASIC_EXTRA, master_shapes=BASIC_MASTER,
+                       layout_shapes=BASIC_LAYOUT),
+    "noplaceholder.pptx": pptx(*NOPH_SLIDES, other_style=levels(sz=2800, lvl=2), default_style=levels(sz=2800, lvl=3)),
+    "objects.pptx": pptx(*OBJ_SLIDES, slide_rels=[OBJ_LINKS] * len(OBJ_SLIDES), extra=OBJ_EXTRA),
 }
 ROOT = Path(__file__).resolve().parent / "fixtures" / "ooxml"
 
 
+def key(name: str) -> str:
+    """기대값 파일 이름 줄기: DOCX는 이름 줄기(basic), PPTX는 줄기-pptx(basic-pptx: 같은 줄기의 DOCX와 겹치지 않게)."""
+    stem = Path(name).stem
+    return f"{stem}-pptx" if name.endswith(".pptx") else stem
+
+
 def document_id(name: str) -> str:
-    return "fx-ooxml-" + Path(name).stem
+    return "fx-ooxml-" + key(name)
 
 
 def golden(name: str, data: bytes) -> tuple[DocumentTree, ProcessingHistory, list[dict[str, object]]]:
     """엔진 ingest와 같은 SourceInfo(쪽 없음 → page_count None). 셋째는 그림 자산의 화소 정보(처음 나온 차례)."""
-    parsed = DocxParser().parse(data, name)
+    parsed = (PptxParser() if name.endswith(".pptx") else DocxParser()).parse(data, name)
     source = SourceInfo(name=name, mime=parsed.mime, content_hash="sha256:" + hashlib.sha256(data).hexdigest())
     tree = build_tree(parsed, document_id(name), 1, source)
     order = list(dict.fromkeys(b.figure.asset for b in tree.blocks if b.figure is not None))
@@ -568,9 +810,9 @@ def build_all() -> dict[str, bytes]:
     for name, data in SAMPLES.items():
         tree, history, shown = golden(name, data)
         out[f"inputs/{name}"] = data
-        out[f"expected/{Path(name).stem}.json"] = _json(tree)
-        out[f"expected/{Path(name).stem}.history.json"] = _json(history)
-        out[f"expected/{Path(name).stem}.pixels.json"] = (json.dumps(shown, indent=2) + "\n").encode("utf-8")
+        out[f"expected/{key(name)}.json"] = _json(tree)
+        out[f"expected/{key(name)}.history.json"] = _json(history)
+        out[f"expected/{key(name)}.pixels.json"] = (json.dumps(shown, indent=2) + "\n").encode("utf-8")
     return out
 
 

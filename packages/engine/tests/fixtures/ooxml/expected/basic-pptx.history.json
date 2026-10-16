@@ -1,0 +1,162 @@
+{
+  "schema_version": "0.4",
+  "document_id": "fx-ooxml-basic-pptx",
+  "version": 1,
+  "regions": [
+    {
+      "region_id": "slide3-sh0-hidden-slide-0",
+      "locator": {
+        "kind": "slide",
+        "slide": 3,
+        "shape_index": 0
+      },
+      "kind": "paragraph",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "hidden_slide"
+    },
+    {
+      "region_id": "slide2-sh4-hidden-text-0",
+      "locator": {
+        "kind": "slide",
+        "slide": 2,
+        "shape_index": 4
+      },
+      "kind": "paragraph",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": {
+        "passed": true,
+        "checks": [
+          {
+            "name": "hidden_chars",
+            "passed": true,
+            "value": 5.0,
+            "threshold": null
+          }
+        ]
+      },
+      "fallback_reason": "hidden_text"
+    },
+    {
+      "region_id": "slide2-sh6-hidden-text-0",
+      "locator": {
+        "kind": "slide",
+        "slide": 2,
+        "shape_index": 6
+      },
+      "kind": "paragraph",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": {
+        "passed": true,
+        "checks": [
+          {
+            "name": "hidden_chars",
+            "passed": true,
+            "value": 5.0,
+            "threshold": null
+          }
+        ]
+      },
+      "fallback_reason": "hidden_text"
+    },
+    {
+      "region_id": "slide1-sh0-speaker-notes-0",
+      "locator": {
+        "kind": "slide",
+        "slide": 1,
+        "shape_index": 0
+      },
+      "kind": "paragraph",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": {
+        "passed": true,
+        "checks": [
+          {
+            "name": "chars",
+            "passed": true,
+            "value": 9.0,
+            "threshold": null
+          }
+        ]
+      },
+      "fallback_reason": "speaker_notes_skipped"
+    },
+    {
+      "region_id": "doc-master-text",
+      "locator": {
+        "kind": "slide",
+        "slide": 1,
+        "shape_index": 0
+      },
+      "kind": "paragraph",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": {
+        "passed": true,
+        "checks": [
+          {
+            "name": "chars",
+            "passed": true,
+            "value": 8.0,
+            "threshold": null
+          }
+        ]
+      },
+      "fallback_reason": "master_text_skipped"
+    }
+  ]
+}

@@ -1,0 +1,359 @@
+{
+  "schema_version": "0.4",
+  "document_id": "fx-ooxml-objects-pptx",
+  "version": 1,
+  "regions": [
+    {
+      "region_id": "slide1-sh0-table-0",
+      "locator": {
+        "kind": "slide",
+        "slide": 1,
+        "shape_index": 0
+      },
+      "kind": "table",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "merged_cell_text_kept"
+    },
+    {
+      "region_id": "slide1-sh1-table-0",
+      "locator": {
+        "kind": "slide",
+        "slide": 1,
+        "shape_index": 1
+      },
+      "kind": "table",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "table_invalid"
+    },
+    {
+      "region_id": "slide2-sh1-figure-0",
+      "locator": {
+        "kind": "slide",
+        "slide": 2,
+        "shape_index": 1
+      },
+      "kind": "figure",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "figure_image_unsupported"
+    },
+    {
+      "region_id": "slide2-sh3-object-0",
+      "locator": {
+        "kind": "slide",
+        "slide": 2,
+        "shape_index": 3
+      },
+      "kind": "figure",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "embedded_object"
+    },
+    {
+      "region_id": "slide2-sh3-chart-0",
+      "locator": {
+        "kind": "slide",
+        "slide": 2,
+        "shape_index": 3
+      },
+      "kind": "paragraph",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": {
+        "passed": true,
+        "checks": [
+          {
+            "name": "cache_chars",
+            "passed": true,
+            "value": 5.0,
+            "threshold": null
+          }
+        ]
+      },
+      "fallback_reason": "chart_text"
+    },
+    {
+      "region_id": "slide2-sh4-object-0",
+      "locator": {
+        "kind": "slide",
+        "slide": 2,
+        "shape_index": 4
+      },
+      "kind": "figure",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "embedded_object"
+    },
+    {
+      "region_id": "slide2-sh5-object-0",
+      "locator": {
+        "kind": "slide",
+        "slide": 2,
+        "shape_index": 5
+      },
+      "kind": "figure",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "embedded_object"
+    },
+    {
+      "region_id": "slide3-sh0-object-0",
+      "locator": {
+        "kind": "slide",
+        "slide": 3,
+        "shape_index": 0
+      },
+      "kind": "figure",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "embedded_object"
+    },
+    {
+      "region_id": "slide3-sh0-chart-0",
+      "locator": {
+        "kind": "slide",
+        "slide": 3,
+        "shape_index": 0
+      },
+      "kind": "paragraph",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": {
+        "passed": true,
+        "checks": [
+          {
+            "name": "cache_chars",
+            "passed": true,
+            "value": 5.0,
+            "threshold": null
+          }
+        ]
+      },
+      "fallback_reason": "chart_text"
+    },
+    {
+      "region_id": "slide3-sh1-smartart-0",
+      "locator": {
+        "kind": "slide",
+        "slide": 3,
+        "shape_index": 1
+      },
+      "kind": "paragraph",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "smartart_text"
+    },
+    {
+      "region_id": "slide3-sh1-smartart-1",
+      "locator": {
+        "kind": "slide",
+        "slide": 3,
+        "shape_index": 1
+      },
+      "kind": "paragraph",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "smartart_text"
+    },
+    {
+      "region_id": "slide3-sh2-smartart-0",
+      "locator": {
+        "kind": "slide",
+        "slide": 3,
+        "shape_index": 2
+      },
+      "kind": "paragraph",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "smartart_text"
+    },
+    {
+      "region_id": "slide2-sh6-equation-0",
+      "locator": {
+        "kind": "slide",
+        "slide": 2,
+        "shape_index": 6
+      },
+      "kind": "paragraph",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": null,
+      "fallback_reason": "equation_text"
+    },
+    {
+      "region_id": "doc-alternate-content",
+      "locator": {
+        "kind": "slide",
+        "slide": 1,
+        "shape_index": 0
+      },
+      "kind": "paragraph",
+      "attempts": [
+        {
+          "layer": "det",
+          "driver_id": null,
+          "model_id": null,
+          "model_revision": null,
+          "usage": null,
+          "correction": null,
+          "error": null
+        }
+      ],
+      "chosen": "det",
+      "gate": {
+        "passed": true,
+        "checks": [
+          {
+            "name": "chars",
+            "passed": true,
+            "value": 9.0,
+            "threshold": null
+          }
+        ]
+      },
+      "fallback_reason": "alternate_content_skipped"
+    }
+  ]
+}

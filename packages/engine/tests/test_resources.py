@@ -389,6 +389,15 @@ def test_docx_has_its_own_measured_byte_factor():
     assert resources.estimate(cost, 0, 1000, "docx") == resources.BYTES_FACTOR["docx"] * 1000
 
 
+def test_pptx_has_its_own_measured_byte_factor():
+    """PPTX도 압축을 풀고 XML 트리·그림 디코드가 함께 있어 그 밖 형식보다 큰 배수를 따로 쓴다(스펙 §12.3)."""
+    cost = resources.Cost(base=1000, per_page=10)
+    assert resources.BYTES_FACTOR["pptx"] > resources.BYTES_FACTOR["other"]
+    kinds = [resources.byte_kind(p) for p in ("a.pptx", "b.PPTX", "c.ppt", "d.pptm")]
+    assert kinds == ["pptx", "pptx", "other", "other"]
+    assert resources.estimate(cost, 0, 1000, "pptx") == resources.BYTES_FACTOR["pptx"] * 1000
+
+
 @pytest.mark.parametrize(("budget", "cores", "workers"), [
     (int(48 * resources.GiB * 0.8), 15, 15),  # 이 기계: 38.4GiB
     (int(16 * resources.GiB * 0.8), 8, 5),  # 16GiB 노트북

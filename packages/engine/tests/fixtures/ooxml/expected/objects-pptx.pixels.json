@@ -1,0 +1,18 @@
+[
+  {
+    "mode": "RGB",
+    "size": [
+      6,
+      6
+    ],
+    "sha256": "cd92f9927d15c457981d436bc918cbb2d3f52537b00c831d591b063f1af8c32e"
+  },
+  {
+    "mode": "RGB",
+    "size": [
+      4,
+      4
+    ],
+    "sha256": "dfaeb7513f6627c21f434a9bbd57f1a442ee19dec693cf161d10e8ec2571cc7a"
+  }
+]
