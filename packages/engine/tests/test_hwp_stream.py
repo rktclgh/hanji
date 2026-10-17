@@ -70,6 +70,7 @@ def test_compressed_streams_are_raw_deflate_and_trailing_bytes_are_ignored():
 
 
 def test_a_decompression_bomb_stops_at_the_limit_plus_one_within_a_second(monkeypatch):
+    monkeypatch.setattr(stream, "MAX_RATIO", 10**9)  # 한도 + 1 경로만 본다(압축률 상한은 아래 테스트)
     bomb = B.deflate(bytes(80 * 1024 * 1024))
     asked = []
     real = zlib.decompressobj
@@ -90,6 +91,72 @@ def test_a_decompression_bomb_stops_at_the_limit_plus_one_within_a_second(monkey
     with pytest.raises(ParseError, match="HWP stream larger than 67108864 bytes"):
         Reader(cfb(BodyText__Section0=bomb), compressed=True).data("BodyText/Section0")
     assert time.perf_counter() - start < 1.0 and asked == [64 * 1024 * 1024 + 1]
+
+
+def _padded(size: int, ratio: int) -> tuple[bytes, int]:
+    """풀린 크기가 size, 압축 쪽(끝 덤 포함)이 size // ratio B인 스트림. 끝 바이트는 무시되는 덤이다."""
+    packed = B.deflate(bytes(size))
+    want = size // ratio
+    assert size % ratio == 0 and len(packed) <= want
+    return packed + bytes(want - len(packed)), size
+
+
+def test_ratio_limits_match_hwpx():
+    from hanji.formats.hwpx import container
+
+    assert (stream.MAX_RATIO, stream.RATIO_FLOOR) == (container.MAX_RATIO, container.RATIO_FLOOR) == (200, 1 << 20)
+
+
+def test_a_record_stream_over_the_ratio_cap_is_refused_and_exactly_the_cap_is_accepted():
+    raw, size = _padded(2_400_000, 200)  # 정확히 200배
+    reader = Reader(cfb(DocInfo=raw), compressed=True)
+    assert len(reader.data("DocInfo")) == size and reader.read == size
+    with pytest.raises(ParseError, match="compression ratio over 200") as info:
+        Reader(cfb(DocInfo=raw[:-1]), compressed=True).data("DocInfo")  # 압축 쪽이 1B 작아 200배를 넘는다
+    assert info.value.location == "a.hwp:DocInfo"
+    raw201, _ = _padded(2_010_000, 201)  # 201배
+    with pytest.raises(ParseError, match="compression ratio over 200"):
+        Reader(cfb(BodyText__Section0=raw201), compressed=True).data("BodyText/Section0")
+
+
+def test_a_stream_at_or_under_the_ratio_floor_is_accepted_whatever_its_ratio(monkeypatch):
+    floor = 1 << 20
+    for size in (floor // 4, floor):  # 압축률은 천 배가 넘는다
+        raw = B.deflate(bytes(size))
+        assert size > 200 * len(raw)
+        assert len(Reader(cfb(DocInfo=raw), compressed=True).data("DocInfo")) == size
+    with pytest.raises(ParseError, match="compression ratio over 200"):
+        Reader(cfb(DocInfo=B.deflate(bytes(floor + 1))), compressed=True).data("DocInfo")
+    monkeypatch.setattr(stream, "RATIO_FLOOR", 2 * floor)  # 읽을 때마다 읽는다
+    assert len(Reader(cfb(DocInfo=B.deflate(bytes(floor + 1))), compressed=True).data("DocInfo")) == floor + 1
+
+
+def test_a_ratio_bomb_stops_at_the_ratio_cap_before_inflating_everything():
+    bomb = B.deflate(bytes(64 * 1024 * 1024))  # 한도 안(64 MiB)이지만 약 천 배
+    asked = []
+    real = zlib.decompressobj
+
+    class Spy:
+        def __init__(self, wbits):
+            self.inner = real(wbits)
+
+        def decompress(self, data, max_length=0):
+            asked.append(max_length)
+            return self.inner.decompress(data, max_length)
+
+        def __getattr__(self, name):
+            return getattr(self.inner, name)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(stream.zlib, "decompressobj", Spy)
+        with pytest.raises(ParseError, match="compression ratio over 200"):
+            Reader(cfb(BodyText__Section0=bomb), compressed=True).data("BodyText/Section0")
+    assert asked == [200 * len(bomb) + 1] and asked[0] < 64 * 1024 * 1024 // 4
+
+
+def test_ratio_does_not_apply_to_uncompressed_streams():
+    body = bytes(3 * 1024 * 1024)
+    assert Reader(cfb(DocInfo=body), compressed=False).data("DocInfo") == body
 
 
 def test_stream_limits_apply_to_each_stream_and_to_the_document_total(monkeypatch):
