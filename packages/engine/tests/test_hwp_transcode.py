@@ -243,13 +243,24 @@ def test_table_lists_out_of_count_and_paragraphs_outside_any_list_keep_their_tex
     assert shape(result.root[0]) == [("0", [("tbl", ["tr"]), ("ctrl", ["unknownObject"])])]
     assert reasons(result) == [("record_inconsistent", "list_paragraphs", 2), ("unknown_control", None, None)]
     assert result.audit.ok
-    short_cell = B.record(B.TABLE, 2, bytes(8)) + B.record(B.LIST_HEADER, 2, bytes(33))
     short_caption = B.record(B.LIST_HEADER, 2, bytes(11)) + B.record(B.TABLE, 2, bytes(8))
-    for broken, what, at in ((B.record(B.TABLE, 2, bytes(7)), "TABLE", 5), (short_cell, "LIST_HEADER cell", 6),
+    for broken, what, at in ((B.record(B.TABLE, 2, bytes(7)), "TABLE", 5),
                              (short_caption, "LIST_HEADER caption", 5)):  # 문단 머리 0~3, 컨트롤 4
         with pytest.raises(ParseError, match=f"{what} record too short") as info:
             section(B.paragraph(B.extended(11, "tbl "), controls=[B.control("tbl ", 1, broken)]))
         assert info.value.location == f"a.hwp:BodyText/Section0#{at}"
+
+
+def test_a_list_shorter_than_a_cell_after_table_takes_the_leftover_path_instead_of_failing():
+    tbl = B.control("tbl ", 1, B.record(B.TABLE, 2, struct.pack("<IHH", 0, 1, 1)),
+                    B.cell(2, 0, 0, B.paragraph("칸 글", level=2)), B.caption(2, B.paragraph("뒤에 온 캡션", level=2)))
+    result = section(B.paragraph(B.extended(11, "tbl "), controls=[tbl]))
+    assert shape(result.root[0]) == [("0", [("tbl", ["tr"]), ("ctrl", ["unknownObject"])])]
+    assert reasons(result) == [("record_inconsistent", "list_shape", 1), ("unknown_control", None, None)]
+    assert cells(result.root[0].find(f"{HP}run/{HP}tbl")) == [[("0", "1", "0", "0", "1", "1", ["칸 글"])]]
+    rescued = result.root[0].find(f"{HP}run/{HP}ctrl/{HP}unknownObject")
+    assert ["".join(t.text or "" for t in p.iter(f"{HP}t")) for p in rescued.iter(f"{HP}p")] == ["뒤에 온 캡션"]
+    assert result.audit.ok
 
 
 def test_char_shape_bounds_after_the_text_fold_into_one_empty_run():

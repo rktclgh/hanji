@@ -391,8 +391,8 @@ class _Writer:
         self.sublist(self.node(parent, CAPTION, depth, side=side), paras, anchor, depth + 1)
 
     def table(self, run: ET.Element, record: Record, anchor: int, depth: int) -> bool:
-        """표: TABLE 앞 리스트는 캡션(첫째), 뒤 리스트는 칸(레코드 차례, 행 주소가 바뀔 때 새 hp:tr). TABLE이 없으면
-        거짓(모르는 컨트롤 길)."""
+        """표: TABLE 앞 리스트는 캡션(첫째), 뒤 리스트는 칸(레코드 차례, 행 주소가 바뀔 때 새 hp:tr), 칸보다 짧은 뒤
+        리스트는 남는 문단 길. TABLE이 없으면 거짓(모르는 컨트롤 길)."""
         kids = record.children
         k = next((i for i, r in enumerate(kids) if r.tag == TABLE), None)
         if k is None:
@@ -409,8 +409,9 @@ class _Writer:
         row = -1
         for header, paras in self.lists(kids[k + 1:], anchor):
             cell = header.body
-            if len(cell) < 34:
-                raise ParseError("LIST_HEADER cell record too short", f"{self.location}#{header.index}")
+            if len(cell) < 34:  # 칸보다 짧은 리스트(캡션 모양)는 칸이 아니라 남는 문단 길로(문단은 used에 들지 않는다)
+                self.region("record-inconsistent", RECORD_INCONSISTENT, anchor, "list_shape", 1)
+                continue
             col, at, colspan, rowspan = struct.unpack_from("<HHHH", cell, 8)
             if tr is None or at != row:
                 tr, row = self.node(tbl, TR, depth + 1), at

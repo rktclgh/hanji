@@ -1,6 +1,7 @@
 """HWP 파서 연결(HWP 스펙 §3·§8·§9·§11.2): 공유 처리부와 두 장부, 형식 엿보기, 배포용 미리보기, 구역 차례, 등록."""
 
 import importlib.util
+import struct
 from pathlib import Path
 
 import pytest
@@ -59,6 +60,17 @@ def test_unknown_controls_rescue_their_text_at_section_end_and_both_ledgers_agre
     assert shown(parsed)[2] == ("paragraph", "칸 글", 0.3)  # 닻 문단마다 구조 문단 하나
     assert len(shown(parsed)) == 4 and shown(parsed)[3][1].startswith("깊이 2\n깊이 4\n") and shown(parsed)[3][2] == 0.3
     assert reasons(parsed) == ["unknown_control", "unknown_control"] + ["unknown_control"] * 31 + ["unassigned_text"]
+    assert counts[0].ok and counts[0].rescued > 0 and audits[0].ok
+
+
+def test_a_caption_shaped_list_after_table_is_rescued_once_and_the_document_still_parses():
+    table = B.control("tbl ", 1, B.record(B.TABLE, 2, struct.pack("<IHH", 0, 1, 1)),
+                      B.cell(2, 0, 0, B.paragraph("칸 글", level=2)), B.caption(2, B.paragraph("뒤에 온 캡션", level=2)))
+    parsed, counts, audits = HwpParser()._parse(B.document(B.paragraph("표 앞", B.extended(11, "tbl "),
+                                                                        controls=[table])), "a.hwp")
+    assert [text for _, text, _ in shown(parsed)].count("뒤에 온 캡션") == 1
+    assert "".join(text for _, text, _ in shown(parsed)).count("칸 글") == 1
+    assert reasons(parsed) == ["record_inconsistent", "unknown_control", "unassigned_text"]
     assert counts[0].ok and counts[0].rescued > 0 and audits[0].ok
 
 
