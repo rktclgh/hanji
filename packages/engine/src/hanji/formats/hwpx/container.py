@@ -40,6 +40,12 @@ class Item:
     embedded: bool
 
 
+def _outside(href: str) -> bool:
+    """Contents/ 밖의 보통 상대 경로: 첫 마디가 빈 것·.·..·Contents가 아니고 .. 마디와 역슬래시가 없다."""
+    parts = href.split("/")
+    return parts[0] not in ("", ".", "..", "Contents") and ".." not in parts and "\\" not in href
+
+
 def _limits() -> Limits:
     """이 모듈의 상한 값(호출 때 읽는다: 몽키패치가 그대로 작동한다)."""
     return Limits(members=MAX_MEMBERS, xml_bytes=MAX_XML_BYTES, xml_total=MAX_XML_TOTAL, binary_bytes=MAX_BINARY_BYTES,
@@ -48,12 +54,13 @@ def _limits() -> Limits:
 
 class Package(Archive):
     """열린 HWPX 꾸러미. 생성자가 zip·mimetype·content.hpf(manifest·spine)를 확인한다. sections는 spine 순서의
-    구역 멤버 이름, masterpages는 zip의 마스터 쪽 멤버 이름이다."""
+    구역 멤버 이름, masterpages는 zip의 마스터 쪽 멤버 이름, skipped는 읽지 않고 건너뛴 spine 항목(Contents/ 밖) 수다."""
 
     def __init__(self, data: bytes, name: str) -> None:
         super().__init__(data, name, "not an HWPX (zip) package", _limits)
         self._mimetype()
         self.items, spine = self._content()
+        self.skipped = 0
         self.sections = self._spine(spine)
         self.masterpages = tuple(n for n in self._infos if MASTERPAGE.fullmatch(n))
 
@@ -82,7 +89,8 @@ class Package(Archive):
         return items, spine
 
     def _spine(self, spine: list[str]) -> tuple[str, ...]:
-        """spine 순서의 구역 멤버. 어긋나면 ParseError: 건너뛰거나 두 번 읽으면 장부가 그것을 놓친다."""
+        """spine 순서의 구역 멤버. 어긋나면 ParseError: 건너뛰거나 두 번 읽으면 장부가 그것을 놓친다. Contents/ 밖의 보통
+        상대 경로 항목(한컴이 넣는 Scripts/headerScripts.js 등)은 읽지 않고 세기만 한다(구역·header만 읽는다)."""
         location = f"{self.name}:{CONTENT}"
         if len(set(spine)) != len(spine):
             raise ParseError("duplicate spine itemref", location)
@@ -92,6 +100,12 @@ class Package(Archive):
             if ref not in self.items:
                 raise ParseError(f"spine itemref {ref!r} is not in the manifest", location)
             href = self.items[ref].href
+            if _outside(href):
+                if href in hrefs:
+                    raise ParseError(f"spine refers to {href!r} twice", location)
+                hrefs.add(href)
+                self.skipped += 1
+                continue
             if href != HEADER and not SECTION.fullmatch(href):
                 raise ParseError(f"unsupported spine item {href!r}", location)
             if href in hrefs:
