@@ -127,8 +127,8 @@ def test_surrogates_in_control_info_words_neither_pair_nor_count():
     # 가0, 탭1–8(부가 정보에 대리쌍), 나9, 모르는 인라인 컨트롤10–17(부가 정보에 대리쌍), 문단 끝18
     text = B.units("가", [9, 0xD800, 0xDC00, 0, 0, 0, 0, 9], "나", [5, 0x41, 0xD800, 0xDC00, 0, 0, 0, 5], B.PARA_END)
     result = section(B.paragraph(text=text, shapes=((0, 1), (3, 2), (12, 3), (14, 4))))
-    # 경계 3은 탭 안이라 1로 당긴다. 낱말이 아닌 모르는 컨트롤 안 경계(12·14)는 당기지 않고 글자 뒤 빈 런이 된다
-    assert shape(result.root[0]) == [("1", [("가", [])]), ("2", [(None, [("tab", "나")])]), ("3", []), ("4", [])]
+    # 경계 3은 탭 안이라 1로 당긴다. 낱말이 아닌 모르는 컨트롤 안 경계(12·14)는 당기지 않고 글자 뒤 빈 런 하나로 접힌다
+    assert shape(result.root[0]) == [("1", [("가", [])]), ("2", [(None, [("tab", "나")])]), ("3", [])]
     assert reasons(result) == [("unknown_control_char", "chars", 1)] and result.audit.ok
 
 
@@ -201,6 +201,284 @@ def test_unknown_record_tags_are_counted_per_section():
     result = section(B.paragraph("글") + B.record(0x3FF, 0, b"x") + B.record(0x200, 1))
     assert reasons(result) == [("unknown_record", "records", 2)]
     assert result.regions[0].region_id == "s0-unknown-record" and result.audit.ok
+
+
+def cells(tbl: ET.Element) -> list[list[tuple]]:
+    """행마다 칸 (header, borderFillIDRef, rowAddr, colAddr, rowSpan, colSpan, 문단 글자들)."""
+    out = []
+    for tr in tbl.iterfind(f"{HP}tr"):
+        row = []
+        for tc in tr.iterfind(f"{HP}tc"):
+            addr, span = tc.find(f"{HP}cellAddr"), tc.find(f"{HP}cellSpan")
+            texts = ["".join(t.text or "" for t in p.iter(f"{HP}t")) for p in tc.find(f"{HP}subList")]
+            row.append((tc.get("header"), tc.get("borderFillIDRef"), addr.get("rowAddr"), addr.get("colAddr"),
+                        span.get("rowSpan"), span.get("colSpan"), texts))
+        out.append(row)
+    return out
+
+
+def test_tables_become_hp_tbl_with_caption_cells_spans_header_bits_and_fills():
+    tbl = B.table(1, 2, 3, B.cell(2, 0, 0, B.paragraph("구분", level=2), header=True),
+                  B.cell(2, 0, 1, B.paragraph("값", level=2), header=True, fill=2),
+                  B.cell(2, 0, 2, B.paragraph("비고", level=2), span=(2, 1)),
+                  B.cell(2, 1, 0, B.paragraph("인건비", level=2), B.paragraph("둘째 줄", level=2), span=(1, 2)),
+                  caption=B.caption(2, B.paragraph("표 1. 지어낸 표", level=2), side="TOP"))
+    result = section(B.paragraph("표 앞", B.extended(11, "tbl "), "뒤", controls=[tbl]))
+    assert shape(result.root[0]) == [("0", [("표 앞", []), ("tbl", ["caption", "tr", "tr"]), ("뒤", [])])]
+    found = result.root[0].find(f"{HP}run/{HP}tbl")
+    assert (found.get("rowCnt"), found.get("colCnt"), found.find(f"{HP}caption").get("side")) == ("2", "3", "TOP")
+    assert [shape(p)[0][1][0][0] for p in found.find(f"{HP}caption/{HP}subList")] == ["표 1. 지어낸 표"]
+    assert cells(found) == [[("1", "1", "0", "0", "1", "1", ["구분"]), ("1", "2", "0", "1", "1", "1", ["값"]),
+                             ("0", "1", "0", "2", "2", "1", ["비고"])],
+                            [("0", "1", "1", "0", "1", "2", ["인건비", "둘째 줄"])]]
+    assert result.regions == [] and result.audit.ok
+
+
+def test_table_lists_out_of_count_and_paragraphs_outside_any_list_keep_their_text():
+    tbl = B.control("tbl ", 1, B.record(B.TABLE, 2, struct.pack("<IHH", 0, 1, 1)),
+                    B.cell(2, 0, 0, B.paragraph("칸 글", level=2)).replace(struct.pack("<hIH", 1, 0, 0),
+                                                                          struct.pack("<hIH", 3, 0, 0)),
+                    B.record(B.CTRL_HEADER, 2, b"xxxx"), B.paragraph("리스트 밖 문단", level=2))
+    result = section(B.paragraph(B.extended(11, "tbl "), controls=[tbl]))
+    assert shape(result.root[0]) == [("0", [("tbl", ["tr"]), ("ctrl", ["unknownObject"])])]
+    assert reasons(result) == [("record_inconsistent", "list_paragraphs", 2), ("unknown_control", None, None)]
+    assert result.audit.ok
+    short_caption = B.record(B.LIST_HEADER, 2, bytes(11)) + B.record(B.TABLE, 2, bytes(8))
+    for broken, what, at in ((B.record(B.TABLE, 2, bytes(7)), "TABLE", 5),
+                             (short_caption, "LIST_HEADER caption", 5)):  # 문단 머리 0~3, 컨트롤 4
+        with pytest.raises(ParseError, match=f"{what} record too short") as info:
+            section(B.paragraph(B.extended(11, "tbl "), controls=[B.control("tbl ", 1, broken)]))
+        assert info.value.location == f"a.hwp:BodyText/Section0#{at}"
+
+
+def test_a_list_shorter_than_a_cell_after_table_takes_the_leftover_path_instead_of_failing():
+    tbl = B.control("tbl ", 1, B.record(B.TABLE, 2, struct.pack("<IHH", 0, 1, 1)),
+                    B.cell(2, 0, 0, B.paragraph("칸 글", level=2)), B.caption(2, B.paragraph("뒤에 온 캡션", level=2)))
+    result = section(B.paragraph(B.extended(11, "tbl "), controls=[tbl]))
+    assert shape(result.root[0]) == [("0", [("tbl", ["tr"]), ("ctrl", ["unknownObject"])])]
+    assert reasons(result) == [("record_inconsistent", "list_shape", 1), ("unknown_control", None, None)]
+    assert cells(result.root[0].find(f"{HP}run/{HP}tbl")) == [[("0", "1", "0", "0", "1", "1", ["칸 글"])]]
+    rescued = result.root[0].find(f"{HP}run/{HP}ctrl/{HP}unknownObject")
+    assert ["".join(t.text or "" for t in p.iter(f"{HP}t")) for p in rescued.iter(f"{HP}p")] == ["뒤에 온 캡션"]
+    assert result.audit.ok
+
+
+def tags(element: ET.Element) -> list:
+    """요소 이름과 자식(재귀) — hp:p 안은 런 모양 대신 문단 글자."""
+    if local(element) == "p":
+        return ["p", "".join(t.text or "" for t in element.iter(f"{HP}t"))]
+    return [local(element), {k: v for k, v in element.attrib.items()}, [tags(c) for c in element]]
+
+
+def test_drawing_objects_become_pictures_shapes_containers_and_embedded_objects():
+    shapes = [B.gso(1, B.pic(2, 3, width=14400, height=7200), caption=B.caption(2, B.paragraph("그림 1", level=2))),
+              B.gso(1, B.component(2, "$pic", B.picture(3, 5), size=(500, 400), first=(500, 400))),
+              B.gso(1, B.container(2, B.pic(3, 1, top=False), B.rect(3, B.paragraph("묶음 속 글상자", level=4), top=False),
+                                   B.line(3, top=False))),
+              B.gso(1, B.ole(2)), B.gso(1, B.ole(2, chart=True)), B.gso(1, B.textart(2, "지어낸 글맵시")),
+              B.gso(1, B.component(2, "$unk", B.listed(3, B.paragraph("모르는 도형 글", level=3))))]
+    data = B.paragraph("앞", *[B.extended(11, "gso ")] * len(shapes), controls=shapes)
+    result = section(data)
+    run = result.root[0].find(f"{HP}run")
+    assert [tags(e) for e in run][1:] == [
+        ["pic", {}, [["curSz", {"width": "14400", "height": "7200"}, []], ["img", {"binaryItemIDRef": "3"}, []],
+                     ["caption", {"side": "BOTTOM"}, [["subList", {}, [["p", "그림 1"]]]]]]],
+        ["pic", {}, [["curSz", {"width": "0", "height": "0"}, []], ["img", {"binaryItemIDRef": "5"}, []]]],
+        ["container", {}, [["pic", {}, [["curSz", {"width": "7200", "height": "3600"}, []],
+                                        ["img", {"binaryItemIDRef": "1"}, []]]],
+                           ["rect", {}, [["drawText", {}, [["subList", {}, [["p", "묶음 속 글상자"]]]]]]],
+                           ["line", {}, []]]],
+        ["ole", {}, []], ["chart", {}, []], ["textart", {"text": "지어낸 글맵시"}, []],
+        ["ctrl", {}, [["unknownObject", {}, [["subList", {}, [["p", "모르는 도형 글"]]]]]]]]
+    assert reasons(result) == [("unknown_control", None, None)] and result.audit.ok
+
+
+def test_equations_carry_their_script_and_caption_and_both_join_the_transcode_ledger(monkeypatch):
+    script = "x = {-b +- sqrt {b^2 - 4ac}} over {2a}"
+    data = B.paragraph(B.extended(11, "eqed"), B.extended(11, "gso "),
+                       controls=[B.equation(1, script, caption=B.caption(2, B.paragraph("식 1", level=2), side="TOP")),
+                                 B.gso(1, B.textart(2, "글맵시 글"))])
+    result = section(data)
+    eq = result.root[0].find(f"{HP}run/{HP}equation")
+    assert eq.findtext(f"{HP}script") == script and eq.find(f"{HP}caption").get("side") == "TOP"
+    assert result.audit.ok and result.regions == []
+
+    def check(mutate) -> transcode.Audit:
+        def wrapped(records, root, marks, skipped, location):
+            mutate(root)
+            return REAL_AUDIT(records, root, marks, skipped, location)
+
+        monkeypatch.setattr(transcode, "audit", wrapped)
+        return section(data).audit
+
+    def cut_script(root):
+        found = next(root.iter(f"{HP}script"))
+        found.text = found.text[:-3]
+
+    def script_tail(root):
+        next(root.iter(f"{HP}script")).tail = "떠돌이"
+
+    def drop_art(root):
+        run = next(root.iter(f"{HP}run"))
+        run.remove(run.find(f"{HP}textart"))
+
+    def change_art(root):
+        next(root.iter(f"{HP}textart")).set("text", "글맵시 굴")
+
+    assert check(cut_script) == transcode.Audit(1, 0, 0)
+    assert check(script_tail) == transcode.Audit(0, 0, 3)
+    assert check(drop_art) == transcode.Audit(0, 1, 0)
+    assert check(change_art) == transcode.Audit(1, 0, 0)
+
+
+def test_objects_without_their_body_record_take_the_unknown_path_and_short_ones_are_refused():
+    result = section(B.paragraph(B.extended(11, "eqed"), B.extended(11, "gso "),
+                                 controls=[B.control("eqed", 1), B.gso(1, B.component(2, "$tat"))]))
+    assert [tags(e)[0] for e in result.root[0].find(f"{HP}run")] == ["ctrl", "ctrl"]
+    assert reasons(result) == [("unknown_control", None, None)] and result.audit.ok
+    pic = B.component(2, "$pic", B.record(B.SC_PICTURE, 3, bytes(72)))
+    short = B.record(B.SHAPE_COMPONENT, 2, b"cip$" * 2 + bytes(27))  # ID 두 번 뒤 크기까지 28바이트가 모자란다
+    for control, what, at in ((B.gso(1, short), "SHAPE_COMPONENT", 5),
+                              (B.gso(1, pic), "SHAPE_COMPONENT_PICTURE", 6),
+                              (B.control("eqed", 1, B.record(B.EQEDIT, 2, struct.pack("<IH", 0, 9))), "EQEDIT", 5)):
+        with pytest.raises(ParseError, match=f"{what} record too short") as info:
+            section(B.paragraph(B.extended(11, "gso "), controls=[control]))
+        assert info.value.location == f"a.hwp:BodyText/Section0#{at}"
+
+
+def broken_textart(level: int, body: bytes, *children: bytes, top: bool = True) -> bytes:
+    """글맵시 SHAPE_COMPONENT(level): children(레벨 level + 1) + 몸이 body인 SHAPE_COMPONENT_TEXTART."""
+    return B.component(level, "$tat", *children, B.record(B.SC_TEXTART, level + 1, body), top=top)
+
+
+def test_a_textart_whose_text_does_not_fit_or_is_not_plausible_takes_the_unknown_path_with_a_record():
+    def art(text: str) -> bytes:
+        return bytes(32) + B.hwp_string(text) + bytes(44)
+
+    bodies = [bytes(33), bytes(32) + struct.pack("<H", 500) + "짧은 글".encode("utf-16-le"),  # 길이가 몸을 넘는다
+              art("지어낸\ufffd글맵시"), bytes(32) + struct.pack("<HH", 2, 0xD800) + "글".encode("utf-16-le"),
+              art("지어낸\x01글맵시"), art("지어낸\x0b글맵시")]
+    for body in bodies:
+        shape = broken_textart(2, body, B.listed(3, B.paragraph("글맵시 아래 글", level=3)))
+        result = section(B.paragraph("앞", B.extended(11, "gso "), controls=[B.gso(1, shape)]))
+        assert next(result.root.iter(f"{HP}textart"), None) is None
+        rescued = result.root[0].find(f"{HP}run/{HP}ctrl/{HP}unknownObject")
+        assert [tags(p)[1] for p in rescued.iter(f"{HP}p")] == ["글맵시 아래 글"]
+        assert reasons(result) == [("record_inconsistent", "textart", 1), ("unknown_control", None, None)]
+        assert result.audit.ok
+    # 묶음 안의 깨진 글맵시: 그 개체만 빠지고 나머지 묶음은 그대로
+    inside = B.gso(1, B.container(2, B.pic(3, 1, top=False), broken_textart(3, bodies[1], top=False)))
+    result = section(B.paragraph(B.extended(11, "gso "), controls=[inside]))
+    assert [local(e) for e in result.root[0].find(f"{HP}run/{HP}container")] == ["pic"]
+    assert reasons(result) == [("record_inconsistent", "textart", 1), ("unknown_control", None, None)]
+    assert result.audit.ok
+    # 글맵시 개체 밖의 깨진 글맵시 레코드는 문서를 거부하지 않고 장부가 고아로 잡는다
+    stray_art = B.gso(1, B.component(2, "$unk", B.record(B.SC_TEXTART, 3, bodies[1])))
+    result = section(B.paragraph(B.extended(11, "gso "), controls=[stray_art]))
+    assert result.audit == transcode.Audit(0, 1, 0)
+
+
+def test_tab_and_line_breaks_in_a_textart_are_plausible_text_and_stay_in_the_ledger():
+    text = "첫째 줄\n둘째\t줄\r\n셋째 줄"
+    result = section(B.paragraph("앞", B.extended(11, "gso "), controls=[B.gso(1, B.textart(2, text))]))
+    assert [e.get("text") for e in result.root.iter(f"{HP}textart")] == [text]
+    assert reasons(result) == [] and result.audit.ok
+
+
+def test_an_unknown_shape_nested_in_a_container_leaves_one_unknown_control_and_its_text_is_rescued_once():
+    empty = B.gso(1, B.container(2, B.pic(3, 1, top=False), B.component(3, "$unk", top=False)))
+    result = section(B.paragraph(B.extended(11, "gso "), controls=[empty]))
+    assert [local(e) for e in result.root[0].find(f"{HP}run/{HP}container")] == ["pic"]
+    assert reasons(result) == [("unknown_control", None, None)] and result.audit.ok
+    two = B.gso(1, B.container(2, B.component(3, "$unk", top=False), B.component(3, "$unk", top=False),
+                               B.component(3, "$unk", B.listed(4, B.paragraph("묶음 속 모르는 도형 글", level=4)),
+                                           top=False)))
+    result = section(B.paragraph(B.extended(11, "gso "), controls=[two]))
+    assert reasons(result) == [("unknown_control", None, None)] and result.audit.ok
+    assert [t.text for t in result.root.iter(f"{HP}t")] == ["묶음 속 모르는 도형 글"]
+
+
+def test_an_unknown_shape_in_a_container_inside_a_text_box_flags_only_the_inner_paragraph():
+    inner = B.gso(4, B.container(5, B.pic(6, 1, top=False), B.component(6, "$unk", top=False)))
+    box = B.rect(2, B.paragraph("글상자 글", B.extended(11, "gso "), level=3, controls=[inner]))
+    result = section(B.paragraph("앞", B.extended(11, "gso "), controls=[B.gso(1, box)]))
+    assert reasons(result) == [("unknown_control", None, None)] and result.audit.ok
+    assert [t.text for t in result.root.iter(f"{HP}t")] == ["앞", "글상자 글"]
+    # 바깥 묶음에서 먼저 빠진 도형은 안쪽 컨트롤이 끝나도 바깥 문단 표시로 남는다
+    deep = B.gso(5, B.container(6, B.component(7, "$unk", top=False)))
+    outer = B.gso(1, B.container(2, B.component(3, "$unk", top=False), B.rect(3, B.paragraph(
+        "묶음 속 글상자 글", B.extended(11, "gso "), level=4, controls=[deep]), top=False)))
+    result = section(B.paragraph("앞", B.extended(11, "gso "), controls=[outer]))
+    assert reasons(result) == [("unknown_control", None, None)] * 2 and result.audit.ok
+
+
+def test_an_unknown_first_component_with_a_readable_textart_second_is_skipped_with_the_record():
+    both = B.gso(1, B.component(2, "$unk") + B.textart(2, "둘째 글맵시"))
+    result = section(B.paragraph("앞", B.extended(11, "gso "), controls=[both]))
+    assert next(result.root.iter(f"{HP}textart"), None) is None
+    assert reasons(result) == [("unknown_control", None, None)] and result.audit == transcode.Audit(0, 0, 0)
+
+
+def test_a_readable_textart_under_a_second_component_is_skipped_with_the_record_not_an_orphan():
+    both = B.gso(1, B.pic(2, 1) + B.textart(2, "둘째 글맵시"))
+    result = section(B.paragraph("앞", B.extended(11, "gso "), controls=[both]))
+    assert next(result.root.iter(f"{HP}textart"), None) is None
+    assert [img.get("binaryItemIDRef") for img in result.root.iter(f"{container.HC}img")] == ["1"]
+    assert reasons(result) == [("unknown_control", None, None)] and result.audit == transcode.Audit(0, 0, 0)
+
+
+def test_shape_components_after_the_first_under_a_drawing_object_are_recorded_once_per_paragraph():
+    two_pics = B.gso(1, B.pic(2, 1) + B.pic(2, 2))
+    with_text = B.gso(1, B.pic(2, 3) + B.rect(2, B.paragraph("둘째 도형 글", level=3)))
+    result = section(B.paragraph("앞", B.extended(11, "gso "), B.extended(11, "gso "), controls=[two_pics, with_text])
+                     + B.paragraph(B.extended(11, "gso "), controls=[B.gso(1, B.pic(2, 4) + B.line(2))]))
+    first, second = result.root
+    assert [tags(e)[0] for e in first.find(f"{HP}run")][1:] == ["pic", "pic", "ctrl"]
+    assert [img.get("binaryItemIDRef") for img in result.root.iter(f"{container.HC}img")] == ["1", "3", "4"]
+    rescued = first.find(f"{HP}run/{HP}ctrl/{HP}unknownObject")
+    assert [tags(p)[1] for p in rescued.iter(f"{HP}p")] == ["둘째 도형 글"]
+    assert [tags(e)[0] for e in second.find(f"{HP}run")] == ["pic"]
+    assert reasons(result) == [("unknown_control", None, None)] * 2
+    assert [r.anchor for r in result.regions] == [0, 1] and result.audit.ok
+
+
+def test_margins_notes_and_hidden_comments_become_their_owpml_controls():
+    controls = [B.margin(1, "head", B.paragraph("머리말", level=2)),
+                B.margin(1, "foot", B.paragraph("꼬리말 첫째", level=2), B.paragraph("꼬리말 둘째", level=2), apply="ODD"),
+                B.margin(1, "head", B.paragraph("짝수 쪽 머리말", level=2), apply="EVEN"),
+                B.note(1, "fn  ", B.paragraph("각주 글", level=2)), B.note(1, "en  ", B.paragraph("미주 글", level=2)),
+                B.hidden(1, B.paragraph("숨은 설명 글", level=2))]
+    codes = [B.extended(16, "head"), B.extended(16, "foot"), B.extended(16, "head"), B.extended(17, "fn  "),
+             B.extended(17, "en  "), B.extended(15, "tcmt")]
+    result = section(B.paragraph("본문", *codes, controls=controls))
+    run = result.root[0].find(f"{HP}run")
+    assert [tags(e) for e in run][1:] == [
+        ["ctrl", {}, [["header", {"applyPageType": "BOTH"}, [["subList", {}, [["p", "머리말"]]]]]]],
+        ["ctrl", {}, [["footer", {"applyPageType": "ODD"}, [["subList", {}, [["p", "꼬리말 첫째"], ["p", "꼬리말 둘째"]]]]]]],
+        ["ctrl", {}, [["header", {"applyPageType": "EVEN"}, [["subList", {}, [["p", "짝수 쪽 머리말"]]]]]]],
+        ["ctrl", {}, [["footNote", {}, [["subList", {}, [["p", "각주 글"]]]]]]],
+        ["ctrl", {}, [["endNote", {}, [["subList", {}, [["p", "미주 글"]]]]]]],
+        ["ctrl", {}, [["hiddenComment", {}, [["subList", {}, [["p", "숨은 설명 글"]]]]]]]]
+    assert result.regions == [] and result.audit.ok
+    with pytest.raises(ParseError, match="CTRL_HEADER foot record too short") as info:
+        section(B.paragraph(B.extended(16, "foot"),
+                            controls=[B.control("foot", 1, B.listed(2, B.paragraph("글", level=2)))]))
+    assert info.value.location == "a.hwp:BodyText/Section0#4"
+
+
+def test_masterpage_lists_are_not_transcoded_and_count_their_characters():
+    table = B.table(3, 1, 1, B.cell(4, 0, 0, B.paragraph("바탕쪽 표 칸", level=4)))
+    secd = B.section_def(1, [B.paragraph("바탕쪽 글", B.extended(11, "tbl "), level=2, controls=[table])], [],
+                         [B.paragraph("홀수 쪽", B.TAB, "바탕", level=2)])
+    result = section(B.paragraph(B.extended(2, "secd"), "본문", controls=[secd]))
+    assert shape(result.root[0]) == [("0", [("ctrl", []), ("본문", [])])]
+    assert result.masters == [9, 0, 5] and result.regions == [] and result.audit.ok  # 표 칸 글자도 센다
+
+
+def test_char_shape_bounds_after_the_text_fold_into_one_empty_run():
+    many = [(0, 1)] + [(10 + k, k % 7) for k in range(5000)]
+    result = section(B.paragraph("가나다", shapes=many))
+    assert shape(result.root[0]) == [("1", [("가나다", [])]), ("0", [])]
 
 
 TWO = (B.paragraph("첫째", B.TAB, "문단") + B.paragraph("둘째 문단")

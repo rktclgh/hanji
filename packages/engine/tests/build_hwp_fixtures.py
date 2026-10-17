@@ -9,9 +9,10 @@ FileHeader, raw deflate, DocInfo(build_hwpx_fixtures.header()와 같은 인자),
 PARA_CHAR_SHAPE·PARA_LINE_SEG)과 컨트롤, 문서 하나(document). 테스트는 이 파일을 importlib로 읽어 쓰기 도구를 쓰고,
 tamper로 직렬화 직전 배치를 고쳐 잘못된 파일을 만든다.
 
-쌍둥이 골든: HWP 입력은 build_hwpx_fixtures.py의 같은 예제(구역 XML·header.xml)를 레코드로 옮겨 만들고, 기대값은 HWPX
-골든(fixtures/hwpx/expected)을 그대로 쓴다. 비교는 형식 정체성(source.name·mime·content_hash, document_id)만 가리고
-block_id는 블록 순번으로 바꾼다(참조도 같이). HWP에 같은 것이 없는 HWPX 처리 이력은 DROPPED에 적은 것만 뺀다.
+쌍둥이 골든: HWP 입력은 build_hwpx_fixtures.py의 같은 예제(구역 XML·header.xml·그림 manifest)를 레코드로 옮겨 만들고,
+기대값은 HWPX 골든(fixtures/hwpx/expected)을 그대로 쓴다. 비교는 형식 정체성(source.name·mime·content_hash, document_id)만
+가리고 block_id는 블록 순번으로 바꾼다(참조도 같이). 그림은 HWPX 골든처럼 자산 키를 가리고 화소 정보를 따로 견준다. HWP에
+같은 것이 없는 HWPX 처리 이력은 DROPPED에 적은 것만 뺀다.
 """
 
 import argparse
@@ -185,8 +186,20 @@ def deflate(data: bytes) -> bytes:
 
 
 # ---- DocInfo 쓰기 도구 ----
-DOCUMENT_PROPERTIES, ID_MAPPINGS, BORDER_FILL, CHAR_SHAPE, PARA_SHAPE = 0x10, 0x11, 0x14, 0x15, 0x19
+DOCUMENT_PROPERTIES, ID_MAPPINGS, BIN_DATA, BORDER_FILL, CHAR_SHAPE, PARA_SHAPE = 0x10, 0x11, 0x12, 0x14, 0x15, 0x19
 HEADS = ("NONE", "OUTLINE", "NUMBER", "BULLET")
+LINK, EMBEDDING, STORAGE = 0, 1, 2
+
+
+def bin_data(sid: int = 1, ext: str = "png", kind: int = EMBEDDING, mode: int = 0) -> bytes:
+    """BIN_DATA 몸: 속성(bit 0–3 종류, bit 4–5 압축 0 문서 따름·1 압축·2 비압축). 연결은 빈 절대·상대 경로, 포함은 저장
+    id + 확장자, OLE 저장소는 저장 id."""
+    attr = kind | mode << 4
+    if kind == LINK:
+        return struct.pack("<HHH", attr, 0, 0)
+    if kind == EMBEDDING:
+        return struct.pack("<HHH", attr, sid, len(ext)) + ext.encode("utf-16-le")
+    return struct.pack("<HH", attr, sid)
 
 
 def colorref(color: str) -> int:
@@ -215,19 +228,21 @@ def border_fill(color: str = "none", kind: int = 1) -> bytes:
 
 
 def docinfo(headings: Mapping[int, tuple[str, int]] = (), chars: Mapping[int, tuple[int, bool]] = (),
-            fills: Mapping[int, str] = (), sections: int = 1, extra: Sequence[bytes] = ()) -> bytes:
+            fills: Mapping[int, str] = (), sections: int = 1, extra: Sequence[bytes] = (),
+            bins: Sequence[bytes] = ()) -> bytes:
     """DocInfo 레코드(풀린 바이트). 인자는 build_hwpx_fixtures.header()와 같다(문단 모양 0 NONE·글자 모양 0 10pt·
     테두리 채움 1 none은 늘 있다). HWP id는 순번이라 id가 0(테두리 채움은 1)부터 이어져야 한다. extra는 끝에 붙일
-    레코드(레벨 1)."""
+    레코드(레벨 1). bins는 BIN_DATA 몸들(bin_data, ID_MAPPINGS 바로 뒤 레벨 1, 순번 1부터)."""
     headings = {0: ("NONE", 0), **dict(headings)}
     chars = {0: (1000, False), **dict(chars)}
     fills = {1: "none", **dict(fills)}
     assert list(headings) == list(range(len(headings))) and list(chars) == list(range(len(chars)))
     assert list(fills) == list(range(1, len(fills) + 1))
     counts = [0] * 18
-    counts[8], counts[9], counts[13] = len(fills), len(chars), len(headings)
+    counts[0], counts[8], counts[9], counts[13] = len(bins), len(fills), len(chars), len(headings)
     out = [record(DOCUMENT_PROPERTIES, 0, struct.pack("<H", sections) + bytes(24)),
            record(ID_MAPPINGS, 0, struct.pack("<18i", *counts))]
+    out += [record(BIN_DATA, 1, body) for body in bins]
     out += [record(BORDER_FILL, 1, border_fill(color)) for color in fills.values()]
     out += [record(CHAR_SHAPE, 1, char_shape(height, bold)) for height, bold in chars.values()]
     out += [record(PARA_SHAPE, 1, para_shape(kind, level)) for kind, level in headings.values()]
@@ -274,6 +289,133 @@ def control(ident: str, level: int, *children: bytes, body: bytes = b"") -> byte
 def list_header(level: int, paragraphs: int) -> bytes:
     """LIST_HEADER: 문단 수(INT16) + 속성(UINT32). 문단들은 이 레코드 뒤 같은 레벨에 온다."""
     return record(LIST_HEADER, level, struct.pack("<hI", paragraphs, 0))
+
+
+# ---- 개체 쓰기 도구(리스트·표) ----
+TABLE = 0x4D
+SIDES = ("LEFT", "RIGHT", "TOP", "BOTTOM")
+OBJECT = bytes(42)  # 개체 공통 속성 자리(CTRL_HEADER 몸의 ID 뒤, 파서는 읽지 않는다)
+
+
+def listed(level: int, *paras: bytes, tail: bytes = b"", ext: int = 0, count: int | None = None) -> bytes:
+    """리스트: LIST_HEADER(level, 문단 수 INT16 + 속성 UINT32 + 확장 속성 UINT16 + tail) + 같은 레벨 문단들(paras는
+    paragraph(level=level)로 직렬화한 문단 하나씩, count가 있으면 그 수를 선언한다)."""
+    head = struct.pack("<hIH", len(paras) if count is None else count, 0, ext)
+    return record(LIST_HEADER, level, head + tail) + b"".join(paras)
+
+
+def caption(level: int, *paras: bytes, side: str = "BOTTOM") -> bytes:
+    """캡션 리스트(30B LIST_HEADER: 오프셋 8 캡션 속성 bit 0–1 방향, 폭, 간격, 최대 길이, 0 8바이트)."""
+    return listed(level, *paras, tail=struct.pack("<IIhI", SIDES.index(side), 0, 0, 0) + bytes(8))
+
+
+def cell(level: int, row: int, col: int, *paras: bytes, span: tuple[int, int] = (1, 1), header: bool = False,
+         fill: int = 1) -> bytes:
+    """표 칸 리스트(47B LIST_HEADER: 오프셋 6의 bit 2 제목 칸, 8부터 열·행 주소, 열·행 병합(span = (행, 열)), 폭·높이,
+    여백 넷, 32 테두리 채움 id, 0 13바이트)."""
+    tail = struct.pack("<HHHHII", col, row, span[1], span[0], 0, 0) + bytes(8) + struct.pack("<H", fill) + bytes(13)
+    return listed(level, *paras, tail=tail, ext=4 if header else 0)
+
+
+def table(level: int, rows: int, cols: int, *cells: bytes, caption: bytes = b"") -> bytes:
+    """표 컨트롤(level): [캡션 리스트] + TABLE(속성, 행·열 수, 칸 간격, 안쪽 여백, 행마다 칸 수, 테두리 채움, 영역 0) +
+    칸 리스트들(레벨 level + 1로 만든 것)."""
+    body = struct.pack("<IHHH", 0, rows, cols, 0) + bytes(8) + struct.pack(f"<{rows}H", *[cols] * rows)
+    return control("tbl ", level, caption, record(TABLE, level + 1, body + struct.pack("<HH", 1, 0)), *cells,
+                   body=OBJECT)
+
+
+# ---- 개체 쓰기 도구(그리기 개체·수식) ----
+SHAPE_COMPONENT, SC_LINE, SC_RECTANGLE, SC_OLE, SC_PICTURE = 0x4C, 0x4E, 0x4F, 0x54, 0x55
+EQEDIT, SC_TEXTART, CHART_DATA = 0x58, 0x5A, 0x5F
+
+
+def hwp_string(text: str) -> bytes:
+    """WORD 길이 + WCHAR 글자."""
+    raw = text.encode("utf-16-le", "surrogatepass")
+    return struct.pack("<H", len(raw) // 2) + raw
+
+
+def component(level: int, ident: str, *children: bytes, top: bool = True, size: tuple[int, int] = (7200, 3600),
+              first: tuple[int, int] = (0, 0)) -> bytes:
+    """SHAPE_COMPONENT(level): 종류 ID(개체 바로 아래면 두 번, 묶음 안이면 한 번) + 묶음 안 X·Y, 묶인 횟수, 버전, 처음
+    폭·높이(first), 현재 폭·높이(size), 속성·회전 자리 0 + 이미 직렬화한 자식(레벨 level + 1)."""
+    ident4 = int.from_bytes(ident.encode("latin-1"), "big").to_bytes(4, "little")
+    body = ident4 * (2 if top else 1) + struct.pack("<iiHHIIII", 0, 0, 0, 1, *first, *size) + bytes(14)
+    return record(SHAPE_COMPONENT, level, body) + b"".join(children)
+
+
+def gso(level: int, shape: bytes, caption: bytes = b"") -> bytes:
+    """그리기 개체 컨트롤(level): [캡션 리스트] + SHAPE_COMPONENT(component(level + 1, …))."""
+    return control("gso ", level, caption, shape, body=OBJECT)
+
+
+def picture(level: int, ref: int) -> bytes:
+    """SHAPE_COMPONENT_PICTURE 91B: 테두리·자르기·여백 68B 0, 밝기·명암·효과, BinData 순번(오프셋 71), 나머지 0."""
+    return record(SC_PICTURE, level, bytes(71) + struct.pack("<H", ref) + bytes(18))
+
+
+def pic(level: int, ref: int, width: int = 7200, height: int = 3600, top: bool = True) -> bytes:
+    """그림 SHAPE_COMPONENT(level). 처음 크기는 0이라 현재 크기가 늘 다르다(같으면 HWPX처럼 curSz 0)."""
+    return component(level, "$pic", picture(level + 1, ref), top=top, size=(width, height))
+
+
+def rect(level: int, *paras: bytes, top: bool = True) -> bytes:
+    """글상자(사각형 SHAPE_COMPONENT(level)): 리스트(paras는 레벨 level + 1 문단) + SHAPE_COMPONENT_RECTANGLE."""
+    box = listed(level + 1, *paras) if paras else b""
+    return component(level, "$rec", box, record(SC_RECTANGLE, level + 1, bytes(33)), top=top)
+
+
+def line(level: int, top: bool = True) -> bytes:
+    return component(level, "$lin", record(SC_LINE, level + 1, bytes(20)), top=top)
+
+
+def container(level: int, *shapes: bytes) -> bytes:
+    """묶음 SHAPE_COMPONENT(level): 자식 SHAPE_COMPONENT들(레벨 level + 1, top=False로 만든 것)."""
+    return component(level, "$con", *shapes)
+
+
+def ole(level: int, chart: bool = False) -> bytes:
+    """OLE SHAPE_COMPONENT(level)(chart면 CHART_DATA 자식도)."""
+    data = record(CHART_DATA, level + 1, bytes(2)) if chart else b""
+    return component(level, "$ole", record(SC_OLE, level + 1, bytes(24)), data)
+
+
+def textart(level: int, text: str) -> bytes:
+    """글맵시 SHAPE_COMPONENT(level): SHAPE_COMPONENT_TEXTART(꼭짓점 8 INT32 + 글자 + 글꼴 이름·모양 + 나머지 0)."""
+    body = bytes(32) + hwp_string(text) + hwp_string("") + hwp_string("") + bytes(40)
+    return component(level, "$tat", record(SC_TEXTART, level + 1, body))
+
+
+def equation(level: int, script: str, caption: bytes = b"") -> bytes:
+    """수식 컨트롤(level): [캡션 리스트] + EQEDIT(속성, 스크립트, 글자 크기, 색, 기준선, 버전·글꼴 이름)."""
+    body = struct.pack("<I", 0) + hwp_string(script) + struct.pack("<IIh", 1000, 0, 0) + hwp_string("") * 2
+    return control("eqed", level, caption, record(EQEDIT, level + 1, body), body=OBJECT)
+
+
+# ---- 개체 쓰기 도구(머리말·꼬리말·주석·숨은 설명·바탕쪽) ----
+PAGES = ("BOTH", "EVEN", "ODD")
+
+
+def margin(level: int, kind: str, *paras: bytes, apply: str = "BOTH") -> bytes:
+    """머리말(head)·꼬리말(foot) 컨트롤(level, 몸 12B: 속성 bit 0–1 적용 쪽) + 리스트(34B, paras는 레벨 level + 1)."""
+    return control(kind, level, listed(level + 1, *paras, tail=bytes(26)), body=struct.pack("<I", PAGES.index(apply))
+                   + bytes(4))
+
+
+def note(level: int, kind: str, *paras: bytes) -> bytes:
+    """각주(fn  )·미주(en  ) 컨트롤(level, 몸 20B) + 리스트(16B)."""
+    return control(kind, level, listed(level + 1, *paras, tail=bytes(8)), body=bytes(16))
+
+
+def hidden(level: int, *paras: bytes) -> bytes:
+    """숨은 설명(tcmt) 컨트롤(level) + 리스트."""
+    return control("tcmt", level, listed(level + 1, *paras, tail=bytes(8)))
+
+
+def section_def(level: int, *masters: Sequence[bytes]) -> bytes:
+    """구역 정의(secd) 컨트롤(level) + 바탕쪽 리스트들(masters: 리스트마다 레벨 level + 1 문단들, 34B LIST_HEADER)."""
+    return control("secd", level, *(listed(level + 1, *paras, tail=bytes(26)) for paras in masters), body=bytes(34))
 
 
 def paragraph(*items: str | list[int], level: int = 0, pr: int = 0, style: int = 0,
@@ -327,32 +469,120 @@ MARKS = {"tab": TAB, "lineBreak": LINE_BREAK, "nbSpace": NB_SPACE, "fwSpace": FW
 
 
 def from_section(xml: str) -> bytes:
-    """HWPX 구역 XML(hp:p·hp:run·hp:t와 그 안 인라인 요소·hp:linesegarray만) → 구역 레코드. 런마다 글자 모양 경계
-    (시작 위치, charPrIDRef), hp:t 안 모르는 요소는 그 글자만 남긴다(HWP에는 그런 구조가 없다: 형광펜은 영역 태그다)."""
-    out = []
-    for p in ET.fromstring(xml):
-        items: list[str | list[int]] = []
-        shapes = []
-        for run in p.iterfind(f"{OWPML}run"):
-            shapes.append((len(units(*items)), int(run.get("charPrIDRef", "0"))))
-            for t in run:
-                if t.tag != f"{OWPML}t":
-                    raise ValueError(f"not an HP-A twin element: {t.tag}")
-                items.append(t.text or "")
-                for child in t:
-                    name = child.tag.removeprefix(OWPML)
-                    items.append(MARKS[name] if name in MARKS else "".join(child.itertext()))
-                    items.append(child.tail or "")
-        segs = p.find(f"{OWPML}linesegarray")
-        lines = len(segs) if segs is not None else None
-        text = [item for item in items if item != ""]
-        out.append(paragraph(*text, pr=int(p.get("paraPrIDRef", "0")), style=int(p.get("styleIDRef", "0")),
-                             shapes=shapes or ((0, 0),), lines=lines))
-    return b"".join(out)
+    """HWPX 구역 XML → 구역 레코드(최상위 hp:p마다 레벨 0 문단)."""
+    return b"".join(from_para(p, 0) for p in ET.fromstring(xml))
 
 
-def from_header(xml: str) -> bytes:
-    """HWPX header.xml(build_hwpx_fixtures.header()) → DocInfo 레코드(같은 id: 문단·글자 모양 0부터, 테두리 채움 1부터)."""
+def from_para(p: ET.Element, level: int) -> bytes:
+    """HWPX hp:p → 문단 레코드(level). 런마다 글자 모양 경계(시작 위치, charPrIDRef), hp:t 안 아는 인라인 요소는 제어 문자,
+    모르는 요소는 그 글자만 남긴다(HWP에는 그런 구조가 없다: 형광펜은 영역 태그다). 런 안 개체·컨트롤은 그 자리의 확장
+    컨트롤 문자와 문단 아래 컨트롤 레코드(레벨 level + 1)로(from_object)."""
+    items: list[str | list[int]] = []
+    shapes = []
+    controls: list[bytes] = []
+    for run in p.iterfind(f"{OWPML}run"):
+        shapes.append((len(units(*items)), int(run.get("charPrIDRef", "0"))))
+        for child in run:
+            if child.tag != f"{OWPML}t":
+                for code, ident, data in from_object(child, level + 1):
+                    items.append(extended(code, ident))
+                    controls.append(data)
+                continue
+            items.append(child.text or "")
+            for inner in child:
+                name = inner.tag.removeprefix(OWPML)
+                items.append(MARKS[name] if name in MARKS else "".join(inner.itertext()))
+                items.append(inner.tail or "")
+    segs = p.find(f"{OWPML}linesegarray")
+    lines = len(segs) if segs is not None else None
+    text = [item for item in items if item != ""]
+    return paragraph(*text, level=level, pr=int(p.get("paraPrIDRef", "0")), style=int(p.get("styleIDRef", "0")),
+                     shapes=shapes or ((0, 0),), lines=lines, controls=controls)
+
+
+def _paras(element: ET.Element | None, level: int) -> list[bytes]:
+    """요소의 hp:subList 문단들 → 레벨 level 문단 레코드들(없으면 빈 목록)."""
+    sub = element.find(f"{OWPML}subList") if element is not None else None
+    return [from_para(p, level) for p in sub.iterfind(f"{OWPML}p")] if sub is not None else []
+
+
+def _caption(element: ET.Element, level: int) -> bytes:
+    found = element.find(f"{OWPML}caption")
+    return caption(level, *_paras(found, level), side=found.get("side", "BOTTOM")) if found is not None else b""
+
+
+def _component(element: ET.Element, level: int, top: bool) -> bytes:
+    """그리기 개체 요소 → SHAPE_COMPONENT(level). 그림 id "imageK"는 BIN_DATA 순번 K다(from_items)."""
+    name = element.tag.removeprefix(OWPML)
+    if name == "pic":
+        size = element.find(f"{OWPML}curSz")
+        ref = element.find(f"{CORE_NS}img").get("binaryItemIDRef")
+        return pic(level, int(ref.removeprefix("image")), int(size.get("width")), int(size.get("height")), top=top)
+    if name == "rect":
+        return rect(level, *_paras(element.find(f"{OWPML}drawText"), level + 1), top=top)
+    if name == "line":
+        return line(level, top=top)
+    if name == "container":
+        return container(level, *(_component(child, level + 1, False) for child in element))
+    if name == "textart":
+        return textart(level, element.get("text", ""))
+    if name == "ole":
+        return ole(level)
+    raise ValueError(f"not a twin drawing object: {element.tag}")
+
+
+def from_object(element: ET.Element, level: int) -> list[tuple[int, str, bytes]]:
+    """런 안 개체·컨트롤 요소 → (확장 컨트롤 코드, 컨트롤 ID, 컨트롤 레코드(level))들. hp:ctrl 하나에 든 머리말·꼬리말
+    둘은 HWP 컨트롤 둘이다(처리부 출력이 같다)."""
+    name = element.tag.removeprefix(OWPML)
+    if name == "tbl":
+        rows = []
+        for tc in element.iterfind(f"{OWPML}tr/{OWPML}tc"):
+            addr, span = tc.find(f"{OWPML}cellAddr"), tc.find(f"{OWPML}cellSpan")
+            rows.append(cell(level + 1, int(addr.get("rowAddr")), int(addr.get("colAddr")), *_paras(tc, level + 1),
+                             span=(int(span.get("rowSpan")), int(span.get("colSpan"))), header=tc.get("header") == "1",
+                             fill=int(tc.get("borderFillIDRef"))))
+        return [(11, "tbl ", table(level, int(element.get("rowCnt")), int(element.get("colCnt")), *rows,
+                                   caption=_caption(element, level + 1)))]
+    if name == "equation":
+        return [(11, "eqed", equation(level, element.findtext(f"{OWPML}script") or ""))]
+    if name == "ctrl":
+        out = []
+        for child in element:
+            kind = child.tag.removeprefix(OWPML)
+            if kind in ("header", "footer"):
+                out.append((16, kind[:4], margin(level, kind[:4], *_paras(child, level + 1),
+                                                  apply=child.get("applyPageType", "BOTH"))))
+            elif kind in ("footNote", "endNote"):
+                ident = "fn  " if kind == "footNote" else "en  "
+                out.append((17, ident, note(level, ident, *_paras(child, level + 1))))
+            elif kind == "hiddenComment":
+                out.append((15, "tcmt", hidden(level, *_paras(child, level + 1))))
+            else:
+                raise ValueError(f"not a twin control: {child.tag}")
+        return out
+    return [(11, "gso ", gso(level, _component(element, level + 1, True), caption=_caption(element, level + 1)))]
+
+
+def from_items(items: Sequence[tuple[str, str, str, bool]], binaries: Mapping[str, bytes]) -> tuple[list[bytes],
+                                                                                                     dict[str, bytes]]:
+    """HWPX 그림 manifest 항목(id "imageK"는 K번째) → BIN_DATA 몸들과 BinData 스트림. 내장이 아니면 연결."""
+    bins, streams = [], {}
+    for k, (key, href, _, embedded) in enumerate(items, 1):
+        assert key == f"image{k}"
+        if not embedded:
+            bins.append(bin_data(kind=LINK))
+            continue
+        ext = href.rsplit(".", 1)[1]
+        bins.append(bin_data(k, ext))
+        if href in binaries:
+            streams[f"BinData/BIN{k:04X}.{ext}"] = binaries[href]
+    return bins, streams
+
+
+def from_header(xml: str, bins: Sequence[bytes] = ()) -> bytes:
+    """HWPX header.xml(build_hwpx_fixtures.header()) → DocInfo 레코드(같은 id: 문단·글자 모양 0부터, 테두리 채움 1부터)와
+    BIN_DATA 몸들."""
     root = ET.fromstring(xml)
     headings = {int(e.get("id")): (e.find(f"{HEAD_NS}heading").get("type"), int(e.find(f"{HEAD_NS}heading").get(
         "level"))) for e in root.iter(f"{HEAD_NS}paraPr")}
@@ -360,18 +590,26 @@ def from_header(xml: str) -> bytes:
              for e in root.iter(f"{HEAD_NS}charPr")}
     fills = {int(e.get("id")): e.find(f".//{CORE_NS}winBrush").get("faceColor")
              for e in root.iter(f"{HEAD_NS}borderFill")}
-    return docinfo(headings=headings, chars=chars, fills=fills)
+    return docinfo(headings=headings, chars=chars, fills=fills, bins=bins)
 
 
 # ---- 쌍둥이 골든 예제 ----
 BASIC = [from_section(s) for s in HX.BASIC]
+FIGURE_BINS = from_items(HX.FIGURE_ITEMS, HX.FIGURE_BINARIES)
+ONE_BIN = from_items(HX.FIGURE_ITEMS[:1], {"BinData/image1.png": HX.GRAY_PNG})
 SAMPLES: dict[str, bytes] = {
     "basic.hwp": document(*BASIC, head=from_header(HX.BASIC_HEAD)),
     "headings.hwp": document(*(from_section(s) for s in HX.HEADINGS), head=from_header(HX.HEAD_SIZES)),
     "empty.hwp": document(from_section(HX.section(HX.para())), head=from_header(HX.header())),
     "basic-deflate.hwp": document(*BASIC, head=from_header(HX.BASIC_HEAD), compressed=True),
+    "table.hwp": document(from_section(HX.TABLE), head=from_header(HX.TABLE_HEAD, ONE_BIN[0]), extra=ONE_BIN[1]),
+    "figures.hwp": document(from_section(HX.FIGURES), head=from_header(HX.header(), FIGURE_BINS[0]),
+                            extra=FIGURE_BINS[1]),
+    "notes.hwp": document(*(from_section(s) for s in HX.NOTES), head=from_header(HX.header(), ONE_BIN[0]),
+                          extra=ONE_BIN[1]),
 }
-TWINS = {"basic.hwp": "basic", "headings.hwp": "headings", "empty.hwp": "empty", "basic-deflate.hwp": "basic"}
+TWINS = {"basic.hwp": "basic", "headings.hwp": "headings", "empty.hwp": "empty", "basic-deflate.hwp": "basic",
+         "table.hwp": "table", "figures.hwp": "figures", "notes.hwp": "notes"}
 # HWP에 같은 구조가 없어 HWP 출력에 없는 HWPX 처리 이력(region_id): hp:t 안 모르는 요소(형광펜)
 DROPPED = {"basic": ("s1-p10-unknown-inline-0",)}
 ROOT = HERE / "fixtures" / "hwp"
@@ -389,7 +627,9 @@ def golden(name: str, data: bytes) -> tuple[DocumentTree, ProcessingHistory]:
 
 def twin_key(tree: dict, history: dict) -> dict:
     """비교 키: 형식 정체성(source.name·mime·content_hash, document_id)만 가리고, block_id는 블록 순번(#k)으로 바꾼다
-    (그 id를 가리키는 값도 같은 순번으로). 그 밖 모든 필드는 그대로 비교한다."""
+    (그 id를 가리키는 값도 같은 순번으로). 그림 자산 키에서 나온 값은 HWPX 골든처럼 portable로 가린다(OS마다 PNG 압축
+    바이트가 다르다: 화소는 twin_ok가 따로 본다). 그 밖 모든 필드는 그대로 비교한다."""
+    tree = HX.portable(tree)
     ids = {block["block_id"]: f"#{block['order']}" for block in tree["blocks"]}
 
     def walk(value: object) -> object:
@@ -413,8 +653,14 @@ def expected_key(stem: str) -> dict:
 
 
 def twin_ok(name: str, data: bytes) -> bool:
+    """비교 키와 그림 화소 정보(처음 나온 차례)가 HWPX 골든과 같다."""
     tree, history = golden(name, data)
-    return twin_key(tree.model_dump(mode="json"), history.model_dump(mode="json")) == expected_key(TWINS[name])
+    assets = HwpParser().parse(data, name).assets
+    order = list(dict.fromkeys(b.figure.asset for b in tree.blocks if b.figure is not None))
+    shown = [HX.pixels(assets[key]) for key in order]
+    expected = json.loads((HWPX_EXPECTED / f"{TWINS[name]}.pixels.json").read_bytes())
+    return twin_key(tree.model_dump(mode="json"), history.model_dump(mode="json")) == expected_key(TWINS[name]) and \
+        shown == expected
 
 
 def streams_of(data: bytes) -> dict[str, bytes]:

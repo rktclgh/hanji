@@ -389,6 +389,15 @@ def test_docx_has_its_own_measured_byte_factor():
     assert resources.estimate(cost, 0, 1000, "docx") == resources.BYTES_FACTOR["docx"] * 1000
 
 
+def test_hwp_has_its_own_measured_byte_factor():
+    """HWP도 레코드 트리·옮겨 쓴 요소 트리·그림 디코드가 함께 있어 그 밖 형식보다 큰 배수를 따로 쓴다(HWP 스펙 §12.4)."""
+    cost = resources.Cost(base=1000, per_page=10)
+    assert resources.BYTES_FACTOR["hwp"] > resources.BYTES_FACTOR["other"]
+    kinds = [resources.byte_kind(p) for p in ("a.hwp", "b.HWP", "c.hwt", "d.hwpx")]
+    assert kinds == ["hwp", "hwp", "other", "hwpx"]
+    assert resources.estimate(cost, 0, 1000, "hwp") == resources.BYTES_FACTOR["hwp"] * 1000
+
+
 def test_pptx_has_its_own_measured_byte_factor():
     """PPTX도 압축을 풀고 XML 트리·그림 디코드가 함께 있어 그 밖 형식보다 큰 배수를 따로 쓴다(스펙 §12.3)."""
     cost = resources.Cost(base=1000, per_page=10)
