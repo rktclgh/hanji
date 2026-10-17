@@ -43,7 +43,8 @@ class Item:
 def _outside(href: str) -> bool:
     """Contents/ 밖의 보통 상대 경로: 첫 마디가 빈 것·.·..·Contents가 아니고 .. 마디와 역슬래시가 없다."""
     parts = href.split("/")
-    return parts[0] not in ("", ".", "..", "Contents") and ".." not in parts and "\\" not in href
+    head = parts[0]
+    return head not in ("", ".", "..") and head.casefold() != "contents" and ".." not in parts and "\\" not in href
 
 
 def _limits() -> Limits:

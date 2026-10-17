@@ -146,7 +146,8 @@ def test_spine_items_outside_contents_are_counted_and_not_read():
     twice = [("js", "Scripts/a.js", "text/javascript", True), ("js2", "Scripts/a.js", "text/javascript", True)]
     refused(B.package(SECTION, items=twice, spine=["header", "section0", "js", "js2"]),
             "refers to 'Scripts/a.js' twice")
-    for href in ("./Scripts/a.js", "Scripts/../Contents/section1.xml", "Scripts\\a.js"):
+    for href in ("./Scripts/a.js", "Scripts/../Contents/section1.xml", "Scripts\\a.js", "contents/section0.xml",
+                 "CONTENTS/section1.xml"):  # Contents의 대소문자 변형은 밖이 아니다
         data = B.package(SECTION, items=[("x", href, "text/javascript", True)], spine=["header", "section0", "x"])
         assert refused(data, "unsupported spine item").location == "a.hwpx:Contents/content.hpf"
 
