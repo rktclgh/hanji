@@ -86,3 +86,21 @@ def test_short_bin_data_records_are_refused():
         with pytest.raises(ParseError, match="DocInfo BIN_DATA record too short") as info:
             pictures([body], {})
         assert info.value.location == "a.hwp:DocInfo#2"
+
+
+def test_entries_sharing_a_storage_id_keep_their_own_compression_attribute():
+    packed = B.deflate(PNG)
+    streams = {"BinData/BIN0001.png": packed}
+    # 같은 저장 id 둘: 압축(1)과 비압축(2). 같은 결정끼리는 같은 href, 다른 결정은 다른 href(처리부가 href로 캐시한다)
+    found = pictures([B.bin_data(1, mode=1), B.bin_data(1, mode=2), B.bin_data(1, mode=1)], streams)
+    first, second, third = (found.items[k].href for k in "123")
+    assert first == "BinData/BIN0001.png" and third == first and second != first
+    assert found.has(first) and found.has(second)
+    assert found.binary(first) == PNG  # 속성이 바이트와 맞는 쪽은 풀린다
+    assert found.binary(second) == packed  # 맞지 않는 쪽은 그대로 읽힌다(그림으로는 못 읽는다)
+    # 순서를 바꿔도 각 항목은 제 속성을 따른다
+    swapped = pictures([B.bin_data(1, mode=2), B.bin_data(1, mode=1)], streams)
+    assert swapped.binary(swapped.items["1"].href) == packed and swapped.binary(swapped.items["2"].href) == PNG
+    # 문서를 따르는 항목(0)과 명시한 항목이 같은 결정이면 같은 href
+    same = pictures([B.bin_data(1, mode=0), B.bin_data(1, mode=1)], streams, compressed=True)
+    assert same.items["1"].href == same.items["2"].href

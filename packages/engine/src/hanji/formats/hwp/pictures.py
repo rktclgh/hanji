@@ -5,7 +5,8 @@ DocInfo BIN_DATA 레코드를 차례대로 읽는다(순번 1부터: 그림 레�
 포함이면 저장 id(UINT16)와 확장자(WORD 길이 + WCHAR) → 스트림 BinData/BIN{저장 id:04X}.{확장자}(디렉터리의 정확한 이름,
 없으면 대소문자만 다른 스트림 하나). 연결은 경로를 따라가지 않는다(embedded=False → figure_image_linked). OLE 저장소와
 모르는 종류는 그림 스트림이 없다(figure_image_missing). 바이트 읽기 상한은 HWPX와 같은 값(container.MAX_BINARY_*·
-MAX_RATIO, 읽을 때마다 읽는다): 하나가 넘으면 TooLarge, 합이 넘으면 OverBudget, 깨진 압축은 ParseError(그 그림만 잃는다)."""
+MAX_RATIO, 읽을 때마다 읽는다): 하나가 넘으면 TooLarge, 합이 넘으면 OverBudget, 깨진 압축은 ParseError(그 그림만 잃는다).
+압축 결정은 항목마다 따로다: 같은 저장 id인데 결정이 다른 항목은 href에 #packed·#raw를 달아 구별한다(처리부가 href로 캐시)."""
 
 import struct
 import zlib
@@ -28,7 +29,7 @@ class BinData:
     def __init__(self, cfb: Compound, records: list[Record], compressed: bool, location: str) -> None:
         self.cfb = cfb
         self.items: Mapping[str, Item] = {}
-        self._packed: dict[str, bool] = {}  # 포함 스트림 경로 → 압축을 풀지
+        self._streams: dict[str, tuple[str, bool]] = {}  # href → (스트림 경로, 압축을 풀지)
         self.read = 0  # 실제로 읽은 그림 스트림 바이트 합(압축이면 푼 바이트)
         folded: dict[str, list[str]] = {}
         for path in cfb.streams:
@@ -58,23 +59,28 @@ class BinData:
             if path not in cfb.streams and len(folded.get(path.casefold(), [])) == 1:
                 path = folded[path.casefold()][0]  # 확장자 대소문자만 다른 스트림 하나
             mode = attr >> 4 & 3
-            self._packed[path] = mode == ALWAYS or (mode not in (ALWAYS, NEVER) and compressed)
-            items[key] = Item(path, "", True)
+            packed = mode == ALWAYS or (mode not in (ALWAYS, NEVER) and compressed)
+            href = path
+            if self._streams.get(href, (path, packed)) != (path, packed):  # 같은 저장 id인데 압축 결정이 다른 항목
+                href = f"{path}#{'packed' if packed else 'raw'}"
+            self._streams[href] = (path, packed)
+            items[key] = Item(href, "", True)
         self.items = items
 
     def has(self, member: str) -> bool:
-        return member in self._packed and self.cfb.has(member)
+        return member in self._streams and self.cfb.has(self._streams[member][0])
 
     def binary(self, member: str) -> bytes:
         """그림 스트림 바이트(압축이면 푼 것). 읽기는 min(하나 상한, 합의 남은 몫) + 1바이트까지만 한다."""
-        location = f"{self.cfb.name}:{member}"
+        path, packed = self._streams[member]
+        location = f"{self.cfb.name}:{path}"
         each, total = container.MAX_BINARY_BYTES, container.MAX_BINARY_TOTAL
         left = total - self.read
         if left <= 0:
             raise OverBudget(f"picture streams larger than {total} bytes in total")
         limit = min(each, left)
-        raw = self.cfb.read(member, limit)
-        if self._packed[member] and len(raw) <= limit:  # 압축 바이트가 이미 한도를 넘으면 풀지 않고 크기로 거른다
+        raw = self.cfb.read(path, limit)
+        if packed and len(raw) <= limit:  # 압축 바이트가 이미 한도를 넘으면 풀지 않고 크기로 거른다
             inflater = zlib.decompressobj(-15)
             cap = max(container.RATIO_FLOOR, container.MAX_RATIO * len(raw))
             try:
