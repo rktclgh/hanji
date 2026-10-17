@@ -62,6 +62,16 @@ def test_pictures_read_their_bin_data_stream_and_keep_the_caption_link():
     assert all(c.ok for c in counts) and all(a.ok for a in audits)
 
 
+def test_a_wmf_picture_becomes_a_figure_without_an_image_and_figure_image_unsupported():
+    head = B.docinfo(bins=[B.bin_data(1, "wmf")])
+    data = B.document(B.paragraph(B.extended(11, "gso "), controls=[B.gso(1, B.pic(2, 1))]), head=head,
+                      extra={"BinData/BIN0001.wmf": HX.FAKE_WMF})
+    parsed, counts, audits = HwpParser()._parse(data, "a.hwp")
+    assert [b["kind"] for b in parsed.blocks] == ["figure"] and "figure" not in parsed.blocks[0]
+    assert parsed.assets == {} and reasons(parsed) == ["figure_image_unsupported"]
+    assert all(c.ok for c in counts) and all(a.ok for a in audits)
+
+
 def test_masterpage_text_is_counted_after_all_sections_like_hwpx():
     first = B.section_def(1, [B.paragraph("첫 바탕쪽", level=2)], [B.paragraph(level=2)])
     second = B.section_def(1, [B.paragraph("둘째 구역 바탕쪽", level=2)])
