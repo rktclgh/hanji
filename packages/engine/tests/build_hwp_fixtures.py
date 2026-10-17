@@ -1,11 +1,13 @@
 """HWP 5.0 합성 문서 쓰기 도구(지어낸 한국어 글자만).
 
 자체 OLE 복합 파일(MS-CFB) 쓰기 도구: 512B 섹터(major 3) 또는 4096B(major 4), FAT·mini FAT·디렉터리, 고정 차례(경로
-이름 차례, 형제는 CFB 비교 규칙 차례로 right에 잇는다), 시각 0. 테스트는 이 파일을 importlib로 읽어 쓰기 도구를 쓰고,
-tamper로 직렬화 직전 배치를 고쳐 잘못된 파일을 만든다.
+이름 차례, 형제는 CFB 비교 규칙 차례로 right에 잇는다), 시각 0. 레코드 쓰기 도구: 레코드 머리(0xFFF 확장 크기),
+FileHeader, raw deflate. 테스트는 이 파일을 importlib로 읽어 쓰기 도구를 쓰고, tamper로 직렬화 직전 배치를 고쳐
+잘못된 파일을 만든다.
 """
 
 import struct
+import zlib
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 
@@ -139,3 +141,24 @@ def serialize(layout: Layout) -> bytes:
             + struct.pack("<IIIII", h["cutoff"], h["minifat"], h["nminifat"], h["difat_first"], h["ndifat"])
             + struct.pack("<109I", *h["difat"]))  # type: ignore[misc]
     return head.ljust(layout.sector, b"\0") + b"".join(bytes(s) for s in layout.sectors)
+
+
+# ---- 레코드 쓰기 도구 ----
+
+def record(tag: int, level: int, body: bytes = b"") -> bytes:
+    """레코드 머리(TagID 10비트·Level 10비트·Size 12비트, 4095B 이상은 Size 0xFFF + DWORD) + 몸."""
+    if len(body) >= 0xFFF:
+        return struct.pack("<II", tag | level << 10 | 0xFFF << 20, len(body)) + body
+    return struct.pack("<I", tag | level << 10 | len(body) << 20) + body
+
+
+def file_header(version: tuple[int, int, int, int] = (5, 1, 0, 1), flags: int = 0) -> bytes:
+    """FileHeader 256B: 서명(NUL 채움), 버전 0xMMnnPPrr, 속성, 속성 2, EncryptVersion 4."""
+    value = version[0] << 24 | version[1] << 16 | version[2] << 8 | version[3]
+    return (b"HWP Document File".ljust(32, b"\0") + struct.pack("<IIII", value, flags, 0, 4)).ljust(256, b"\0")
+
+
+def deflate(data: bytes) -> bytes:
+    """머리 없는 raw deflate(한컴 문서의 압축 스트림과 같은 꼴, wbits −15)."""
+    packer = zlib.compressobj(9, zlib.DEFLATED, -15)
+    return packer.compress(data) + packer.flush()
