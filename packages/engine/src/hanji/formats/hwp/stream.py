@@ -84,7 +84,7 @@ class Reader:
     def data(self, path: str) -> bytes:
         """스트림 바이트(압축이면 푼 것). 하나가 MAX_STREAM_BYTES, 합이 MAX_STREAM_TOTAL을 넘으면 ParseError."""
         location = f"{self.cfb.name}:{path}"
-        left = MAX_STREAM_TOTAL - self.read
+        left = max(0, MAX_STREAM_TOTAL - self.read)  # 예산 초과 뒤 다시 불러도 상한이 0 아래(zlib는 무제한)로 가지 않게
         limit = min(MAX_STREAM_BYTES, left)
         raw = self.cfb.read(path, MAX_STREAM_BYTES)
         if len(raw) > MAX_STREAM_BYTES:

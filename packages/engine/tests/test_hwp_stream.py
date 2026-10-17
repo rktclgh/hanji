@@ -173,6 +173,11 @@ def test_stream_limits_apply_to_each_stream_and_to_the_document_total(monkeypatc
     with pytest.raises(ParseError, match="larger than 150 bytes in total") as info:
         reader.data("BodyText/Section0")
     assert info.value.location == "a.hwp:BodyText/Section0"
+    compressed = Reader(cfb(DocInfo=B.deflate(body), BodyText__Section0=B.deflate(body)), compressed=True)
+    compressed.data("DocInfo")
+    for _ in range(3):  # 예산을 넘긴 뒤 다시 불러도 상한 없이 풀거나 ValueError가 나지 않는다
+        with pytest.raises(ParseError, match="larger than 150 bytes in total"):
+            compressed.data("BodyText/Section0")
 
 
 def test_records_form_a_tree_by_level_with_extended_sizes():
