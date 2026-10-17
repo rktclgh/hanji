@@ -357,7 +357,7 @@ def test_a_textart_whose_text_does_not_fit_or_is_not_plausible_takes_the_unknown
 
     bodies = [bytes(33), bytes(32) + struct.pack("<H", 500) + "짧은 글".encode("utf-16-le"),  # 길이가 몸을 넘는다
               art("지어낸\ufffd글맵시"), bytes(32) + struct.pack("<HH", 2, 0xD800) + "글".encode("utf-16-le"),
-              art("지어낸\x01글맵시"), art("지어낸\t글맵시")]
+              art("지어낸\x01글맵시"), art("지어낸\x0b글맵시")]
     for body in bodies:
         shape = broken_textart(2, body, B.listed(3, B.paragraph("글맵시 아래 글", level=3)))
         result = section(B.paragraph("앞", B.extended(11, "gso "), controls=[B.gso(1, shape)]))
@@ -370,11 +370,40 @@ def test_a_textart_whose_text_does_not_fit_or_is_not_plausible_takes_the_unknown
     inside = B.gso(1, B.container(2, B.pic(3, 1, top=False), broken_textart(3, bodies[1], top=False)))
     result = section(B.paragraph(B.extended(11, "gso "), controls=[inside]))
     assert [local(e) for e in result.root[0].find(f"{HP}run/{HP}container")] == ["pic"]
-    assert reasons(result) == [("record_inconsistent", "textart", 1)] and result.audit.ok
+    assert reasons(result) == [("record_inconsistent", "textart", 1), ("unknown_control", None, None)]
+    assert result.audit.ok
     # 글맵시 개체 밖의 깨진 글맵시 레코드는 문서를 거부하지 않고 장부가 고아로 잡는다
     stray_art = B.gso(1, B.component(2, "$unk", B.record(B.SC_TEXTART, 3, bodies[1])))
     result = section(B.paragraph(B.extended(11, "gso "), controls=[stray_art]))
     assert result.audit == transcode.Audit(0, 1, 0)
+
+
+def test_tab_and_line_breaks_in_a_textart_are_plausible_text_and_stay_in_the_ledger():
+    text = "첫째 줄\n둘째\t줄\r\n셋째 줄"
+    result = section(B.paragraph("앞", B.extended(11, "gso "), controls=[B.gso(1, B.textart(2, text))]))
+    assert [e.get("text") for e in result.root.iter(f"{HP}textart")] == [text]
+    assert reasons(result) == [] and result.audit.ok
+
+
+def test_an_unknown_shape_nested_in_a_container_leaves_one_unknown_control_and_its_text_is_rescued_once():
+    empty = B.gso(1, B.container(2, B.pic(3, 1, top=False), B.component(3, "$unk", top=False)))
+    result = section(B.paragraph(B.extended(11, "gso "), controls=[empty]))
+    assert [local(e) for e in result.root[0].find(f"{HP}run/{HP}container")] == ["pic"]
+    assert reasons(result) == [("unknown_control", None, None)] and result.audit.ok
+    two = B.gso(1, B.container(2, B.component(3, "$unk", top=False), B.component(3, "$unk", top=False),
+                               B.component(3, "$unk", B.listed(4, B.paragraph("묶음 속 모르는 도형 글", level=4)),
+                                           top=False)))
+    result = section(B.paragraph(B.extended(11, "gso "), controls=[two]))
+    assert reasons(result) == [("unknown_control", None, None)] and result.audit.ok
+    assert [t.text for t in result.root.iter(f"{HP}t")] == ["묶음 속 모르는 도형 글"]
+
+
+def test_a_readable_textart_under_a_second_component_is_skipped_with_the_record_not_an_orphan():
+    both = B.gso(1, B.pic(2, 1) + B.textart(2, "둘째 글맵시"))
+    result = section(B.paragraph("앞", B.extended(11, "gso "), controls=[both]))
+    assert next(result.root.iter(f"{HP}textart"), None) is None
+    assert [img.get("binaryItemIDRef") for img in result.root.iter(f"{container.HC}img")] == ["1"]
+    assert reasons(result) == [("unknown_control", None, None)] and result.audit == transcode.Audit(0, 0, 0)
 
 
 def test_shape_components_after_the_first_under_a_drawing_object_are_recorded_once_per_paragraph():

@@ -69,7 +69,7 @@ UNKNOWN_RECORD = "unknown_record"
 SPAN = re.compile(rb"(?:[\x20-\xff][\x00-\xff]|[\x00-\x1f][\x01-\xff])*+")
 LONE = re.compile(r"[\ud800-\udfff]")  # surrogatepass 디코드 뒤 남은 짝 없는 대리 문자
 NATIVE16 = "utf-16-le" if sys.byteorder == "little" else "utf-16-be"
-IMPLAUSIBLE = re.compile("[\x00-\x1f\ufffd]")  # 글맵시 글자로 읽은 것이 틀렸다는 표지(U+FFFD·제어 문자)
+IMPLAUSIBLE = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\ufffd]")  # 글맵시 글자로 읽은 것이 틀렸다는 표지(U+FFFD·제어 문자, 탭·줄바꿈은 뺀다)
 
 
 def wchars(body: bytes) -> array:
@@ -109,7 +109,7 @@ def hwp_string(body: bytes, at: int, what: str, location: str) -> str:
 def record_text(record: Record, location: str) -> str | None:
     """EQEDIT(속성 UINT32 뒤 스크립트)·글맵시(꼭짓점 8 INT32 뒤 글자) 레코드의 글자. 옮겨 쓰기와 R(r)이 함께 쓴다(디코드는
     자리 하나뿐이다: 순서·소속은 장부가, 자리는 독립 샘플 게이트가 본다). 글맵시 배치는 실파일로 확인하지 못했다: 길이가
-    몸을 넘거나 글자에 U+FFFD·제어 문자(< 0x20)가 섞이면 ParseError 대신 None(읽지 못한 레코드)."""
+    몸을 넘거나 글자에 U+FFFD·제어 문자(탭·줄바꿈 \t \n \r 말고 < 0x20)가 섞이면 ParseError 대신 None(읽지 못한 레코드)."""
     if record.tag == EQEDIT:
         return hwp_string(record.body, 4, "EQEDIT", f"{location}#{record.index}")
     body = record.body
@@ -173,6 +173,7 @@ class _Writer:
         self.skipped: set[int] = set()  # 기록과 함께 건너뛴 글자 레코드
         self.regions: list[Region] = []
         self.unknown: set[int] = set()  # unknown_control을 남긴 문단(id)
+        self.dropped = False  # 지금 컨트롤의 묶음 안에서 모르는 도형이 빠졌나
         self.used: set[int] = set()  # 리스트로 옮긴 PARA_HEADER 순번(어느 리스트에도 들지 않은 문단을 찾는다)
 
     def node(self, parent: ET.Element, tag: str, depth: int, **attrs: str) -> ET.Element:
@@ -372,11 +373,16 @@ class _Writer:
                     self.region("control-text", CONTROL_TEXT, anchor, "chars", chars)
             return
         build = {"tbl ": self.table, "gso ": self.gso, "eqed": self.equation}.get(ident)
+        self.dropped = False
         if build is None or not build(run, record, anchor, depth):
             self.unknown_object(run, paras, p, anchor, depth)
             return
+        if self.dropped:  # 묶음 안에서 모르는 도형이 빠졌다(만든 요소 없음): 문단마다 한 번 기록
+            self.flag_unknown(p, anchor)
         if ident == "gso " and sum(r.tag == SHAPE_COMPONENT for r in record.children) > 1:
             self.flag_unknown(p, anchor)  # 둘째 이후 SHAPE_COMPONENT는 옮기지 않는다(글자는 아래 남는 문단 길)
+            for later in [r for r in record.children if r.tag == SHAPE_COMPONENT][1:]:
+                self.skipped.update(r.index for r in self.descendants(later) if r.tag == TEXTART)  # 기록과 함께 건너뜀
         rest = [header for header in paras if header.index not in self.used]
         if rest:
             self.unknown_object(run, rest, p, anchor, depth)
@@ -477,7 +483,7 @@ class _Writer:
             element = self.node(parent, f"{HP}container", depth)
             for child in kids:
                 if child.tag == SHAPE_COMPONENT:
-                    self.shape(element, child, anchor, depth + 1, 4)
+                    self.dropped |= self.shape(element, child, anchor, depth + 1, 4) is None
             return element
         if ident == "$ole":
             return self.node(parent, f"{HP}ole", depth)
