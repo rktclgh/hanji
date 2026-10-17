@@ -324,6 +324,74 @@ def table(level: int, rows: int, cols: int, *cells: bytes, caption: bytes = b"")
                    body=OBJECT)
 
 
+# ---- 개체 쓰기 도구(그리기 개체·수식) ----
+SHAPE_COMPONENT, SC_LINE, SC_RECTANGLE, SC_OLE, SC_PICTURE = 0x4C, 0x4E, 0x4F, 0x54, 0x55
+EQEDIT, SC_TEXTART, CHART_DATA = 0x58, 0x5A, 0x5F
+
+
+def hwp_string(text: str) -> bytes:
+    """WORD 길이 + WCHAR 글자."""
+    raw = text.encode("utf-16-le", "surrogatepass")
+    return struct.pack("<H", len(raw) // 2) + raw
+
+
+def component(level: int, ident: str, *children: bytes, top: bool = True, size: tuple[int, int] = (7200, 3600),
+              first: tuple[int, int] = (0, 0)) -> bytes:
+    """SHAPE_COMPONENT(level): 종류 ID(개체 바로 아래면 두 번, 묶음 안이면 한 번) + 묶음 안 X·Y, 묶인 횟수, 버전, 처음
+    폭·높이(first), 현재 폭·높이(size), 속성·회전 자리 0 + 이미 직렬화한 자식(레벨 level + 1)."""
+    ident4 = int.from_bytes(ident.encode("latin-1"), "big").to_bytes(4, "little")
+    body = ident4 * (2 if top else 1) + struct.pack("<iiHHIIII", 0, 0, 0, 1, *first, *size) + bytes(14)
+    return record(SHAPE_COMPONENT, level, body) + b"".join(children)
+
+
+def gso(level: int, shape: bytes, caption: bytes = b"") -> bytes:
+    """그리기 개체 컨트롤(level): [캡션 리스트] + SHAPE_COMPONENT(component(level + 1, …))."""
+    return control("gso ", level, caption, shape, body=OBJECT)
+
+
+def picture(level: int, ref: int) -> bytes:
+    """SHAPE_COMPONENT_PICTURE 91B: 테두리·자르기·여백 68B 0, 밝기·명암·효과, BinData 순번(오프셋 71), 나머지 0."""
+    return record(SC_PICTURE, level, bytes(71) + struct.pack("<H", ref) + bytes(18))
+
+
+def pic(level: int, ref: int, width: int = 7200, height: int = 3600, top: bool = True) -> bytes:
+    """그림 SHAPE_COMPONENT(level). 처음 크기는 0이라 현재 크기가 늘 다르다(같으면 HWPX처럼 curSz 0)."""
+    return component(level, "$pic", picture(level + 1, ref), top=top, size=(width, height))
+
+
+def rect(level: int, *paras: bytes, top: bool = True) -> bytes:
+    """글상자(사각형 SHAPE_COMPONENT(level)): 리스트(paras는 레벨 level + 1 문단) + SHAPE_COMPONENT_RECTANGLE."""
+    box = listed(level + 1, *paras) if paras else b""
+    return component(level, "$rec", box, record(SC_RECTANGLE, level + 1, bytes(33)), top=top)
+
+
+def line(level: int, top: bool = True) -> bytes:
+    return component(level, "$lin", record(SC_LINE, level + 1, bytes(20)), top=top)
+
+
+def container(level: int, *shapes: bytes) -> bytes:
+    """묶음 SHAPE_COMPONENT(level): 자식 SHAPE_COMPONENT들(레벨 level + 1, top=False로 만든 것)."""
+    return component(level, "$con", *shapes)
+
+
+def ole(level: int, chart: bool = False) -> bytes:
+    """OLE SHAPE_COMPONENT(level)(chart면 CHART_DATA 자식도)."""
+    data = record(CHART_DATA, level + 1, bytes(2)) if chart else b""
+    return component(level, "$ole", record(SC_OLE, level + 1, bytes(24)), data)
+
+
+def textart(level: int, text: str) -> bytes:
+    """글맵시 SHAPE_COMPONENT(level): SHAPE_COMPONENT_TEXTART(꼭짓점 8 INT32 + 글자 + 글꼴 이름·모양 + 나머지 0)."""
+    body = bytes(32) + hwp_string(text) + hwp_string("") + hwp_string("") + bytes(40)
+    return component(level, "$tat", record(SC_TEXTART, level + 1, body))
+
+
+def equation(level: int, script: str, caption: bytes = b"") -> bytes:
+    """수식 컨트롤(level): [캡션 리스트] + EQEDIT(속성, 스크립트, 글자 크기, 색, 기준선, 버전·글꼴 이름)."""
+    body = struct.pack("<I", 0) + hwp_string(script) + struct.pack("<IIh", 1000, 0, 0) + hwp_string("") * 2
+    return control("eqed", level, caption, record(EQEDIT, level + 1, body), body=OBJECT)
+
+
 def paragraph(*items: str | list[int], level: int = 0, pr: int = 0, style: int = 0,
               shapes: Sequence[tuple[int, int]] = ((0, 0),), lines: int | None = 1, controls: Sequence[bytes] = (),
               nchars: int | None = None, text: Sequence[int] | None = None) -> bytes:

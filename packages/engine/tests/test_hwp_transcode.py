@@ -263,6 +263,91 @@ def test_a_list_shorter_than_a_cell_after_table_takes_the_leftover_path_instead_
     assert result.audit.ok
 
 
+def tags(element: ET.Element) -> list:
+    """요소 이름과 자식(재귀) — hp:p 안은 런 모양 대신 문단 글자."""
+    if local(element) == "p":
+        return ["p", "".join(t.text or "" for t in element.iter(f"{HP}t"))]
+    return [local(element), {k: v for k, v in element.attrib.items()}, [tags(c) for c in element]]
+
+
+def test_drawing_objects_become_pictures_shapes_containers_and_embedded_objects():
+    shapes = [B.gso(1, B.pic(2, 3, width=14400, height=7200), caption=B.caption(2, B.paragraph("그림 1", level=2))),
+              B.gso(1, B.component(2, "$pic", B.picture(3, 5), size=(500, 400), first=(500, 400))),
+              B.gso(1, B.container(2, B.pic(3, 1, top=False), B.rect(3, B.paragraph("묶음 속 글상자", level=4), top=False),
+                                   B.line(3, top=False))),
+              B.gso(1, B.ole(2)), B.gso(1, B.ole(2, chart=True)), B.gso(1, B.textart(2, "지어낸 글맵시")),
+              B.gso(1, B.component(2, "$unk", B.listed(3, B.paragraph("모르는 도형 글", level=3))))]
+    data = B.paragraph("앞", *[B.extended(11, "gso ")] * len(shapes), controls=shapes)
+    result = section(data)
+    run = result.root[0].find(f"{HP}run")
+    assert [tags(e) for e in run][1:] == [
+        ["pic", {}, [["curSz", {"width": "14400", "height": "7200"}, []], ["img", {"binaryItemIDRef": "3"}, []],
+                     ["caption", {"side": "BOTTOM"}, [["subList", {}, [["p", "그림 1"]]]]]]],
+        ["pic", {}, [["curSz", {"width": "0", "height": "0"}, []], ["img", {"binaryItemIDRef": "5"}, []]]],
+        ["container", {}, [["pic", {}, [["curSz", {"width": "7200", "height": "3600"}, []],
+                                        ["img", {"binaryItemIDRef": "1"}, []]]],
+                           ["rect", {}, [["drawText", {}, [["subList", {}, [["p", "묶음 속 글상자"]]]]]]],
+                           ["line", {}, []]]],
+        ["ole", {}, []], ["chart", {}, []], ["textart", {"text": "지어낸 글맵시"}, []],
+        ["ctrl", {}, [["unknownObject", {}, [["subList", {}, [["p", "모르는 도형 글"]]]]]]]]
+    assert reasons(result) == [("unknown_control", None, None)] and result.audit.ok
+
+
+def test_equations_carry_their_script_and_caption_and_both_join_the_transcode_ledger(monkeypatch):
+    script = "x = {-b +- sqrt {b^2 - 4ac}} over {2a}"
+    data = B.paragraph(B.extended(11, "eqed"), B.extended(11, "gso "),
+                       controls=[B.equation(1, script, caption=B.caption(2, B.paragraph("식 1", level=2), side="TOP")),
+                                 B.gso(1, B.textart(2, "글맵시 글"))])
+    result = section(data)
+    eq = result.root[0].find(f"{HP}run/{HP}equation")
+    assert eq.findtext(f"{HP}script") == script and eq.find(f"{HP}caption").get("side") == "TOP"
+    assert result.audit.ok and result.regions == []
+
+    def check(mutate) -> transcode.Audit:
+        def wrapped(records, root, marks, skipped, location):
+            mutate(root)
+            return REAL_AUDIT(records, root, marks, skipped, location)
+
+        monkeypatch.setattr(transcode, "audit", wrapped)
+        return section(data).audit
+
+    def cut_script(root):
+        found = next(root.iter(f"{HP}script"))
+        found.text = found.text[:-3]
+
+    def script_tail(root):
+        next(root.iter(f"{HP}script")).tail = "떠돌이"
+
+    def drop_art(root):
+        run = next(root.iter(f"{HP}run"))
+        run.remove(run.find(f"{HP}textart"))
+
+    def change_art(root):
+        next(root.iter(f"{HP}textart")).set("text", "글맵시 굴")
+
+    assert check(cut_script) == transcode.Audit(1, 0, 0)
+    assert check(script_tail) == transcode.Audit(0, 0, 3)
+    assert check(drop_art) == transcode.Audit(0, 1, 0)
+    assert check(change_art) == transcode.Audit(1, 0, 0)
+
+
+def test_objects_without_their_body_record_take_the_unknown_path_and_short_ones_are_refused():
+    result = section(B.paragraph(B.extended(11, "eqed"), B.extended(11, "gso "),
+                                 controls=[B.control("eqed", 1), B.gso(1, B.component(2, "$tat"))]))
+    assert [tags(e)[0] for e in result.root[0].find(f"{HP}run")] == ["ctrl", "ctrl"]
+    assert reasons(result) == [("unknown_control", None, None)] and result.audit.ok
+    pic = B.component(2, "$pic", B.record(B.SC_PICTURE, 3, bytes(72)))
+    short = B.record(B.SHAPE_COMPONENT, 2, b"cip$" * 2 + bytes(27))  # ID 두 번 뒤 크기까지 28바이트가 모자란다
+    for control, what, at in ((B.gso(1, short), "SHAPE_COMPONENT", 5),
+                              (B.gso(1, pic), "SHAPE_COMPONENT_PICTURE", 6),
+                              (B.control("eqed", 1, B.record(B.EQEDIT, 2, struct.pack("<IH", 0, 9))), "EQEDIT", 5),
+                              (B.gso(1, B.component(2, "$tat", B.record(B.SC_TEXTART, 3, bytes(33)))),
+                               "SHAPE_COMPONENT_TEXTART", 6)):
+        with pytest.raises(ParseError, match=f"{what} record too short") as info:
+            section(B.paragraph(B.extended(11, "gso "), controls=[control]))
+        assert info.value.location == f"a.hwp:BodyText/Section0#{at}"
+
+
 def test_char_shape_bounds_after_the_text_fold_into_one_empty_run():
     many = [(0, 1)] + [(10 + k, k % 7) for k in range(5000)]
     result = section(B.paragraph("가나다", shapes=many))

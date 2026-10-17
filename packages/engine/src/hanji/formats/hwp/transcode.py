@@ -5,14 +5,18 @@ styleIDRef), PARA_CHAR_SHAPE 경계마다 hp:run(charPrIDRef, 글자 뒤 경계�
 빈칸·고정폭 빈칸·제목 차례 표시는 hp:t의 자식, 뒤 글자는 그 tail), PARA_LINE_SEG 항목마다 hp:lineseg. 확장 컨트롤은 문단의
 k번째 자식 CTRL_HEADER와 짝짓는다. 컨트롤: 글자 없는 자리 컨트롤(필드·단 정의·쪽 번호 등)은 빈 hp:ctrl, 덧말·글자 겹침은
 글자 수만(control_text_skipped), 표는 hp:tbl(TABLE 레코드의 행·열 수, 그 앞 리스트는 캡션, 뒤 리스트는 칸: LIST_HEADER
-오프셋 8부터 열·행 주소·열·행 병합, 32 테두리 채움, 6의 bit 2 제목 칸). 리스트는 LIST_HEADER와 그 뒤 같은 레벨 문단들이다.
+오프셋 8부터 열·행 주소·열·행 병합, 32 테두리 채움, 6의 bit 2 제목 칸), 그리기 개체(gso)는 첫 SHAPE_COMPONENT의 종류
+ID로 hp:pic(그림 레코드 오프셋 71의 BinData 순번, 현재 크기가 처음 크기와 같으면 curSz 0 — HWPX와 같다)·도형(첫 리스트는
+hp:drawText)·hp:container(자식 SHAPE_COMPONENT마다, ID는 한 번만 적힌다)·hp:ole·hp:chart·hp:video·hp:textart@text, 그 앞
+리스트는 캡션, 수식은 hp:equation/hp:script(EQEDIT 스크립트). 리스트는 LIST_HEADER와 그 뒤 같은 레벨 문단들이다.
 몸 레코드가 없는 컨트롤과 모르는 ID는 hp:ctrl/hp:unknownObject/hp:subList 아래로 그 아래 문단을 옮기고(처리부가 모르는
 요소라 블록이 없고 장부가 글자를 살린다, unknown_control), 아는 컨트롤에서 어느 리스트에도 들지 않은 문단도 그 뒤에 같은
 길로 둔다(글자를 조용히 잃지 않는다).
 
-옮겨 쓰기 장부: 글자 레코드(PARA_TEXT 전부와 덧말·글자 겹침 CTRL_HEADER)마다 원본에서 따로 디코드한 정규 문자열 R(r)과
-트리에서 r로 표시된 hp:t들의 글자를 문서 순서로 이은 T(r)이 정확히 같거나, r을 기록과 함께 건너뛰었어야 한다. 처리부가
-읽지 않는 자리(hp:t 자신의 tail, 그 밖 요소의 text·tail)의 글자는 떠돌이(stray)로 센다. 표시는 요소 속성이 아니라 옆
+옮겨 쓰기 장부: 글자 레코드(PARA_TEXT 전부, 덧말·글자 겹침 CTRL_HEADER, EQEDIT, 글맵시)마다 원본에서 따로 디코드한
+정규 문자열 R(r)과 트리에서 r로 표시된 요소(hp:t, hp:script의 글자, hp:textart@text)의 글자를 문서 순서로 이은 T(r)이
+정확히 같거나, r을 기록과 함께 건너뛰었어야 한다. 처리부가 읽지 않는 자리(hp:t 자신의 tail, hp:script 밖 요소의
+text·tail)의 글자는 떠돌이(stray)로 센다. 표시는 요소 속성이 아니라 옆
 사전(id(요소) → 레코드 순번)이다(처리부가 보는 트리를 바꾸지 않는다). 요소 수는 문서 전체 MAX_NODES, 트리 깊이는
 MAX_XML_DEPTH 안이다(넘으면 ParseError). 보통 글자(≥ 0x20)는 글자마다 객체를 만들지 않고 구간째 디코드한다."""
 
@@ -29,12 +33,12 @@ from ...errors import ParseError
 from ..flowdoc import Region, gate
 from ..flowledger import ink
 from ..hwpx import container
-from ..hwpx.container import HP, HS
+from ..hwpx.container import HC, HP, HS
 from ..pdf.parser import COVERAGE_MISMATCH
 from .stream import Record
 
 PARA_HEADER, PARA_TEXT, PARA_CHAR_SHAPE, PARA_LINE_SEG, CTRL_HEADER, LIST_HEADER = 0x42, 0x43, 0x44, 0x45, 0x47, 0x48
-TABLE = 0x4D
+TABLE, SHAPE_COMPONENT, PICTURE, EQEDIT, TEXTART, CHART_DATA, VIDEO_DATA = 0x4D, 0x4C, 0x55, 0x58, 0x5A, 0x5F, 0x62
 # 사양 표에 있는 태그(DocInfo 0x10–0x20·0x5C·0x5E·0x60·0x61, 본문 0x42–0x5D·0x5F·0x62·0x73): 그 밖은 unknown_record
 KNOWN_TAGS = frozenset([*range(0x10, 0x21), *range(0x42, 0x5E), 0x5E, 0x5F, 0x60, 0x61, 0x62, 0x73])
 MAX_NODES = 4_000_000  # 문서 전체 옮겨 쓴 요소 수
@@ -47,6 +51,9 @@ INLINE_TAGS = {9: f"{HP}tab", 8: f"{HP}titleMark", 10: f"{HP}lineBreak", 30: f"{
 P, RUN, T, CTRL, SUBLIST = f"{HP}p", f"{HP}run", f"{HP}t", f"{HP}ctrl", f"{HP}subList"
 TBL, TR, TC, CAPTION = f"{HP}tbl", f"{HP}tr", f"{HP}tc", f"{HP}caption"
 SIDES = ("LEFT", "RIGHT", "TOP", "BOTTOM")  # 캡션 속성 bit 0–1(짝 표 캡션 3개 모두 2 → TOP)
+SCRIPT, TEXTART_TAG = f"{HP}script", f"{HP}textart"
+SHAPES = {"$rec": "rect", "$ell": "ellipse", "$arc": "arc", "$pol": "polygon", "$cur": "curve", "$lin": "line",
+          "$col": "connectLine"}  # SHAPE_COMPONENT 종류 ID → 그리기 요소(글상자 리스트가 있을 수 있다)
 # 글자 없는 자리 컨트롤(빈 hp:ctrl). 필드(%로 시작)도 같다. 리스트·문단이 달리면 모르는 컨트롤 경로다
 PLACES = frozenset(("secd", "cold", "atno", "nwno", "pghd", "pgct", "pgnp", "idxm", "bokm", "form", "tcps", "tdut"))
 TEXT_CONTROLS = frozenset(("tcps", "tdut"))  # 글자가 CTRL_HEADER 몸에 있다(HWPX도 쓰지 않는다): 수만 남긴다
@@ -84,6 +91,24 @@ def decode16(raw: bytes | memoryview, codec: str = "utf-16-le") -> tuple[str, in
 def utf16(units: array) -> tuple[str, int]:
     """WCHAR들 → 글자(대리쌍 묶음)와 짝 없는 대리 문자 수(U+FFFD로 바꾼다)."""
     return decode16(units.tobytes(), NATIVE16)
+
+
+def hwp_string(body: bytes, at: int, what: str, location: str) -> str:
+    """몸 at 자리의 WORD 길이 + WCHAR 글자(대리쌍 묶음, 짝 없는 대리 문자 → U+FFFD). 모자라면 ParseError."""
+    if len(body) < at + 2:
+        raise ParseError(f"{what} record too short", location)
+    (n,) = struct.unpack_from("<H", body, at)
+    if len(body) < at + 2 + 2 * n:
+        raise ParseError(f"{what} record too short", location)
+    return utf16(wchars(body[at + 2:at + 2 + 2 * n]))[0]
+
+
+def record_text(record: Record, location: str) -> str:
+    """EQEDIT(속성 UINT32 뒤 스크립트)·글맵시(꼭짓점 8 INT32 뒤 글자) 레코드의 글자. 옮겨 쓰기와 R(r)이 함께 쓴다(디코드는
+    자리 하나뿐이다: 순서·소속은 장부가, 자리는 독립 샘플 게이트가 본다)."""
+    if record.tag == EQEDIT:
+        return hwp_string(record.body, 4, "EQEDIT", f"{location}#{record.index}")
+    return hwp_string(record.body, 32, "SHAPE_COMPONENT_TEXTART", f"{location}#{record.index}")
 
 
 def control_text(body: bytes, ident: str, location: str) -> str:
@@ -136,7 +161,7 @@ class _Writer:
         self.base = base
         self.location = location
         self.nodes = nodes
-        self.marks: dict[int, int] = {}  # id(hp:t) → PARA_TEXT 레코드 순번(트리가 요소를 붙잡고 있다)
+        self.marks: dict[int, int] = {}  # id(요소) → 글자 레코드 순번(hp:t, hp:script, hp:textart. 트리가 붙잡고 있다)
         self.skipped: set[int] = set()  # 기록과 함께 건너뛴 글자 레코드
         self.regions: list[Region] = []
         self.unknown: set[int] = set()  # unknown_control을 남긴 문단(id)
@@ -338,7 +363,7 @@ class _Writer:
                 if chars:
                     self.region("control-text", CONTROL_TEXT, anchor, "chars", chars)
             return
-        build = {"tbl ": self.table}.get(ident)
+        build = {"tbl ": self.table, "gso ": self.gso, "eqed": self.equation}.get(ident)
         if build is None or not build(run, record, anchor, depth):
             self.unknown_object(run, paras, p, anchor, depth)
             return
@@ -389,6 +414,82 @@ class _Writer:
             raise ParseError("LIST_HEADER caption record too short", f"{self.location}#{header.index}")
         side = SIDES[struct.unpack_from("<I", header.body, 8)[0] & 3]
         self.sublist(self.node(parent, CAPTION, depth, side=side), paras, anchor, depth + 1)
+
+    def gso(self, run: ET.Element, record: Record, anchor: int, depth: int) -> bool:
+        """그리기 개체: 첫 SHAPE_COMPONENT(ID가 두 번 적힌다) → 개체 요소, 그 앞 리스트는 캡션. 없거나 모르는 종류면 거짓."""
+        kids = record.children
+        k = next((i for i, r in enumerate(kids) if r.tag == SHAPE_COMPONENT), None)
+        if k is None:
+            return False
+        element = self.shape(run, kids[k], anchor, depth, 8)
+        if element is None:
+            return False
+        captions = self.lists(kids[:k], anchor)
+        if captions:
+            self.caption(element, captions[0], anchor, depth + 1)
+        return True
+
+    def shape(self, parent: ET.Element, record: Record, anchor: int, depth: int, base: int) -> ET.Element | None:
+        """SHAPE_COMPONENT 하나 → 개체 요소(depth). base는 종류 ID 뒤 필드의 시작(개체 바로 아래 8, 묶음 안 4).
+        모르는 종류면 None(만든 요소 없음: 그 아래 문단은 부르는 쪽이 모르는 컨트롤 길로 옮긴다)."""
+        ident = control_id(record.body)
+        kids = record.children
+        tags = {r.tag for r in kids}
+        location = f"{self.location}#{record.index}"
+        if VIDEO_DATA in tags or CHART_DATA in tags:
+            return self.node(parent, f"{HP}video" if VIDEO_DATA in tags else f"{HP}chart", depth)
+        if ident == "$pic":
+            if len(record.body) < base + 28:
+                raise ParseError("SHAPE_COMPONENT record too short", location)
+            first = struct.unpack_from("<II", record.body, base + 12)  # 처음 폭·높이
+            now = struct.unpack_from("<II", record.body, base + 20)  # 현재 폭·높이
+            pic = self.node(parent, f"{HP}pic", depth)
+            # 현재 크기가 처음 크기와 같으면 HWPX는 curSz를 0으로 적는다(짝 그림 263개 모두)
+            self.node(pic, f"{HP}curSz", depth + 1, width=str(0 if now == first else now[0]),
+                      height=str(0 if now == first else now[1]))
+            image = next((r for r in kids if r.tag == PICTURE), None)
+            if image is not None:
+                if len(image.body) < 73:
+                    raise ParseError("SHAPE_COMPONENT_PICTURE record too short", f"{self.location}#{image.index}")
+                self.node(pic, f"{HC}img", depth + 1, binaryItemIDRef=str(struct.unpack_from("<H", image.body, 71)[0]))
+            return pic
+        if ident in SHAPES:
+            element = self.node(parent, f"{HP}{SHAPES[ident]}", depth)
+            texts = self.lists(kids, anchor)
+            if texts:
+                self.sublist(self.node(element, f"{HP}drawText", depth + 1), texts[0][1], anchor, depth + 2)
+            return element
+        if ident == "$con":
+            element = self.node(parent, f"{HP}container", depth)
+            for child in kids:
+                if child.tag == SHAPE_COMPONENT:
+                    self.shape(element, child, anchor, depth + 1, 4)
+            return element
+        if ident == "$ole":
+            return self.node(parent, f"{HP}ole", depth)
+        if ident == "$tat":
+            art = next((r for r in kids if r.tag == TEXTART), None)
+            if art is None:
+                return None
+            element = self.node(parent, TEXTART_TAG, depth, text=record_text(art, self.location))
+            self.marks[id(element)] = art.index
+            return element
+        return None
+
+    def equation(self, run: ET.Element, record: Record, anchor: int, depth: int) -> bool:
+        """수식: hp:equation/hp:script(EQEDIT 스크립트), 그 앞 리스트는 캡션. EQEDIT가 없으면 거짓."""
+        kids = record.children
+        k = next((i for i, r in enumerate(kids) if r.tag == EQEDIT), None)
+        if k is None:
+            return False
+        element = self.node(run, f"{HP}equation", depth)
+        captions = self.lists(kids[:k], anchor)
+        if captions:
+            self.caption(element, captions[0], anchor, depth + 1)
+        script = self.node(element, SCRIPT, depth + 1)
+        script.text = record_text(kids[k], self.location)
+        self.marks[id(script)] = kids[k].index
+        return True
 
     def table(self, run: ET.Element, record: Record, anchor: int, depth: int) -> bool:
         """표: TABLE 앞 리스트는 캡션(첫째), 뒤 리스트는 칸(레코드 차례, 행 주소가 바뀔 때 새 hp:tr), 칸보다 짧은 뒤
@@ -445,6 +546,8 @@ def canonical(record: Record, location: str) -> str:
     WCHAR 하나 → U+FFFD 하나). location은 스트림 위치(덧말·글자 겹침 몸이 짧으면 ParseError에 #순번을 붙인다)."""
     if record.tag == CTRL_HEADER:
         return control_text(record.body, control_id(record.body), f"{location}#{record.index}")
+    if record.tag in (EQEDIT, TEXTART):
+        return record_text(record, location)
     raw = record.body
     even = memoryview(raw)[:len(raw) - len(raw) % 2]
     units = even.cast("H") if sys.byteorder == "little" else wchars(raw)  # 복사 없이 WCHAR로 본다
@@ -472,12 +575,15 @@ MARKS = {f"{HP}tab": "\t", f"{HP}lineBreak": "\n", f"{HP}nbSpace": "\x1e", f"{HP
 
 
 def tree_texts(root: ET.Element, marks: dict[int, int]) -> dict[int, str]:
-    """T(r): r로 표시된 hp:t들을 문서 순서로 훑어 처리부가 읽는 자리(text, 자식마다 표지 글자 또는 그 안 글자, 자식
-    tail)만 이은 것."""
+    """T(r): r로 표시된 요소들을 문서 순서로 훑어 처리부가 읽는 자리만 이은 것. hp:t는 text, 자식마다 표지 글자 또는 그
+    안 글자, 자식 tail. hp:script는 text, hp:textart는 text 속성."""
     out: dict[int, list[str]] = {}
     for element in root.iter():
         k = marks.get(id(element))
         if k is None:
+            continue
+        if element.tag != T:
+            out.setdefault(k, []).append(element.get("text", "") if element.tag == TEXTART_TAG else element.text or "")
             continue
         parts = [element.text or ""]
         for child in element:
@@ -488,7 +594,8 @@ def tree_texts(root: ET.Element, marks: dict[int, int]) -> dict[int, str]:
 
 
 def stray(root: ET.Element) -> int:
-    """처리부가 읽지 않는 자리(hp:t 자신의 tail, hp:t 자식의 text, 그 밖 요소의 text·tail)의 공백 아닌 글자 수."""
+    """처리부가 읽지 않는 자리(hp:t 자신의 tail, hp:t 자식의 text, hp:script의 tail, 그 밖 요소의 text·tail)의 공백
+    아닌 글자 수."""
     count = 0
     stack: list[tuple[ET.Element, bool]] = [(root, False)]
     while stack:
@@ -497,6 +604,8 @@ def stray(root: ET.Element) -> int:
             count += ink(element.tail or "")
         elif in_t:
             count += ink(element.text or "")
+        elif element.tag == SCRIPT:
+            count += ink(element.tail or "")
         else:
             count += ink(element.text or "") + ink(element.tail or "")
         stack.extend((child, element.tag == T and not in_t) for child in element)
@@ -504,15 +613,16 @@ def stray(root: ET.Element) -> int:
 
 
 def audit(records: list[Record], root: ET.Element, marks: dict[int, int], skipped: set[int], location: str) -> Audit:
-    """모든 글자 레코드(PARA_TEXT, 덧말·글자 겹침 CTRL_HEADER)를 레벨·부모와 상관없이 훑어 판정한다. location은 구역
-    스트림 위치("{파일}:{스트림}", 오류에 #순번을 붙인다)."""
+    """모든 글자 레코드(PARA_TEXT, 덧말·글자 겹침 CTRL_HEADER, EQEDIT, 글맵시)를 레벨·부모와 상관없이 훑어 판정한다.
+    location은 구역 스트림 위치("{파일}:{스트림}", 오류에 #순번을 붙인다)."""
     found = tree_texts(root, marks)
     mismatched = orphans = 0
     stack = list(reversed(records))
     while stack:
         record = stack.pop()
         stack.extend(reversed(record.children))
-        if record.tag != PARA_TEXT and not (record.tag == CTRL_HEADER and control_id(record.body) in TEXT_CONTROLS):
+        if record.tag not in (PARA_TEXT, EQEDIT, TEXTART) and not (
+                record.tag == CTRL_HEADER and control_id(record.body) in TEXT_CONTROLS):
             continue
         text = found.get(record.index)
         if record.index in skipped:

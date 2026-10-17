@@ -47,6 +47,21 @@ def test_a_compressed_document_reads_headings_lists_and_paragraphs_with_both_led
     assert parsed.regions == () and all(c.ok for c in counts) and all(a.ok for a in audits) and len(audits) == 2
 
 
+def test_pictures_read_their_bin_data_stream_and_keep_the_caption_link():
+    head = B.docinfo(bins=[B.bin_data(1, "png"), B.bin_data(kind=B.LINK)])
+    caption = B.caption(2, B.paragraph("그림 1. 지어낸 그림", level=2))
+    pics = [B.gso(1, B.pic(2, 1), caption=caption), B.gso(1, B.pic(2, 2)), B.gso(1, B.pic(2, 7))]
+    data = B.document(b"".join(B.paragraph(B.extended(11, "gso "), controls=[pic]) for pic in pics), head=head,
+                      compressed=True, extra={"BinData/BIN0001.png": B.deflate(HX.GRAY_PNG)})
+    parsed, counts, audits = HwpParser()._parse(data, "a.hwp")
+    figure, caption_block, linked, missing = parsed.blocks
+    assert (figure["kind"], caption_block["kind"], caption_block["text"]) == ("figure", "caption", "그림 1. 지어낸 그림")
+    assert figure["figure"]["caption_ref"] == 1 and figure["figure"]["dpi"] == 6  # 캡션 블록 순번, 6화소 ÷ 1인치
+    assert len(parsed.assets) == 1 and "figure" not in linked and "figure" not in missing
+    assert reasons(parsed) == ["figure_image_linked", "figure_image_missing"]
+    assert all(c.ok for c in counts) and all(a.ok for a in audits)
+
+
 def test_unknown_controls_rescue_their_text_at_section_end_and_both_ledgers_agree():
     table = B.control("tbl ", 1, B.list_header(2, 1), B.paragraph("칸 글", level=2))
     deep = B.list_header(64, 0)
