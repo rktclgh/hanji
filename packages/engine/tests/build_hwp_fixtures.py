@@ -2,8 +2,9 @@
 
 자체 OLE 복합 파일(MS-CFB) 쓰기 도구: 512B 섹터(major 3) 또는 4096B(major 4), FAT·mini FAT·디렉터리, 고정 차례(경로
 이름 차례, 형제는 CFB 비교 규칙 차례로 right에 잇는다), 시각 0. 레코드 쓰기 도구: 레코드 머리(0xFFF 확장 크기),
-FileHeader, raw deflate, DocInfo(build_hwpx_fixtures.header()와 같은 인자). 테스트는 이 파일을 importlib로 읽어
-쓰기 도구를 쓰고, tamper로 직렬화 직전 배치를 고쳐 잘못된 파일을 만든다.
+FileHeader, raw deflate, DocInfo(build_hwpx_fixtures.header()와 같은 인자), 문단(PARA_HEADER·PARA_TEXT·
+PARA_CHAR_SHAPE·PARA_LINE_SEG)과 컨트롤. 테스트는 이 파일을 importlib로 읽어 쓰기 도구를 쓰고, tamper로 직렬화 직전
+배치를 고쳐 잘못된 파일을 만든다.
 """
 
 import struct
@@ -212,3 +213,64 @@ def docinfo(headings: Mapping[int, tuple[str, int]] = (), chars: Mapping[int, tu
     out += [record(CHAR_SHAPE, 1, char_shape(height, bold)) for height, bold in chars.values()]
     out += [record(PARA_SHAPE, 1, para_shape(kind, level)) for kind, level in headings.values()]
     return b"".join(out) + b"".join(extra)
+
+
+# ---- 문단 쓰기 도구 ----
+PARA_HEADER, PARA_TEXT, PARA_CHAR_SHAPE, PARA_LINE_SEG, CTRL_HEADER, LIST_HEADER = 0x42, 0x43, 0x44, 0x45, 0x47, 0x48
+
+
+def inline(code: int) -> list[int]:
+    """인라인 컨트롤 8 WCHAR(코드, 부가 정보 6, 코드)."""
+    return [code, 0, 0, 0, 0, 0, 0, code]
+
+
+def extended(code: int, ident: str) -> list[int]:
+    """확장 컨트롤 8 WCHAR: 코드, 컨트롤 ID(UINT32 LE, 네 글자는 큰 엔디언), 0 넷, 코드."""
+    value = int.from_bytes(ident.encode("latin-1"), "big")
+    return [code, value & 0xFFFF, value >> 16, 0, 0, 0, 0, code]
+
+
+TAB, TITLE_MARK, FIELD_END = inline(9), inline(8), inline(4)
+LINE_BREAK, NB_SPACE, FW_SPACE, HYPHEN, PARA_END = [10], [30], [31], [24], [13]
+
+
+def units(*items: str | list[int]) -> list[int]:
+    """글자(UTF-16 단위로 편다)와 제어 문자 목록 → WCHAR들."""
+    out: list[int] = []
+    for item in items:
+        if isinstance(item, str):
+            raw = item.encode("utf-16-le", "surrogatepass")
+            out += struct.unpack(f"<{len(raw) // 2}H", raw)
+        else:
+            out += item
+    return out
+
+
+def control(ident: str, level: int, *children: bytes, body: bytes = b"") -> bytes:
+    """CTRL_HEADER(몸 = 컨트롤 ID UINT32 + body) + 이미 직렬화한 자식 레코드들(레벨 level + 1)."""
+    return record(CTRL_HEADER, level, int.from_bytes(ident.encode("latin-1"), "big").to_bytes(4, "little") + body) + \
+        b"".join(children)
+
+
+def list_header(level: int, paragraphs: int) -> bytes:
+    """LIST_HEADER: 문단 수(INT16) + 속성(UINT32). 문단들은 이 레코드 뒤 같은 레벨에 온다."""
+    return record(LIST_HEADER, level, struct.pack("<hI", paragraphs, 0))
+
+
+def paragraph(*items: str | list[int], level: int = 0, pr: int = 0, style: int = 0,
+              shapes: Sequence[tuple[int, int]] = ((0, 0),), lines: int | None = 1, controls: Sequence[bytes] = (),
+              nchars: int | None = None, text: Sequence[int] | None = None) -> bytes:
+    """문단 하나: PARA_HEADER(level) + PARA_TEXT(items + 문단 끝 13, 글자가 없으면 레코드 없음, text가 있으면 그
+    WCHAR 그대로) + PARA_CHAR_SHAPE(shapes = (시작 위치, 글자 모양 id)) + PARA_LINE_SEG(lines개, None이면 레코드 없음)
+    + controls(레벨 level + 1로 직렬화한 컨트롤들, 확장 컨트롤 문자 차례대로)."""
+    ws = list(text) if text is not None else (units(*items) + PARA_END if items else [])
+    count = len(ws) if ws else 1
+    head = struct.pack("<IIHBBHHHIH", count if nchars is None else nchars, 0, pr, style, 0, len(shapes), 0, lines or 0,
+                       0, 0)
+    out = [record(PARA_HEADER, level, head)]
+    if ws:
+        out.append(record(PARA_TEXT, level + 1, struct.pack(f"<{len(ws)}H", *ws)))
+    out.append(record(PARA_CHAR_SHAPE, level + 1, b"".join(struct.pack("<II", pos, k) for pos, k in shapes)))
+    if lines is not None:
+        out.append(record(PARA_LINE_SEG, level + 1, bytes(36 * lines)))
+    return b"".join(out) + b"".join(controls)
