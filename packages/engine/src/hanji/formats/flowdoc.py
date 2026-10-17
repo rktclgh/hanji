@@ -75,10 +75,11 @@ def headings_by_size(specs: list[dict[str, Any]]) -> None:
         return
     chosen = [spec for spec in specs if spec.get("_size") is not None and spec["_lines"] <= HEADING_MAX_LINES
               and spec["_size"] >= body * (BOLD_HEADING_RATIO if spec["_bold"] else HEADING_RATIO)]
-    ranks = sorted({spec["_size"] for spec in chosen}, reverse=True)
+    # 크기 → 단계(큰 크기부터 1). 제목마다 목록에서 찾으면 서로 다른 크기가 많을 때 이차 시간이다
+    ranks = {size: k for k, size in enumerate(sorted({spec["_size"] for spec in chosen}, reverse=True))}
     for spec in chosen:
         # 제목은 한 줄로(PDF처럼 줄을 공백으로 잇는다): 줄바꿈이 목록·제목 경로·마크다운 제목을 깨지 않게
-        spec.update(kind="heading", level=min(ranks.index(spec["_size"]) + 1, MAX_LEVEL),
+        spec.update(kind="heading", level=min(ranks[spec["_size"]] + 1, MAX_LEVEL),
                     text=" ".join(spec["text"].split()), confidence=CONFIDENCE["heading"])
 
 

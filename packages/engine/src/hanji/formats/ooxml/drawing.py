@@ -10,7 +10,7 @@ from typing import Any
 from ...errors import ParseError
 from ..flowledger import ink
 from ..hwpx import images
-from ..hwpx.parser import FIGURE_BUDGET, FIGURE_LINKED, FIGURE_MISSING
+from ..hwpx.owpml import FIGURE_BUDGET, FIGURE_LINKED, FIGURE_MISSING
 from ..pdf.figures import AssetBudget
 from ..zipxml import OverBudget, Prefixes, TooLarge
 from .package import R, Package

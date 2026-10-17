@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from hanji.errors import ParseError
+from hanji.formats.hwpx import owpml
 from hanji.formats.hwpx import parser as hwpx
 from hanji.formats.hwpx.parser import HwpxParser
 from hanji_contracts import FlowLocator
@@ -178,7 +179,7 @@ def test_a_source_put_twice_into_the_same_block_is_a_coverage_mismatch(monkeypat
 
 def test_a_source_put_with_some_of_its_text_missing_is_partial(monkeypatch):
     """<t>A<x>B</x>C</t>에서 B를 버리면 블록 글자를 따로 만드는 방식은 통과하지만, 장부는 출처 n과 넣은 글자 수를 견준다."""
-    monkeypatch.setattr(hwpx, "_t_text", lambda t: ((t.text or "") + "".join(c.tail or "" for c in t), False))
+    monkeypatch.setattr(owpml, "_t_text", lambda t: ((t.text or "") + "".join(c.tail or "" for c in t), False))
     parsed, counts = parse(B.section(B.para(B.run(B.t("가", "<hp:x>나</hp:x>", "다")))))
     assert texts(parsed) == [("paragraph", "가다")]
     assert (counts[0].source, counts[0].in_blocks, counts[0].doubled, counts[0].partial) == (3, 2, 0, 1)

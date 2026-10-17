@@ -24,7 +24,7 @@ from ....errors import ParseError
 from ...base import ParsedSource
 from ...flowdoc import Region, finish, gate, ledger_gate
 from ...flowledger import Bundle, Counts, Ledger, ink
-from ...hwpx.parser import EMBEDDED_OBJECT
+from ...hwpx.owpml import EMBEDDED_OBJECT
 from ...hwpx.tables import RawCell, build
 from ...pdf.group import RESCUED_CONFIDENCE, step
 from ...pdf.parser import COVERAGE_MISMATCH, UNASSIGNED_TEXT
