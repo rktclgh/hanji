@@ -340,12 +340,56 @@ def test_objects_without_their_body_record_take_the_unknown_path_and_short_ones_
     short = B.record(B.SHAPE_COMPONENT, 2, b"cip$" * 2 + bytes(27))  # ID 두 번 뒤 크기까지 28바이트가 모자란다
     for control, what, at in ((B.gso(1, short), "SHAPE_COMPONENT", 5),
                               (B.gso(1, pic), "SHAPE_COMPONENT_PICTURE", 6),
-                              (B.control("eqed", 1, B.record(B.EQEDIT, 2, struct.pack("<IH", 0, 9))), "EQEDIT", 5),
-                              (B.gso(1, B.component(2, "$tat", B.record(B.SC_TEXTART, 3, bytes(33)))),
-                               "SHAPE_COMPONENT_TEXTART", 6)):
+                              (B.control("eqed", 1, B.record(B.EQEDIT, 2, struct.pack("<IH", 0, 9))), "EQEDIT", 5)):
         with pytest.raises(ParseError, match=f"{what} record too short") as info:
             section(B.paragraph(B.extended(11, "gso "), controls=[control]))
         assert info.value.location == f"a.hwp:BodyText/Section0#{at}"
+
+
+def broken_textart(level: int, body: bytes, *children: bytes, top: bool = True) -> bytes:
+    """글맵시 SHAPE_COMPONENT(level): children(레벨 level + 1) + 몸이 body인 SHAPE_COMPONENT_TEXTART."""
+    return B.component(level, "$tat", *children, B.record(B.SC_TEXTART, level + 1, body), top=top)
+
+
+def test_a_textart_whose_text_does_not_fit_or_is_not_plausible_takes_the_unknown_path_with_a_record():
+    def art(text: str) -> bytes:
+        return bytes(32) + B.hwp_string(text) + bytes(44)
+
+    bodies = [bytes(33), bytes(32) + struct.pack("<H", 500) + "짧은 글".encode("utf-16-le"),  # 길이가 몸을 넘는다
+              art("지어낸\ufffd글맵시"), bytes(32) + struct.pack("<HH", 2, 0xD800) + "글".encode("utf-16-le"),
+              art("지어낸\x01글맵시"), art("지어낸\t글맵시")]
+    for body in bodies:
+        shape = broken_textart(2, body, B.listed(3, B.paragraph("글맵시 아래 글", level=3)))
+        result = section(B.paragraph("앞", B.extended(11, "gso "), controls=[B.gso(1, shape)]))
+        assert next(result.root.iter(f"{HP}textart"), None) is None
+        rescued = result.root[0].find(f"{HP}run/{HP}ctrl/{HP}unknownObject")
+        assert [tags(p)[1] for p in rescued.iter(f"{HP}p")] == ["글맵시 아래 글"]
+        assert reasons(result) == [("record_inconsistent", "textart", 1), ("unknown_control", None, None)]
+        assert result.audit.ok
+    # 묶음 안의 깨진 글맵시: 그 개체만 빠지고 나머지 묶음은 그대로
+    inside = B.gso(1, B.container(2, B.pic(3, 1, top=False), broken_textart(3, bodies[1], top=False)))
+    result = section(B.paragraph(B.extended(11, "gso "), controls=[inside]))
+    assert [local(e) for e in result.root[0].find(f"{HP}run/{HP}container")] == ["pic"]
+    assert reasons(result) == [("record_inconsistent", "textart", 1)] and result.audit.ok
+    # 글맵시 개체 밖의 깨진 글맵시 레코드는 문서를 거부하지 않고 장부가 고아로 잡는다
+    stray_art = B.gso(1, B.component(2, "$unk", B.record(B.SC_TEXTART, 3, bodies[1])))
+    result = section(B.paragraph(B.extended(11, "gso "), controls=[stray_art]))
+    assert result.audit == transcode.Audit(0, 1, 0)
+
+
+def test_shape_components_after_the_first_under_a_drawing_object_are_recorded_once_per_paragraph():
+    two_pics = B.gso(1, B.pic(2, 1) + B.pic(2, 2))
+    with_text = B.gso(1, B.pic(2, 3) + B.rect(2, B.paragraph("둘째 도형 글", level=3)))
+    result = section(B.paragraph("앞", B.extended(11, "gso "), B.extended(11, "gso "), controls=[two_pics, with_text])
+                     + B.paragraph(B.extended(11, "gso "), controls=[B.gso(1, B.pic(2, 4) + B.line(2))]))
+    first, second = result.root
+    assert [tags(e)[0] for e in first.find(f"{HP}run")][1:] == ["pic", "pic", "ctrl"]
+    assert [img.get("binaryItemIDRef") for img in result.root.iter(f"{container.HC}img")] == ["1", "3", "4"]
+    rescued = first.find(f"{HP}run/{HP}ctrl/{HP}unknownObject")
+    assert [tags(p)[1] for p in rescued.iter(f"{HP}p")] == ["둘째 도형 글"]
+    assert [tags(e)[0] for e in second.find(f"{HP}run")] == ["pic"]
+    assert reasons(result) == [("unknown_control", None, None)] * 2
+    assert [r.anchor for r in result.regions] == [0, 1] and result.audit.ok
 
 
 def test_char_shape_bounds_after_the_text_fold_into_one_empty_run():

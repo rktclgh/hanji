@@ -11,7 +11,9 @@ hp:drawText)·hp:container(자식 SHAPE_COMPONENT마다, ID는 한 번만 적힌
 리스트는 캡션, 수식은 hp:equation/hp:script(EQEDIT 스크립트). 리스트는 LIST_HEADER와 그 뒤 같은 레벨 문단들이다.
 몸 레코드가 없는 컨트롤과 모르는 ID는 hp:ctrl/hp:unknownObject/hp:subList 아래로 그 아래 문단을 옮기고(처리부가 모르는
 요소라 블록이 없고 장부가 글자를 살린다, unknown_control), 아는 컨트롤에서 어느 리스트에도 들지 않은 문단도 그 뒤에 같은
-길로 둔다(글자를 조용히 잃지 않는다).
+길로 둔다(글자를 조용히 잃지 않는다). gso 아래 둘째 이후 SHAPE_COMPONENT는 옮기지 않고 unknown_control만 남긴다. 글맵시
+글자를 읽지 못하면(배치 미검증: 길이 넘침·U+FFFD·제어 문자) 그 개체는 모르는 컨트롤 길이고 레코드는 record_inconsistent
+(근거 textart)와 함께 건너뛴다.
 
 옮겨 쓰기 장부: 글자 레코드(PARA_TEXT 전부, 덧말·글자 겹침 CTRL_HEADER, EQEDIT, 글맵시)마다 원본에서 따로 디코드한
 정규 문자열 R(r)과 트리에서 r로 표시된 요소(hp:t, hp:script의 글자, hp:textart@text)의 글자를 문서 순서로 이은 T(r)이
@@ -67,6 +69,7 @@ UNKNOWN_RECORD = "unknown_record"
 SPAN = re.compile(rb"(?:[\x20-\xff][\x00-\xff]|[\x00-\x1f][\x01-\xff])*+")
 LONE = re.compile(r"[\ud800-\udfff]")  # surrogatepass 디코드 뒤 남은 짝 없는 대리 문자
 NATIVE16 = "utf-16-le" if sys.byteorder == "little" else "utf-16-be"
+IMPLAUSIBLE = re.compile("[\x00-\x1f\ufffd]")  # 글맵시 글자로 읽은 것이 틀렸다는 표지(U+FFFD·제어 문자)
 
 
 def wchars(body: bytes) -> array:
@@ -103,12 +106,17 @@ def hwp_string(body: bytes, at: int, what: str, location: str) -> str:
     return utf16(wchars(body[at + 2:at + 2 + 2 * n]))[0]
 
 
-def record_text(record: Record, location: str) -> str:
+def record_text(record: Record, location: str) -> str | None:
     """EQEDIT(속성 UINT32 뒤 스크립트)·글맵시(꼭짓점 8 INT32 뒤 글자) 레코드의 글자. 옮겨 쓰기와 R(r)이 함께 쓴다(디코드는
-    자리 하나뿐이다: 순서·소속은 장부가, 자리는 독립 샘플 게이트가 본다)."""
+    자리 하나뿐이다: 순서·소속은 장부가, 자리는 독립 샘플 게이트가 본다). 글맵시 배치는 실파일로 확인하지 못했다: 길이가
+    몸을 넘거나 글자에 U+FFFD·제어 문자(< 0x20)가 섞이면 ParseError 대신 None(읽지 못한 레코드)."""
     if record.tag == EQEDIT:
         return hwp_string(record.body, 4, "EQEDIT", f"{location}#{record.index}")
-    return hwp_string(record.body, 32, "SHAPE_COMPONENT_TEXTART", f"{location}#{record.index}")
+    body = record.body
+    if len(body) < 34 or len(body) < 34 + 2 * struct.unpack_from("<H", body, 32)[0]:
+        return None
+    text = hwp_string(body, 32, "SHAPE_COMPONENT_TEXTART", f"{location}#{record.index}")
+    return None if IMPLAUSIBLE.search(text) else text
 
 
 def control_text(body: bytes, ident: str, location: str) -> str:
@@ -367,17 +375,23 @@ class _Writer:
         if build is None or not build(run, record, anchor, depth):
             self.unknown_object(run, paras, p, anchor, depth)
             return
+        if ident == "gso " and sum(r.tag == SHAPE_COMPONENT for r in record.children) > 1:
+            self.flag_unknown(p, anchor)  # 둘째 이후 SHAPE_COMPONENT는 옮기지 않는다(글자는 아래 남는 문단 길)
         rest = [header for header in paras if header.index not in self.used]
         if rest:
             self.unknown_object(run, rest, p, anchor, depth)
 
     def unknown_object(self, run: ET.Element, paras: list[Record], p: ET.Element, anchor: int, depth: int) -> None:
         """hp:ctrl/hp:unknownObject/hp:subList 아래 문단들(처리부가 모르는 요소: 장부가 글자를 살린다)."""
+        self.flag_unknown(p, anchor)
+        ctrl = self.node(run, CTRL, depth)
+        self.sublist(self.node(ctrl, f"{HP}unknownObject", depth + 1), paras, anchor, depth + 2)
+
+    def flag_unknown(self, p: ET.Element, anchor: int) -> None:
+        """unknown_control(문단 p마다 한 번)."""
         if id(p) not in self.unknown:
             self.unknown.add(id(p))
             self.region("unknown-control", UNKNOWN_CONTROL, anchor)
-        ctrl = self.node(run, CTRL, depth)
-        self.sublist(self.node(ctrl, f"{HP}unknownObject", depth + 1), paras, anchor, depth + 2)
 
     def sublist(self, parent: ET.Element, paras: list[Record], anchor: int, depth: int) -> ET.Element:
         """hp:subList(depth) 아래 문단들."""
@@ -471,7 +485,12 @@ class _Writer:
             art = next((r for r in kids if r.tag == TEXTART), None)
             if art is None:
                 return None
-            element = self.node(parent, TEXTART_TAG, depth, text=record_text(art, self.location))
+            text = record_text(art, self.location)
+            if text is None:  # 읽지 못한 글맵시: 개체 없이 모르는 컨트롤 길, 레코드는 기록과 함께 건너뜀
+                self.skipped.add(art.index)
+                self.region("record-inconsistent", RECORD_INCONSISTENT, anchor, "textart", 1)
+                return None
+            element = self.node(parent, TEXTART_TAG, depth, text=text)
             self.marks[id(element)] = art.index
             return element
         return None
@@ -539,11 +558,12 @@ class _Writer:
         return [r for r in self.descendants(record) if r.tag == PARA_HEADER]
 
 
-def canonical(record: Record, location: str) -> str:
+def canonical(record: Record, location: str) -> str | None:
     """R(r): 옮겨 쓰기와 따로 디코드한 정규 문자열. PARA_TEXT는 보통 글자(대리쌍 묶음, 짝 없는 대리 문자 → U+FFFD)와
     표지 글자(탭 \\t, 줄바꿈 \\n, 묶음 빈칸 \\x1e, 고정폭 빈칸 \\x1f, 하이픈 -), 그 밖 제어 문자·컨트롤은 뺀다.
     runs와 다른 길: 제어 문자 자리를 WCHAR마다 찾고 그 사이 바이트를 errors="replace"로 디코드한다(짝 없는 대리
-    WCHAR 하나 → U+FFFD 하나). location은 스트림 위치(덧말·글자 겹침 몸이 짧으면 ParseError에 #순번을 붙인다)."""
+    WCHAR 하나 → U+FFFD 하나). location은 스트림 위치(덧말·글자 겹침 몸이 짧으면 ParseError에 #순번을 붙인다). 읽지
+    못한 글맵시는 None(건너뛴 기록이 없으면 장부가 고아로 센다)."""
     if record.tag == CTRL_HEADER:
         return control_text(record.body, control_id(record.body), f"{location}#{record.index}")
     if record.tag in (EQEDIT, TEXTART):
@@ -629,7 +649,7 @@ def audit(records: list[Record], root: ET.Element, marks: dict[int, int], skippe
             mismatched += text is not None
             continue
         expected = canonical(record, location)
-        if text == expected or (text is None and expected == ""):
+        if expected is not None and (text == expected or (text is None and expected == "")):
             continue
         if text is None:
             orphans += 1
