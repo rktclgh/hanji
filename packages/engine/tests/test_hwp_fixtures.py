@@ -45,6 +45,21 @@ def test_engine_ingest_matches_the_twin_hwpx_golden_and_the_same_bytes_are_uncha
     assert again == ref  # 같은 원본은 그대로
 
 
+def test_the_twin_key_catches_a_one_character_change_a_changed_heading_path_and_an_extra_record():
+    tree, history = BUILDER.golden("basic.hwp", (ROOT / "inputs" / "basic.hwp").read_bytes())
+    base = (tree.model_dump(mode="json"), history.model_dump(mode="json"))
+    assert BUILDER.twin_key(*base) == BUILDER.expected_key("basic")
+    changed = json.loads(json.dumps(base))
+    changed[0]["blocks"][1]["text"] = changed[0]["blocks"][1]["text"][:-1] + "!"  # 글자 하나
+    assert BUILDER.twin_key(*changed) != BUILDER.expected_key("basic")
+    moved = json.loads(json.dumps(base))
+    moved[0]["blocks"][1]["section_path"] = []  # 제목 경로 하나
+    assert BUILDER.twin_key(*moved) != BUILDER.expected_key("basic")
+    extra = json.loads(json.dumps(base))
+    extra[1]["regions"].append({"region_id": "s0-p0-x-0"})  # 처리 이력 하나 더
+    assert BUILDER.twin_key(*extra) != BUILDER.expected_key("basic")
+
+
 def test_the_basic_twin_differs_from_hwpx_only_by_the_dropped_highlight_record():
     hwpx = ProcessingHistory.model_validate_json((BUILDER.HWPX_EXPECTED / "basic.history.json").read_bytes())
     tree, history = BUILDER.golden("basic.hwp", (ROOT / "inputs" / "basic.hwp").read_bytes())
