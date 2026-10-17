@@ -104,3 +104,16 @@ def test_entries_sharing_a_storage_id_keep_their_own_compression_attribute():
     # 문서를 따르는 항목(0)과 명시한 항목이 같은 결정이면 같은 href
     same = pictures([B.bin_data(1, mode=0), B.bin_data(1, mode=1)], streams, compressed=True)
     assert same.items["1"].href == same.items["2"].href
+
+
+def test_made_up_hrefs_never_take_over_another_entry_and_unknown_members_are_refused():
+    other = b"other picture"
+    streams = {"BinData/BIN0001.png": B.deflate(PNG), "BinData/BIN0001.png#raw": other, "BinData/BIN001A.png": PNG}
+    # 확장자가 "png#raw"인 항목이 먼저 그 이름을 차지해도, 같은 저장 id의 다른 결정 항목이 그 이름을 덮지 않는다
+    found = pictures([B.bin_data(1, ext="png#raw", mode=2), B.bin_data(1, mode=1), B.bin_data(1, mode=2),
+                      B.bin_data(0x1A, mode=2)], streams)
+    hrefs = [found.items[k].href for k in "1234"]
+    assert len(set(hrefs)) == 4 and hrefs[3] == "BinData/BIN001A.png"  # 저장 id는 대문자 16진수
+    assert found.binary(hrefs[0]) == other and found.binary(hrefs[1]) == PNG and found.binary(hrefs[3]) == PNG
+    with pytest.raises(ParseError, match="missing picture stream"):
+        found.binary("BinData/none.png")

@@ -63,6 +63,8 @@ class BinData:
             href = path
             if self._streams.get(href, (path, packed)) != (path, packed):  # 같은 저장 id인데 압축 결정이 다른 항목
                 href = f"{path}#{'packed' if packed else 'raw'}"
+            while self._streams.get(href, (path, packed)) != (path, packed):  # 만든 이름이 다른 항목과 겹치면 늘린다
+                href += "#"
             self._streams[href] = (path, packed)
             items[key] = Item(href, "", True)
         self.items = items
@@ -72,6 +74,8 @@ class BinData:
 
     def binary(self, member: str) -> bytes:
         """그림 스트림 바이트(압축이면 푼 것). 읽기는 min(하나 상한, 합의 남은 몫) + 1바이트까지만 한다."""
+        if member not in self._streams:
+            raise ParseError("missing picture stream", f"{self.cfb.name}:{member}")
         path, packed = self._streams[member]
         location = f"{self.cfb.name}:{path}"
         each, total = container.MAX_BINARY_BYTES, container.MAX_BINARY_TOTAL
