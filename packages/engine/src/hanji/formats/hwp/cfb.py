@@ -2,8 +2,9 @@
 
 생성자가 머리·DIFAT·FAT·디렉터리·mini FAT를 읽고, 이름 트리를 명시적 스택으로 돌아 경로 → 스트림을 만들며, 닿는 모든
 스트림의 사슬을 미리 따라가 섹터 소유권(큰 섹터 표·mini 섹터 표)과 선언 크기를 확인한다(정수만 다루고 바이트는 읽지
-않는다). 그래서 사슬 간 공유·순환·범위 밖 섹터·선언보다 짧은 사슬은 열 때 ParseError다. read는 정확한 경로의 스트림을
-요청한 상한 + 1바이트까지만 모은다. 실패는 ParseError(원인, "{파일 이름}" 또는 "{파일 이름}:{스트림 경로}")."""
+않는다). 그래서 사슬 간 공유·순환·범위 밖 섹터·선언과 다른 길이(짧거나, 필요한 섹터 뒤에 더 이어지는)의 사슬은 열 때
+ParseError다. read는 정확한 경로의 스트림을 요청한 상한 + 1바이트까지만 모으고, 파일 끝에서 잘린 섹터 때문에 모자라면
+ParseError(truncated)다. 실패는 ParseError(원인, "{파일 이름}" 또는 "{파일 이름}:{스트림 경로}")."""
 
 import struct
 import sys
@@ -134,18 +135,22 @@ class Compound:
         self._owner[s] = 1
 
     def _chain(self, start: int, most: int | None, what: str, size: int | None = None) -> list[int]:
-        """FAT 사슬의 섹터들. most개를 넘으면 그만 따른다(None은 끝까지). size가 있으면 그 크기를 덮어야 한다(선언보다
-        긴 사슬은 그대로 두고 읽을 때 자른다)."""
+        """FAT 사슬의 섹터들. most개를 넘으면 그만 따른다(None은 끝까지). size가 있으면 정확히 그 크기를 덮는 섹터까지만
+        따르고, 모자라면 ParseError, 필요한 섹터 뒤 다음 칸이 끝이 아니어도 ParseError다(DIFAT 확인과 같다. 실문서
+        20건의 큰 섹터 사슬에 선언보다 긴 것이 없어 큰 사슬도 mini와 같게 엄격하다)."""
         out: list[int] = []
         s = start
-        while s != ENDOFCHAIN and (most is None or len(out) < most):
+        while s != ENDOFCHAIN and (most is None or len(out) < most) and (size is None or len(out) * self.sector < size):
             self._claim(s, what)
             out.append(s)
             if s >= len(self._fat):
                 raise ParseError(f"CFB {what} sector has no FAT entry", self.name)
             s = self._fat[s]
-        if size is not None and len(out) * self.sector < size:
-            raise ParseError(f"CFB {what} chain ends before its declared size", self.name)
+        if size is not None:
+            if len(out) * self.sector < size:
+                raise ParseError(f"CFB {what} chain ends before its declared size", self.name)
+            if s != ENDOFCHAIN:
+                raise ParseError(f"CFB {what} chain is longer than its declared size", self.name)
         return out
 
     def _entry(self, raw: bytes, k: int) -> _Entry:
@@ -223,6 +228,8 @@ class Compound:
             m = self._minifat[m]
         if len(out) * (1 << MINI_SHIFT) < entry.size:
             raise ParseError("CFB mini chain ends before its declared size", f"{self.name}:{path}")
+        if m != ENDOFCHAIN:  # 필요한 섹터 뒤 다음 칸이 끝이어야 한다(큰 사슬·DIFAT 확인과 같다)
+            raise ParseError("CFB mini chain is longer than its declared size", f"{self.name}:{path}")
         return out
 
     def has(self, path: str) -> bool:
@@ -236,11 +243,15 @@ class Compound:
         chain = self._chains[path]
         if self.streams[path] >= MINI_CUTOFF:
             need = (take + self.sector - 1) // self.sector
-            return b"".join(self._sector(s) for s in chain[:need])[:take]
-        unit = 1 << MINI_SHIFT
-        need = (take + unit - 1) // unit
-        out = []
-        for m in chain[:need]:
-            big, at = divmod(m * unit, self.sector)
-            out.append(self._sector(self._mini[big])[at:at + unit])
-        return b"".join(out)[:take]
+            got = b"".join(self._sector(s) for s in chain[:need])[:take]
+        else:
+            unit = 1 << MINI_SHIFT
+            need = (take + unit - 1) // unit
+            out = []
+            for m in chain[:need]:
+                big, at = divmod(m * unit, self.sector)
+                out.append(self._sector(self._mini[big])[at:at + unit])
+            got = b"".join(out)[:take]
+        if len(got) < take:  # 마지막 섹터가 파일 끝에서 잘렸다(열 때는 섹터 번호만 봤다)
+            raise ParseError("CFB stream is truncated (the file ends before its declared size)", f"{self.name}:{path}")
+        return got

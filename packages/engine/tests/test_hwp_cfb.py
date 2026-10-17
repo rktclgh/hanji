@@ -84,7 +84,9 @@ def test_two_chains_sharing_a_big_sector_or_a_mini_sector_are_refused():
         start=entry(layout, "DocInfo")["start"]))
     assert error.location == "a.hwp:PrvText"
     refused("mini sector out of range", lambda layout: entry(layout, "PrvText").update(start=500))
-    refused("used twice", lambda layout: layout.entries[0].update(start=layout.places["BodyText/Section0"][0]))
+    # 뿌리(mini 스트림) 사슬이 큰 스트림과 섹터를 나눈다(크기를 사슬 길이에 맞춰야 '너무 김'보다 '공유'가 먼저 보인다)
+    refused("used twice", lambda layout: layout.entries[0].update(
+        start=layout.places["BodyText/Section0"][0], size=5000))
 
 
 def test_difat_and_fat_declarations_must_match_the_file():
@@ -140,3 +142,45 @@ def test_entry_names_are_checked_for_length_nul_forbidden_characters_and_case_fo
 def test_too_many_directory_entries_are_refused_before_reading_them(monkeypatch):
     monkeypatch.setattr(cfb, "MAX_DIR_ENTRIES", 4)
     refused("more than 4 CFB directory entries")
+
+
+def test_a_stream_cut_by_the_end_of_the_file_is_refused_when_read_in_both_the_big_and_the_mini_path():
+    # 큰 스트림: 마지막 섹터가 파일 끝에서 잘렸다(열기는 되고, 잘린 자리를 읽는 read만 거부)
+    big = B.compound(STREAMS)[:-150]
+    found = Compound(big, "a.hwp")
+    assert found.read("BodyText/Section1", 10) == b"b" * 11 and found.read("BodyText/Section0", 1 << 20) == b"a" * 5000
+    with pytest.raises(ParseError, match="stream is truncated") as info:
+        found.read("BodyText/Section1", 1 << 20)
+    assert info.value.location == "a.hwp:BodyText/Section1"
+    with pytest.raises(ParseError, match="stream is truncated"):
+        found.read("BodyText/Section1", 4990)  # 상한 + 1이 잘린 자리를 덮는다
+    # mini 스트림: mini 스트림의 마지막 큰 섹터가 잘렸다(작은 스트림만 있으면 mini 스트림이 파일 끝이다)
+    small = {k: v for k, v in STREAMS.items() if len(v) < 4096}
+    found = Compound(B.compound(small)[:-511], "a.hwp")
+    assert found.read("DocInfo", 1 << 20) == STREAMS["DocInfo"] and found.read("PrvText", 5) == b"p" * 6
+    with pytest.raises(ParseError, match="stream is truncated") as info:
+        found.read("PrvText", 1 << 20)
+    assert info.value.location == "a.hwp:PrvText"
+
+
+def test_a_chain_longer_than_the_declared_size_must_end_right_after_the_needed_sectors():
+    # 선언 크기를 줄여 사슬이 남는다(큰 섹터 사슬 둘째 칸이 끝이 아님): 큰·mini·mini 스트림(뿌리) 모두 거부
+    error = refused("longer than its declared size",
+                    lambda layout: entry(layout, "BodyText/Section0").update(size=4200))
+    assert error.location == "a.hwp:BodyText/Section0"
+    error = refused("mini chain is longer than its declared size",
+                    lambda layout: entry(layout, "DocInfo").update(size=64))
+    assert error.location == "a.hwp:DocInfo"
+    refused("mini stream chain is longer than its declared size",
+            lambda layout: layout.entries[0].update(size=500))
+
+    # 사슬이 다른 스트림의 섹터로 이어져도 먼저 '끝이 아님'으로 거부한다(큰 사슬은 필요한 만큼만 따른다)
+    def into_next(layout):
+        last = layout.places["BodyText/Section0"][0] + layout.places["BodyText/Section0"][1] - 1
+        layout.fat[last] = layout.places["BodyText/Section1"][0]
+
+    refused("longer than its declared size", into_next)
+    # 딱 맞는 크기(섹터·64B 경계)는 정상
+    exact = {"A": b"a" * 4096, "B": b"b" * 64, "C": b"c" * 1024 * 3}
+    found = Compound(B.compound(exact), "a.hwp")
+    assert found.read("A", 1 << 20) == exact["A"] and found.read("B", 1 << 20) == exact["B"]
