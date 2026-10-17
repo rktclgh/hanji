@@ -90,6 +90,8 @@ class Compound:
         minifat = self._chain(first_minifat, nminifat, "mini FAT") if nminifat else []
         if len(minifat) != nminifat:
             raise ParseError("CFB mini FAT sector count does not match the header", name)
+        if minifat and self._fat[minifat[-1]] != ENDOFCHAIN:  # 머리가 말한 개수 뒤에서 사슬이 끝나야 한다
+            raise ParseError("CFB mini FAT chain is longer than the header declares", name)
         self._minifat = _words(b"".join(self._sector(s) for s in minifat))
         self._mini = self._chain(root.start, None, "mini stream", root.size) if root.size else []
         self._mini_count = (root.size + (1 << MINI_SHIFT) - 1) >> MINI_SHIFT
@@ -203,7 +205,7 @@ class Compound:
             elif entry.child != NOSTREAM:
                 raise ParseError("CFB stream entry has children", f"{self.name}:{path}")
             else:
-                if path in self.streams:
+                if path in self.streams:  # 방어용: 위 형제 이름 검사가 먼저 걸려 닿지 않는다
                     raise ParseError("duplicate CFB stream path", f"{self.name}:{path}")
                 self.streams[path] = entry.size
                 self._chains[path] = self._stream_chain(entry, path)

@@ -74,6 +74,12 @@ def test_fat_chains_out_of_range_cyclic_or_shorter_than_declared_are_refused():
     refused("ends before its declared size", lambda layout: entry(layout, "BodyText/Section0").update(size=9000))
     refused("ends before its declared size", lambda layout: entry(layout, "DocInfo").update(size=4000))
 
+    def past_fat(layout):  # 파일엔 있지만 FAT 칸이 없는 섹터(FAT 한 섹터는 128칸)
+        layout.sectors += [bytearray(layout.sector) for _ in range(120)]
+        entry(layout, "BodyText/Section1").update(start=len(layout.sectors) - 1)
+
+    refused("has no FAT entry", past_fat)
+
 
 def test_two_chains_sharing_a_big_sector_or_a_mini_sector_are_refused():
     def share(layout):
@@ -111,6 +117,19 @@ def test_difat_and_fat_declarations_must_match_the_file():
 
     refused("longer than the header declares", difat_longer)
 
+    def difat_unmarked(layout):  # FAT에 DIFSECT 표시가 없다(FAT 배열 뒤는 FREESECT로 채워진다)
+        layout.sectors.append(bytearray(struct.pack("<128I", *[B.FREESECT] * 127, B.ENDOFCHAIN)))
+        layout.header.update(difat_first=len(layout.sectors) - 1, ndifat=1)
+
+    refused("DIFAT sector is not marked", difat_unmarked)
+
+    def difat_cut(layout):  # 마지막 섹터(DIFAT)가 파일 끝에서 잘렸다
+        layout.sectors.append(bytearray(struct.pack("<50I", *[B.FREESECT] * 50)))
+        layout.fat.append(B.DIFSECT)
+        layout.header.update(difat_first=len(layout.sectors) - 1, ndifat=1)
+
+    refused("DIFAT sector is truncated", difat_cut)
+
 
 def test_directory_tree_cycles_missing_unused_and_childful_stream_entries_are_refused():
     def index(layout, path):
@@ -134,14 +153,35 @@ def test_entry_names_are_checked_for_length_nul_forbidden_characters_and_case_fo
     refused("name length", lambda layout: entry(layout, "PrvText").update(name="가" * 33))
     refused("forbidden character", lambda layout: entry(layout, "PrvText").update(name="Prv/Text"))
     refused("forbidden character", lambda layout: entry(layout, "PrvText").update(name="Prv:Text"))
+    refused("forbidden character", lambda layout: entry(layout, "PrvText").update(name="Prv\\Text"))
+    refused("forbidden character", lambda layout: entry(layout, "PrvText").update(name="Prv!Text"))
+    refused("forbidden character", lambda layout: entry(layout, "PrvText").update(name="Prv\0Text"))  # 글자 사이 NUL
     error = refused("duplicate CFB entry name", streams={**STREAMS, "DOCINFO": b"x"})
     assert error.location in ("a.hwp:DocInfo", "a.hwp:DOCINFO")
     refused("duplicate CFB entry name", lambda layout: entry(layout, "BodyText/Section1").update(name="Section0"))
 
 
+def test_an_entry_name_that_is_not_valid_utf16_is_refused():
+    layout = []
+    data = bytearray(B.compound(STREAMS, tamper=layout.append))
+    at = (layout[0].places["dir"][0] + 1) * 512 + layout[0].entries.index(entry(layout[0], "PrvText")) * 128
+    data[at:at + 2] = b"\x00\xd8"  # 짝 없는 앞 대리 글자(길이·끝 NUL은 그대로)
+    refused(r"invalid CFB entry name \(a\.hwp\)", data=bytes(data))
+
+
 def test_too_many_directory_entries_are_refused_before_reading_them(monkeypatch):
     monkeypatch.setattr(cfb, "MAX_DIR_ENTRIES", 4)
     refused("more than 4 CFB directory entries")
+
+
+def test_the_mini_fat_must_have_exactly_the_declared_sectors_and_end_right_after_them():
+    refused("mini FAT sector count does not match", lambda layout: layout.header.update(
+        nminifat=layout.places["minifat"][1] + 1))
+    # 작은 스트림 셋(63개씩 → mini 섹터 189개)이 mini FAT 섹터 둘에 걸친다: 머리가 하나만 말하면 거부(자르지 않는다)
+    wide = {k: bytes([97 + n]) * 4000 for n, k in enumerate("ABC")}
+    assert Compound(B.compound(wide), "a.hwp").read("C", 1 << 20) == wide["C"]
+    refused("mini FAT chain is longer than the header declares", streams=wide,
+            tamper=lambda layout: layout.header.update(nminifat=1))
 
 
 def test_a_stream_cut_by_the_end_of_the_file_is_refused_when_read_in_both_the_big_and_the_mini_path():
