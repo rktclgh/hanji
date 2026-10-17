@@ -185,8 +185,20 @@ def deflate(data: bytes) -> bytes:
 
 
 # ---- DocInfo 쓰기 도구 ----
-DOCUMENT_PROPERTIES, ID_MAPPINGS, BORDER_FILL, CHAR_SHAPE, PARA_SHAPE = 0x10, 0x11, 0x14, 0x15, 0x19
+DOCUMENT_PROPERTIES, ID_MAPPINGS, BIN_DATA, BORDER_FILL, CHAR_SHAPE, PARA_SHAPE = 0x10, 0x11, 0x12, 0x14, 0x15, 0x19
 HEADS = ("NONE", "OUTLINE", "NUMBER", "BULLET")
+LINK, EMBEDDING, STORAGE = 0, 1, 2
+
+
+def bin_data(sid: int = 1, ext: str = "png", kind: int = EMBEDDING, mode: int = 0) -> bytes:
+    """BIN_DATA 몸: 속성(bit 0–3 종류, bit 4–5 압축 0 문서 따름·1 압축·2 비압축). 연결은 빈 절대·상대 경로, 포함은 저장
+    id + 확장자, OLE 저장소는 저장 id."""
+    attr = kind | mode << 4
+    if kind == LINK:
+        return struct.pack("<HHH", attr, 0, 0)
+    if kind == EMBEDDING:
+        return struct.pack("<HHH", attr, sid, len(ext)) + ext.encode("utf-16-le")
+    return struct.pack("<HH", attr, sid)
 
 
 def colorref(color: str) -> int:
@@ -215,19 +227,21 @@ def border_fill(color: str = "none", kind: int = 1) -> bytes:
 
 
 def docinfo(headings: Mapping[int, tuple[str, int]] = (), chars: Mapping[int, tuple[int, bool]] = (),
-            fills: Mapping[int, str] = (), sections: int = 1, extra: Sequence[bytes] = ()) -> bytes:
+            fills: Mapping[int, str] = (), sections: int = 1, extra: Sequence[bytes] = (),
+            bins: Sequence[bytes] = ()) -> bytes:
     """DocInfo 레코드(풀린 바이트). 인자는 build_hwpx_fixtures.header()와 같다(문단 모양 0 NONE·글자 모양 0 10pt·
     테두리 채움 1 none은 늘 있다). HWP id는 순번이라 id가 0(테두리 채움은 1)부터 이어져야 한다. extra는 끝에 붙일
-    레코드(레벨 1)."""
+    레코드(레벨 1). bins는 BIN_DATA 몸들(bin_data, ID_MAPPINGS 바로 뒤 레벨 1, 순번 1부터)."""
     headings = {0: ("NONE", 0), **dict(headings)}
     chars = {0: (1000, False), **dict(chars)}
     fills = {1: "none", **dict(fills)}
     assert list(headings) == list(range(len(headings))) and list(chars) == list(range(len(chars)))
     assert list(fills) == list(range(1, len(fills) + 1))
     counts = [0] * 18
-    counts[8], counts[9], counts[13] = len(fills), len(chars), len(headings)
+    counts[0], counts[8], counts[9], counts[13] = len(bins), len(fills), len(chars), len(headings)
     out = [record(DOCUMENT_PROPERTIES, 0, struct.pack("<H", sections) + bytes(24)),
            record(ID_MAPPINGS, 0, struct.pack("<18i", *counts))]
+    out += [record(BIN_DATA, 1, body) for body in bins]
     out += [record(BORDER_FILL, 1, border_fill(color)) for color in fills.values()]
     out += [record(CHAR_SHAPE, 1, char_shape(height, bold)) for height, bold in chars.values()]
     out += [record(PARA_SHAPE, 1, para_shape(kind, level)) for kind, level in headings.values()]
