@@ -100,8 +100,12 @@ def test_distribution_documents_give_preview_paragraphs_only_without_reading_the
     (region,) = parsed.regions
     assert (region.fallback_reason, region.region_id, region.gate.checks[0].name, region.gate.checks[0].value) == (
         "distribution_preview_only", "distribution", "preview_chars", 9)
+    assert [(c.name, c.value, c.passed, c.threshold) for c in region.gate.checks] == [
+        ("preview_chars", 9, True, None), ("truncated", 0, True, None)]
     odd = HwpParser().parse(B.document(broken_body, flags=0x4, extra={"PrvText": preview[:-1]}), "a.hwp")
     assert reasons(odd) == ["distribution_preview_only", "invalid_utf16"]
+    assert shown(odd) == shown(parsed)  # 홀수 바이트는 버린다(U+FFFD 줄을 만들지 않는다)
+    assert [(c.name, c.value) for c in odd.regions[1].gate.checks] == [("chars", 1)]
     monkeypatch.setattr(parser, "PRVTEXT_BYTES", 8)  # 앞부분만
     assert shown(HwpParser().parse(data, "a.hwp")) == [("paragraph", "첫 줄", 0.3)]
     for extra in ({}, {"PrvText": " \r\n".encode("utf-16-le")}):
@@ -111,6 +115,65 @@ def test_distribution_documents_give_preview_paragraphs_only_without_reading_the
     with pytest.raises(ParseError, match="DocInfo CHAR_SHAPE record too short"):  # DocInfo는 그래도 읽는다
         HwpParser().parse(B.document(head=B.record(B.CHAR_SHAPE, 0, bytes(10)), flags=0x4,
                                      extra={"PrvText": preview}), "a.hwp")
+
+
+def _preview(raw: bytes):
+    return HwpParser().parse(B.document(b"\xff" * 10, flags=0x4, extra={"PrvText": raw}), "a.hwp")
+
+
+def _texts(parsed) -> list[str]:
+    return [b["text"] for b in parsed.blocks]
+
+
+def test_a_distribution_preview_drops_an_odd_last_byte_without_a_replacement_char_block():
+    parsed = _preview("가나\n다라\n".encode("utf-16-le") + b"\x41")  # 마지막 줄바꿈 뒤 홀수 바이트
+    assert _texts(parsed) == ["가나", "다라"] and reasons(parsed) == ["distribution_preview_only", "invalid_utf16"]
+    assert [(c.name, c.value) for c in parsed.regions[1].gate.checks] == [("chars", 1)]
+    assert all("�" not in text for text in _texts(parsed))
+
+
+def test_a_distribution_preview_with_nothing_but_replacement_chars_or_spaces_is_an_error():
+    for raw in (" \r\n".encode("utf-16-le") + b"\x41", b"\x41", "\ud800".encode("utf-16-le", "surrogatepass"),
+                " �\n�".encode("utf-16-le")):
+        with pytest.raises(ParseError, match="preview text unavailable") as info:
+            _preview(raw)
+        assert info.value.location == "a.hwp:PrvText"
+
+
+def test_a_distribution_preview_keeps_real_text_around_replacement_chars_and_drops_only_replacement_lines():
+    raw = "가\ud800나\n�\n \ufffd \n다".encode("utf-16-le", "surrogatepass")
+    parsed = _preview(raw)
+    assert _texts(parsed) == ["가�나", "다"] and reasons(parsed) == ["distribution_preview_only", "invalid_utf16"]
+    assert [(c.name, c.value) for c in parsed.regions[1].gate.checks] == [("chars", 1)]  # 짝 없는 대리 문자만 센다
+
+
+def test_a_distribution_preview_cut_inside_a_surrogate_pair_is_truncation_not_invalid_utf16(monkeypatch):
+    raw = "가나😀다".encode("utf-16-le")  # 가(2) 나(2) 😀(4: 높은+낮은) 다(2)
+    for limit in (6, 7):  # 6: 높은 대리 문자에서 잘림, 7: 거기에 홀수 바이트까지
+        monkeypatch.setattr(parser, "PRVTEXT_BYTES", limit)
+        parsed = _preview(raw)
+        assert _texts(parsed) == ["가나"] and reasons(parsed) == ["distribution_preview_only"]
+        assert [(c.name, c.value, c.passed) for c in parsed.regions[0].gate.checks] == [
+            ("preview_chars", 2, True), ("truncated", 1, True)]
+    monkeypatch.setattr(parser, "PRVTEXT_BYTES", 8)  # 쌍이 온전히 들어간다
+    whole = _preview(raw)
+    assert _texts(whole) == ["가나😀"] and whole.regions[0].gate.checks[1].value == 1
+    monkeypatch.setattr(parser, "PRVTEXT_BYTES", len(raw))  # 딱 맞으면 잘린 게 아니다
+    exact = _preview(raw)
+    assert _texts(exact) == ["가나😀다"] and exact.regions[0].gate.checks[1].value == 0
+
+
+def test_a_lone_high_surrogate_at_the_end_of_an_untruncated_preview_is_still_invalid_utf16():
+    parsed = _preview("가나\ud83d".encode("utf-16-le", "surrogatepass"))
+    assert _texts(parsed) == ["가나�"] and reasons(parsed) == ["distribution_preview_only", "invalid_utf16"]
+    assert parsed.regions[0].gate.checks[1].value == 0
+
+
+def test_the_signature_copies_in_hwpx_parser_equal_the_hwp_ones():
+    from hanji.formats.hwp import cfb, stream
+    from hanji.formats.hwpx import parser as hwpx_parser
+
+    assert (hwpx_parser.OLE_SIGNATURE, hwpx_parser.HWP3_SIGNATURE) == (cfb.SIGNATURE, stream.HWP3_SIGNATURE)
 
 
 def test_sections_are_numbered_from_zero_without_gaps_and_docinfo_is_required():

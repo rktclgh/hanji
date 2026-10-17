@@ -9,7 +9,7 @@ ParseError. HP-A는 그림(BinData)을 읽지 않는다: 개체 컨트롤은 모
 import re
 from collections.abc import Mapping
 
-from hanji_contracts import RegionRecord
+from hanji_contracts import GateResult, RegionRecord
 
 from ...errors import ParseError
 from ..base import ParsedSource
@@ -59,20 +59,31 @@ def _sections(cfb: Compound) -> list[str]:
 
 
 def _distribution(cfb: Compound) -> tuple[tuple[dict, ...], tuple[RegionRecord, ...]]:
-    """배포용 문서(§9): PrvText(UTF-16LE)를 PRVTEXT_BYTES까지 읽어 공백만이 아닌 줄마다 구조 문단(신뢰도 0.3)과
-    처리 이력 distribution_preview_only 하나. 홀수 바이트·짝 없는 대리 문자는 U+FFFD와 invalid_utf16."""
+    """배포용 문서(§9): PrvText(UTF-16LE)를 PRVTEXT_BYTES까지 읽어 U+FFFD·공백뿐이 아닌 줄마다 구조 문단(신뢰도 0.3)과
+    처리 이력 distribution_preview_only 하나(preview_chars, truncated). 홀수 바이트는 버리고 짝 없는 대리 문자는
+    U+FFFD, 둘 다 invalid_utf16. 한도에서 잘린 끝(홀수 바이트·높은 대리 문자)은 잘림이지 오류가 아니다."""
     location = f"{cfb.name}:PrvText"
-    raw = cfb.read("PrvText", PRVTEXT_BYTES)[:PRVTEXT_BYTES] if cfb.has("PrvText") else b""
-    text, bad = utf16(wchars(raw))
+    raw = cfb.read("PrvText", PRVTEXT_BYTES) if cfb.has("PrvText") else b""
+    truncated = len(raw) > PRVTEXT_BYTES  # read는 한도 + 1바이트까지 준다
+    raw = raw[:PRVTEXT_BYTES]
+    bad = 0
     if len(raw) % 2:
-        text += "�"
-        bad += 1
-    if not text.strip():
+        raw = raw[:-1]  # 홀수 바이트의 끝은 버린다
+        bad += not truncated
+    units = wchars(raw)
+    if truncated and units and 0xD800 <= units[-1] <= 0xDBFF:  # 한도에 잘린 대리쌍의 앞쪽
+        del units[-1]
+    text, lone = utf16(units)
+    bad += lone
+    if not text.replace("�", "").strip():
         raise ParseError("distribution document: content is encrypted (preview text unavailable)", location)
     specs = [{"kind": "paragraph", "text": line.strip(), "confidence": RESCUED_CONFIDENCE, "state": "det",
               "text_source": "native", "_anchor": k, "_late": False}
-             for k, line in enumerate(LINES.split(text)) if line.strip()]
-    regions = [Region("distribution", "paragraph", DISTRIBUTION, 0, 0, gate("preview_chars", ink(text), None),
+             for k, line in enumerate(LINES.split(text)) if line.replace("�", "").strip()]
+    shown = gate("preview_chars", ink(text), None)
+    flag = gate("truncated", int(truncated), None)
+    regions = [Region("distribution", "paragraph", DISTRIBUTION, 0, 0,
+                      GateResult(passed=shown.passed and flag.passed, checks=shown.checks + flag.checks),
                       "distribution")]
     if bad:
         regions.append(Region("invalid-utf16", "paragraph", INVALID_UTF16, 0, 0, gate("chars", bad, None)))
