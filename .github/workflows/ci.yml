@@ -74,6 +74,9 @@ jobs:
       # DOCX 골든도 zip 헤더 바이트까지 비교한다(HWPX와 같은 이유로 전체 테스트보다 먼저)
       - name: Engine OOXML fixtures up to date
         run: uv run python -W error::EncodingWarning packages/engine/tests/build_ooxml_fixtures.py --check
+      # HWP 쌍둥이 골든: 복합 파일 입력 바이트(압축판은 푼 스트림)와 HWPX 기대값 대조(전체 테스트보다 먼저)
+      - name: Engine HWP fixtures up to date
+        run: uv run python -W error::EncodingWarning packages/engine/tests/build_hwp_fixtures.py --check
       - name: Tests
         # EncodingWarning 오류화는 pyproject filterwarnings가 한다. 명령줄 -W는 그 안의 pypdfium2 예외 필터를 덮어쓰므로 쓰지 않는다
         env:

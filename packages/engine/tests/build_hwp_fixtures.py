@@ -1,16 +1,35 @@
-"""HWP 5.0 합성 문서 쓰기 도구(지어낸 한국어 글자만).
+"""HWP 5.0 합성 문서 쓰기 도구와 쌍둥이 골든 예제 생성기(지어낸 한국어 글자만, HWP 스펙 §11.1).
+
+    uv run python packages/engine/tests/build_hwp_fixtures.py          # fixtures/hwp/inputs/ 재생성
+    uv run python packages/engine/tests/build_hwp_fixtures.py --check  # 입력이 최신이고 쌍둥이가 맞는지 확인
 
 자체 OLE 복합 파일(MS-CFB) 쓰기 도구: 512B 섹터(major 3) 또는 4096B(major 4), FAT·mini FAT·디렉터리, 고정 차례(경로
 이름 차례, 형제는 CFB 비교 규칙 차례로 right에 잇는다), 시각 0. 레코드 쓰기 도구: 레코드 머리(0xFFF 확장 크기),
 FileHeader, raw deflate, DocInfo(build_hwpx_fixtures.header()와 같은 인자), 문단(PARA_HEADER·PARA_TEXT·
-PARA_CHAR_SHAPE·PARA_LINE_SEG)과 컨트롤, 문서 하나(document). 테스트는 이 파일을 importlib로 읽어 쓰기 도구를 쓰고, tamper로 직렬화 직전
-배치를 고쳐 잘못된 파일을 만든다.
+PARA_CHAR_SHAPE·PARA_LINE_SEG)과 컨트롤, 문서 하나(document). 테스트는 이 파일을 importlib로 읽어 쓰기 도구를 쓰고,
+tamper로 직렬화 직전 배치를 고쳐 잘못된 파일을 만든다.
+
+쌍둥이 골든: HWP 입력은 build_hwpx_fixtures.py의 같은 예제(구역 XML·header.xml)를 레코드로 옮겨 만들고, 기대값은 HWPX
+골든(fixtures/hwpx/expected)을 그대로 쓴다. 비교는 형식 정체성(source.name·mime·content_hash, document_id)만 가리고
+block_id는 블록 순번으로 바꾼다(참조도 같이). HWP에 같은 것이 없는 HWPX 처리 이력은 DROPPED에 적은 것만 뺀다.
 """
 
+import argparse
+import hashlib
+import importlib.util
+import json
 import struct
+import sys
+import xml.etree.ElementTree as ET
 import zlib
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
+
+from hanji.core import build_tree
+from hanji.formats.hwp import HwpParser
+from hanji.formats.hwp.cfb import Compound
+from hanji_contracts import DocumentTree, ProcessingHistory, SourceInfo
 
 SIGNATURE = bytes.fromhex("d0cf11e0a1b11ae1")
 DIFSECT, FATSECT, ENDOFCHAIN, FREESECT = 0xFFFFFFFC, 0xFFFFFFFD, 0xFFFFFFFE, 0xFFFFFFFF
@@ -287,3 +306,159 @@ def document(*sections: bytes, head: bytes | None = None, compressed: bool = Fal
     streams.update({f"BodyText/Section{k}": pack(data) for k, data in enumerate(sections)})
     streams.update(dict(extra))
     return compound(streams, major=major)
+
+
+# ---- HWPX 예제 → HWP 레코드(쌍둥이 입력) ----
+HERE = Path(__file__).resolve().parent
+
+
+def _hwpx_builder():
+    spec = importlib.util.spec_from_file_location("engine_build_hwpx_fixtures", HERE / "build_hwpx_fixtures.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+HX = _hwpx_builder()
+OWPML = "{http://www.hancom.co.kr/hwpml/2011/paragraph}"
+HEAD_NS = "{http://www.hancom.co.kr/hwpml/2011/head}"
+CORE_NS = "{http://www.hancom.co.kr/hwpml/2011/core}"
+MARKS = {"tab": TAB, "lineBreak": LINE_BREAK, "nbSpace": NB_SPACE, "fwSpace": FW_SPACE, "titleMark": TITLE_MARK}
+
+
+def from_section(xml: str) -> bytes:
+    """HWPX 구역 XML(hp:p·hp:run·hp:t와 그 안 인라인 요소·hp:linesegarray만) → 구역 레코드. 런마다 글자 모양 경계
+    (시작 위치, charPrIDRef), hp:t 안 모르는 요소는 그 글자만 남긴다(HWP에는 그런 구조가 없다: 형광펜은 영역 태그다)."""
+    out = []
+    for p in ET.fromstring(xml):
+        items: list[str | list[int]] = []
+        shapes = []
+        for run in p.iterfind(f"{OWPML}run"):
+            shapes.append((len(units(*items)), int(run.get("charPrIDRef", "0"))))
+            for t in run:
+                if t.tag != f"{OWPML}t":
+                    raise ValueError(f"not an HP-A twin element: {t.tag}")
+                items.append(t.text or "")
+                for child in t:
+                    name = child.tag.removeprefix(OWPML)
+                    items.append(MARKS[name] if name in MARKS else "".join(child.itertext()))
+                    items.append(child.tail or "")
+        segs = p.find(f"{OWPML}linesegarray")
+        lines = len(segs) if segs is not None else None
+        text = [item for item in items if item != ""]
+        out.append(paragraph(*text, pr=int(p.get("paraPrIDRef", "0")), style=int(p.get("styleIDRef", "0")),
+                             shapes=shapes or ((0, 0),), lines=lines))
+    return b"".join(out)
+
+
+def from_header(xml: str) -> bytes:
+    """HWPX header.xml(build_hwpx_fixtures.header()) → DocInfo 레코드(같은 id: 문단·글자 모양 0부터, 테두리 채움 1부터)."""
+    root = ET.fromstring(xml)
+    headings = {int(e.get("id")): (e.find(f"{HEAD_NS}heading").get("type"), int(e.find(f"{HEAD_NS}heading").get(
+        "level"))) for e in root.iter(f"{HEAD_NS}paraPr")}
+    chars = {int(e.get("id")): (int(e.get("height")), e.find(f"{HEAD_NS}bold") is not None)
+             for e in root.iter(f"{HEAD_NS}charPr")}
+    fills = {int(e.get("id")): e.find(f".//{CORE_NS}winBrush").get("faceColor")
+             for e in root.iter(f"{HEAD_NS}borderFill")}
+    return docinfo(headings=headings, chars=chars, fills=fills)
+
+
+# ---- 쌍둥이 골든 예제 ----
+BASIC = [from_section(s) for s in HX.BASIC]
+SAMPLES: dict[str, bytes] = {
+    "basic.hwp": document(*BASIC, head=from_header(HX.BASIC_HEAD)),
+    "headings.hwp": document(*(from_section(s) for s in HX.HEADINGS), head=from_header(HX.HEAD_SIZES)),
+    "empty.hwp": document(from_section(HX.section(HX.para())), head=from_header(HX.header())),
+    "basic-deflate.hwp": document(*BASIC, head=from_header(HX.BASIC_HEAD), compressed=True),
+}
+TWINS = {"basic.hwp": "basic", "headings.hwp": "headings", "empty.hwp": "empty", "basic-deflate.hwp": "basic"}
+# HWP에 같은 구조가 없어 HWP 출력에 없는 HWPX 처리 이력(region_id): hp:t 안 모르는 요소(형광펜)
+DROPPED = {"basic": ("s1-p10-unknown-inline-0",)}
+ROOT = HERE / "fixtures" / "hwp"
+HWPX_EXPECTED = HERE / "fixtures" / "hwpx" / "expected"
+COMPRESSED_STREAMS = ("DocInfo", "BodyText/")
+
+
+def golden(name: str, data: bytes) -> tuple[DocumentTree, ProcessingHistory]:
+    """엔진 ingest와 같은 SourceInfo로 만든 트리와 처리 이력."""
+    parsed = HwpParser().parse(data, name)
+    source = SourceInfo(name=name, mime=parsed.mime, content_hash="sha256:" + hashlib.sha256(data).hexdigest())
+    tree = build_tree(parsed, "fx-hwp-" + Path(name).stem, 1, source)
+    return tree, ProcessingHistory(document_id=tree.document_id, version=1, regions=parsed.regions)
+
+
+def twin_key(tree: dict, history: dict) -> dict:
+    """비교 키: 형식 정체성(source.name·mime·content_hash, document_id)만 가리고, block_id는 블록 순번(#k)으로 바꾼다
+    (그 id를 가리키는 값도 같은 순번으로). 그 밖 모든 필드는 그대로 비교한다."""
+    ids = {block["block_id"]: f"#{block['order']}" for block in tree["blocks"]}
+
+    def walk(value: object) -> object:
+        if isinstance(value, dict):
+            return {k: walk(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [walk(v) for v in value]
+        return ids.get(value, value) if isinstance(value, str) else value
+
+    tree = walk({k: v for k, v in tree.items() if k != "document_id"})  # type: ignore[assignment]
+    tree["source"] = {k: v for k, v in tree["source"].items() if k not in ("name", "mime", "content_hash")}
+    return {"tree": tree, "regions": history["regions"]}
+
+
+def expected_key(stem: str) -> dict:
+    """HWPX 골든 기대값의 비교 키(DROPPED에 적은 처리 이력은 뺀다)."""
+    tree = json.loads((HWPX_EXPECTED / f"{stem}.json").read_bytes())
+    history = json.loads((HWPX_EXPECTED / f"{stem}.history.json").read_bytes())
+    history["regions"] = [r for r in history["regions"] if r["region_id"] not in DROPPED.get(stem, ())]
+    return twin_key(tree, history)
+
+
+def twin_ok(name: str, data: bytes) -> bool:
+    tree, history = golden(name, data)
+    return twin_key(tree.model_dump(mode="json"), history.model_dump(mode="json")) == expected_key(TWINS[name])
+
+
+def streams_of(data: bytes) -> dict[str, bytes]:
+    """복합 파일의 스트림 경로 → 바이트(압축 스트림은 푼 것: zlib 판마다 압축 바이트가 다를 수 있다)."""
+    cfb = Compound(data, "x")
+    header = cfb.read("FileHeader", 256)
+    compressed = bool(struct.unpack_from("<I", header, 36)[0] & 1)
+    out = {}
+    for path in cfb.streams:
+        raw = cfb.read(path, 1 << 30)
+        out[path] = zlib.decompress(raw, -15) if compressed and path.startswith(COMPRESSED_STREAMS) else raw
+    return out
+
+
+def same(name: str, built: bytes, path: Path) -> bool:
+    """입력 비교: 압축판은 스트림을 풀어 비교하고, 그 밖은 바이트 그대로."""
+    if not path.exists():
+        return False
+    old = path.read_bytes()
+    if "deflate" in name:
+        return streams_of(old) == streams_of(built)
+    return old == built
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="hanji HWP twin fixtures")
+    parser.add_argument("--check", action="store_true")
+    args = parser.parse_args(argv)
+    bad = []
+    for name, data in SAMPLES.items():
+        path = ROOT / "inputs" / name
+        if args.check:
+            if not same(name, data, path):
+                bad.append(f"stale fixture: inputs/{name}")
+            elif not twin_ok(name, path.read_bytes()):
+                bad.append(f"twin mismatch: inputs/{name} vs hwpx/expected/{TWINS[name]}")
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+            print(path)
+    for line in bad:
+        print(line, file=sys.stderr)
+    return 1 if bad else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
