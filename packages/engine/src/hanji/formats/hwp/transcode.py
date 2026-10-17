@@ -8,7 +8,10 @@ k번째 자식 CTRL_HEADER와 짝짓는다. 컨트롤: 글자 없는 자리 컨�
 오프셋 8부터 열·행 주소·열·행 병합, 32 테두리 채움, 6의 bit 2 제목 칸), 그리기 개체(gso)는 첫 SHAPE_COMPONENT의 종류
 ID로 hp:pic(그림 레코드 오프셋 71의 BinData 순번, 현재 크기가 처음 크기와 같으면 curSz 0 — HWPX와 같다)·도형(첫 리스트는
 hp:drawText)·hp:container(자식 SHAPE_COMPONENT마다, ID는 한 번만 적힌다)·hp:ole·hp:chart·hp:video·hp:textart@text, 그 앞
-리스트는 캡션, 수식은 hp:equation/hp:script(EQEDIT 스크립트). 리스트는 LIST_HEADER와 그 뒤 같은 레벨 문단들이다.
+리스트는 캡션, 수식은 hp:equation/hp:script(EQEDIT 스크립트), 머리말·꼬리말은 hp:ctrl/hp:header·hp:footer
+@applyPageType(몸 오프셋 4 bit 0–1: 양쪽·짝·홀), 각주·미주·숨은 설명은 hp:ctrl/hp:footNote·hp:endNote·hp:hiddenComment, 모두
+첫 리스트가 hp:subList다. 구역 정의 아래 리스트(바탕쪽)는 옮기지 않고 글자 레코드를 건너뛴 것으로 적고 공백 아닌 글자 수만
+센다(Section.masters, 파서가 masterpage_text_skipped로). 리스트는 LIST_HEADER와 그 뒤 같은 레벨 문단들이다.
 몸 레코드가 없는 컨트롤과 모르는 ID는 hp:ctrl/hp:unknownObject/hp:subList 아래로 그 아래 문단을 옮기고(처리부가 모르는
 요소라 블록이 없고 장부가 글자를 살린다, unknown_control), 아는 컨트롤에서 어느 리스트에도 들지 않은 문단도 그 뒤에 같은
 길로 둔다(글자를 조용히 잃지 않는다). gso 아래 둘째 이후 SHAPE_COMPONENT는 옮기지 않고 unknown_control만 남긴다. 글맵시
@@ -54,6 +57,9 @@ P, RUN, T, CTRL, SUBLIST = f"{HP}p", f"{HP}run", f"{HP}t", f"{HP}ctrl", f"{HP}su
 TBL, TR, TC, CAPTION = f"{HP}tbl", f"{HP}tr", f"{HP}tc", f"{HP}caption"
 SIDES = ("LEFT", "RIGHT", "TOP", "BOTTOM")  # 캡션 속성 bit 0–1(짝 표 캡션 3개 모두 2 → TOP)
 SCRIPT, TEXTART_TAG = f"{HP}script", f"{HP}textart"
+PAGES = ("BOTH", "EVEN", "ODD", "BOTH")  # 머리말·꼬리말 속성 bit 0–1(3은 정의가 없다)
+LISTED = {"head": f"{HP}header", "foot": f"{HP}footer", "fn  ": f"{HP}footNote", "en  ": f"{HP}endNote",
+          "tcmt": f"{HP}hiddenComment"}  # 리스트 하나를 hp:ctrl 아래 요소로 옮기는 컨트롤
 SHAPES = {"$rec": "rect", "$ell": "ellipse", "$arc": "arc", "$pol": "polygon", "$cur": "curve", "$lin": "line",
           "$col": "connectLine"}  # SHAPE_COMPONENT 종류 ID → 그리기 요소(글상자 리스트가 있을 수 있다)
 # 글자 없는 자리 컨트롤(빈 hp:ctrl). 필드(%로 시작)도 같다. 리스트·문단이 달리면 모르는 컨트롤 경로다
@@ -156,11 +162,12 @@ class Audit:
 
 @dataclass(slots=True)
 class Section:
-    """옮겨 쓴 구역: 트리, 처리 이력(처리부 앞), 장부 숫자, 장부 처리 이력(있으면)."""
+    """옮겨 쓴 구역: 트리, 처리 이력(처리부 앞, 장부 처리 이력 포함), 장부 숫자, 바탕쪽 글자 수."""
 
     root: ET.Element
     regions: list[Region] = field(default_factory=list)
     audit: Audit = Audit(0, 0, 0)
+    masters: list[int] = field(default_factory=list)  # 바탕쪽 리스트마다 공백 아닌 글자 수(구역 안 차례)
 
 
 class _Writer:
@@ -175,6 +182,7 @@ class _Writer:
         self.unknown: set[int] = set()  # unknown_control을 남긴 문단(id)
         self.dropped = False  # 지금 컨트롤의 묶음 안에서 모르는 도형이 빠졌나
         self.used: set[int] = set()  # 리스트로 옮긴 PARA_HEADER 순번(어느 리스트에도 들지 않은 문단을 찾는다)
+        self.masters: list[int] = []  # 바탕쪽 리스트마다 공백 아닌 글자 수
 
     def node(self, parent: ET.Element, tag: str, depth: int, **attrs: str) -> ET.Element:
         self.nodes.count += 1
@@ -372,7 +380,9 @@ class _Writer:
                 if chars:
                     self.region("control-text", CONTROL_TEXT, anchor, "chars", chars)
             return
-        build = {"tbl ": self.table, "gso ": self.gso, "eqed": self.equation}.get(ident)
+        builders = {"tbl ": self.table, "gso ": self.gso, "eqed": self.equation, "secd": self.masterpages,
+                    **dict.fromkeys(LISTED, self.listed)}
+        build = builders.get(ident)
         self.dropped = False
         if build is None or not build(run, record, anchor, depth):
             self.unknown_object(run, paras, p, anchor, depth)
@@ -386,6 +396,44 @@ class _Writer:
         rest = [header for header in paras if header.index not in self.used]
         if rest:
             self.unknown_object(run, rest, p, anchor, depth)
+
+    def listed(self, run: ET.Element, record: Record, anchor: int, depth: int) -> bool:
+        """머리말·꼬리말·각주·미주·숨은 설명: hp:ctrl/요소/hp:subList(첫 리스트). 리스트가 없으면 거짓."""
+        ident = control_id(record.body)
+        found = self.lists(record.children, anchor)
+        if not found:
+            return False
+        attrs = {}
+        if ident in ("head", "foot"):
+            if len(record.body) < 8:
+                raise ParseError(f"CTRL_HEADER {ident} record too short", f"{self.location}#{record.index}")
+            attrs["applyPageType"] = PAGES[struct.unpack_from("<I", record.body, 4)[0] & 3]
+        element = self.node(self.node(run, CTRL, depth), LISTED[ident], depth + 1, **attrs)
+        self.sublist(element, found[0][1], anchor, depth + 2)
+        return True
+
+    def masterpages(self, run: ET.Element, record: Record, anchor: int, depth: int) -> bool:
+        """구역 정의 아래 리스트(바탕쪽, HWPX의 masterpage 멤버): 옮기지 않는다. 그 문단 아래 글자 레코드는 모두 건너뛴
+        것으로 적고, 리스트마다 PARA_TEXT의 공백 아닌 글자 수를 센다. 리스트가 없으면 거짓(빈 자리 컨트롤)."""
+        found = self.lists(record.children, anchor)
+        if not found:
+            return False
+        self.node(run, CTRL, depth)
+        for _, paras in found:
+            chars = 0
+            stack = list(paras)
+            while stack:
+                r = stack.pop()
+                stack.extend(r.children)
+                if r.tag == PARA_HEADER:
+                    self.used.add(r.index)
+                elif r.tag in (PARA_TEXT, EQEDIT, TEXTART) or (
+                        r.tag == CTRL_HEADER and control_id(r.body) in TEXT_CONTROLS):
+                    self.skipped.add(r.index)
+                    if r.tag == PARA_TEXT:
+                        chars += ink(canonical(r, self.location))
+            self.masters.append(chars)
+        return True
 
     def unknown_object(self, run: ET.Element, paras: list[Record], p: ET.Element, anchor: int, depth: int) -> None:
         """hp:ctrl/hp:unknownObject/hp:subList 아래 문단들(처리부가 모르는 요소: 장부가 글자를 살린다)."""
@@ -684,7 +732,7 @@ def section(records: list[Record], index: int, base: int, location: str, nodes: 
         if record.tag == PARA_HEADER:
             anchor += 1
             writer.paragraph(root, record, anchor, 2)
-    result = Section(root, writer.regions)
+    result = Section(root, writer.regions, masters=writer.masters)
     unknown = unknown_records(records)
     if unknown:
         result.regions.append(Region("unknown-record", "paragraph", UNKNOWN_RECORD, index, base,

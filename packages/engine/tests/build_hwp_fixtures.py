@@ -392,6 +392,31 @@ def equation(level: int, script: str, caption: bytes = b"") -> bytes:
     return control("eqed", level, caption, record(EQEDIT, level + 1, body), body=OBJECT)
 
 
+# ---- 개체 쓰기 도구(머리말·꼬리말·주석·숨은 설명·바탕쪽) ----
+PAGES = ("BOTH", "EVEN", "ODD")
+
+
+def margin(level: int, kind: str, *paras: bytes, apply: str = "BOTH") -> bytes:
+    """머리말(head)·꼬리말(foot) 컨트롤(level, 몸 12B: 속성 bit 0–1 적용 쪽) + 리스트(34B, paras는 레벨 level + 1)."""
+    return control(kind, level, listed(level + 1, *paras, tail=bytes(26)), body=struct.pack("<I", PAGES.index(apply))
+                   + bytes(4))
+
+
+def note(level: int, kind: str, *paras: bytes) -> bytes:
+    """각주(fn  )·미주(en  ) 컨트롤(level, 몸 20B) + 리스트(16B)."""
+    return control(kind, level, listed(level + 1, *paras, tail=bytes(8)), body=bytes(16))
+
+
+def hidden(level: int, *paras: bytes) -> bytes:
+    """숨은 설명(tcmt) 컨트롤(level) + 리스트."""
+    return control("tcmt", level, listed(level + 1, *paras, tail=bytes(8)))
+
+
+def section_def(level: int, *masters: Sequence[bytes]) -> bytes:
+    """구역 정의(secd) 컨트롤(level) + 바탕쪽 리스트들(masters: 리스트마다 레벨 level + 1 문단들, 34B LIST_HEADER)."""
+    return control("secd", level, *(listed(level + 1, *paras, tail=bytes(26)) for paras in masters), body=bytes(34))
+
+
 def paragraph(*items: str | list[int], level: int = 0, pr: int = 0, style: int = 0,
               shapes: Sequence[tuple[int, int]] = ((0, 0),), lines: int | None = 1, controls: Sequence[bytes] = (),
               nchars: int | None = None, text: Sequence[int] | None = None) -> bytes:

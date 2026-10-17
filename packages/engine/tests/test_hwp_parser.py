@@ -62,6 +62,18 @@ def test_pictures_read_their_bin_data_stream_and_keep_the_caption_link():
     assert all(c.ok for c in counts) and all(a.ok for a in audits)
 
 
+def test_masterpage_text_is_counted_after_all_sections_like_hwpx():
+    first = B.section_def(1, [B.paragraph("첫 바탕쪽", level=2)], [B.paragraph(level=2)])
+    second = B.section_def(1, [B.paragraph("둘째 구역 바탕쪽", level=2)])
+    data = B.document(B.paragraph(B.extended(2, "secd"), "첫 구역", controls=[first]),
+                      B.paragraph(B.extended(2, "secd"), "둘째 구역", controls=[second]), head=B.docinfo(sections=2))
+    parsed, counts, audits = HwpParser()._parse(data, "a.hwp")
+    assert shown(parsed) == [("paragraph", "첫 구역", 1.0), ("paragraph", "둘째 구역", 1.0)]
+    assert [(r.fallback_reason, r.region_id, r.gate.checks[0].value) for r in parsed.regions] == [
+        ("masterpage_text_skipped", "masterpage-0", 4), ("masterpage_text_skipped", "masterpage-2", 7)]
+    assert all(c.ok for c in counts) and all(a.ok for a in audits)
+
+
 def test_unknown_controls_rescue_their_text_at_section_end_and_both_ledgers_agree():
     table = B.control("tbl ", 1, B.list_header(2, 1), B.paragraph("칸 글", level=2))
     deep = B.list_header(64, 0)

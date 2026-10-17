@@ -421,6 +421,39 @@ def test_shape_components_after_the_first_under_a_drawing_object_are_recorded_on
     assert [r.anchor for r in result.regions] == [0, 1] and result.audit.ok
 
 
+def test_margins_notes_and_hidden_comments_become_their_owpml_controls():
+    controls = [B.margin(1, "head", B.paragraph("머리말", level=2)),
+                B.margin(1, "foot", B.paragraph("꼬리말 첫째", level=2), B.paragraph("꼬리말 둘째", level=2), apply="ODD"),
+                B.margin(1, "head", B.paragraph("짝수 쪽 머리말", level=2), apply="EVEN"),
+                B.note(1, "fn  ", B.paragraph("각주 글", level=2)), B.note(1, "en  ", B.paragraph("미주 글", level=2)),
+                B.hidden(1, B.paragraph("숨은 설명 글", level=2))]
+    codes = [B.extended(16, "head"), B.extended(16, "foot"), B.extended(16, "head"), B.extended(17, "fn  "),
+             B.extended(17, "en  "), B.extended(15, "tcmt")]
+    result = section(B.paragraph("본문", *codes, controls=controls))
+    run = result.root[0].find(f"{HP}run")
+    assert [tags(e) for e in run][1:] == [
+        ["ctrl", {}, [["header", {"applyPageType": "BOTH"}, [["subList", {}, [["p", "머리말"]]]]]]],
+        ["ctrl", {}, [["footer", {"applyPageType": "ODD"}, [["subList", {}, [["p", "꼬리말 첫째"], ["p", "꼬리말 둘째"]]]]]]],
+        ["ctrl", {}, [["header", {"applyPageType": "EVEN"}, [["subList", {}, [["p", "짝수 쪽 머리말"]]]]]]],
+        ["ctrl", {}, [["footNote", {}, [["subList", {}, [["p", "각주 글"]]]]]]],
+        ["ctrl", {}, [["endNote", {}, [["subList", {}, [["p", "미주 글"]]]]]]],
+        ["ctrl", {}, [["hiddenComment", {}, [["subList", {}, [["p", "숨은 설명 글"]]]]]]]]
+    assert result.regions == [] and result.audit.ok
+    with pytest.raises(ParseError, match="CTRL_HEADER foot record too short") as info:
+        section(B.paragraph(B.extended(16, "foot"),
+                            controls=[B.control("foot", 1, B.listed(2, B.paragraph("글", level=2)))]))
+    assert info.value.location == "a.hwp:BodyText/Section0#4"
+
+
+def test_masterpage_lists_are_not_transcoded_and_count_their_characters():
+    table = B.table(3, 1, 1, B.cell(4, 0, 0, B.paragraph("바탕쪽 표 칸", level=4)))
+    secd = B.section_def(1, [B.paragraph("바탕쪽 글", B.extended(11, "tbl "), level=2, controls=[table])], [],
+                         [B.paragraph("홀수 쪽", B.TAB, "바탕", level=2)])
+    result = section(B.paragraph(B.extended(2, "secd"), "본문", controls=[secd]))
+    assert shape(result.root[0]) == [("0", [("ctrl", []), ("본문", [])])]
+    assert result.masters == [9, 0, 5] and result.regions == [] and result.audit.ok  # 표 칸 글자도 센다
+
+
 def test_char_shape_bounds_after_the_text_fold_into_one_empty_run():
     many = [(0, 1)] + [(10 + k, k % 7) for k in range(5000)]
     result = section(B.paragraph("가나다", shapes=many))
