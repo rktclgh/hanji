@@ -51,8 +51,7 @@ class Package(Archive):
     구역 멤버 이름, masterpages는 zip의 마스터 쪽 멤버 이름이다."""
 
     def __init__(self, data: bytes, name: str) -> None:
-        super().__init__(data, name, "not an HWPX (zip) package (HWP 5.0 binary documents are not supported yet)",
-                         _limits)
+        super().__init__(data, name, "not an HWPX (zip) package", _limits)
         self._mimetype()
         self.items, spine = self._content()
         self.sections = self._spine(spine)

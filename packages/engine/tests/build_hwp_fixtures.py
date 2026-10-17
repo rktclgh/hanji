@@ -3,7 +3,7 @@
 자체 OLE 복합 파일(MS-CFB) 쓰기 도구: 512B 섹터(major 3) 또는 4096B(major 4), FAT·mini FAT·디렉터리, 고정 차례(경로
 이름 차례, 형제는 CFB 비교 규칙 차례로 right에 잇는다), 시각 0. 레코드 쓰기 도구: 레코드 머리(0xFFF 확장 크기),
 FileHeader, raw deflate, DocInfo(build_hwpx_fixtures.header()와 같은 인자), 문단(PARA_HEADER·PARA_TEXT·
-PARA_CHAR_SHAPE·PARA_LINE_SEG)과 컨트롤. 테스트는 이 파일을 importlib로 읽어 쓰기 도구를 쓰고, tamper로 직렬화 직전
+PARA_CHAR_SHAPE·PARA_LINE_SEG)과 컨트롤, 문서 하나(document). 테스트는 이 파일을 importlib로 읽어 쓰기 도구를 쓰고, tamper로 직렬화 직전
 배치를 고쳐 잘못된 파일을 만든다.
 """
 
@@ -274,3 +274,16 @@ def paragraph(*items: str | list[int], level: int = 0, pr: int = 0, style: int =
     if lines is not None:
         out.append(record(PARA_LINE_SEG, level + 1, bytes(36 * lines)))
     return b"".join(out) + b"".join(controls)
+
+
+def document(*sections: bytes, head: bytes | None = None, compressed: bool = False, flags: int = 0,
+             version: tuple[int, int, int, int] = (5, 1, 0, 1), extra: Mapping[str, bytes] = (),
+             major: int = 3) -> bytes:
+    """HWP 문서 바이트: FileHeader, DocInfo(head, 없으면 docinfo()), BodyText/Section{k}(풀린 레코드 바이트), extra
+    스트림. compressed면 DocInfo·구역을 raw deflate로 싸고 FileHeader bit 0을 세운다."""
+    pack = deflate if compressed else bytes
+    streams = {"FileHeader": file_header(version, flags | int(compressed)),
+               "DocInfo": pack(docinfo(sections=len(sections)) if head is None else head)}
+    streams.update({f"BodyText/Section{k}": pack(data) for k, data in enumerate(sections)})
+    streams.update(dict(extra))
+    return compound(streams, major=major)
