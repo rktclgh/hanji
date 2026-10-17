@@ -1,11 +1,14 @@
 """구역 레코드 트리 → OWPML 부분집합 요소 트리(HWP 스펙 §7)와 옮겨 쓰기 장부(§6).
 
 HWPX 구역 처리부(hwpx/owpml.py)가 읽는 요소·속성만 만든다: 최상위 PARA_HEADER마다 hs:sec 아래 hp:p(paraPrIDRef·
-styleIDRef), PARA_CHAR_SHAPE 경계마다 hp:run(charPrIDRef), 글자는 hp:t(탭·줄바꿈·묶음 빈칸·고정폭 빈칸·제목 차례
-표시는 hp:t의 자식, 뒤 글자는 그 tail), PARA_LINE_SEG 항목마다 hp:lineseg. 확장 컨트롤은 문단의 k번째 자식 CTRL_HEADER와
-짝짓는다. HP-A의 컨트롤: 글자 없는 자리 컨트롤(필드·단 정의·쪽 번호 등)은 빈 hp:ctrl, 덧말·글자 겹침은 글자 수만
-(control_text_skipped), 그 밖(표·그리기 개체·머리말 등과 모르는 ID)은 hp:ctrl/hp:unknownObject/hp:subList 아래로 그
-아래 문단을 옮긴다(처리부가 모르는 요소라 블록이 없고 장부가 글자를 살린다, unknown_control).
+styleIDRef), PARA_CHAR_SHAPE 경계마다 hp:run(charPrIDRef, 글자 뒤 경계는 빈 런 하나), 글자는 hp:t(탭·줄바꿈·묶음
+빈칸·고정폭 빈칸·제목 차례 표시는 hp:t의 자식, 뒤 글자는 그 tail), PARA_LINE_SEG 항목마다 hp:lineseg. 확장 컨트롤은 문단의
+k번째 자식 CTRL_HEADER와 짝짓는다. 컨트롤: 글자 없는 자리 컨트롤(필드·단 정의·쪽 번호 등)은 빈 hp:ctrl, 덧말·글자 겹침은
+글자 수만(control_text_skipped), 표는 hp:tbl(TABLE 레코드의 행·열 수, 그 앞 리스트는 캡션, 뒤 리스트는 칸: LIST_HEADER
+오프셋 8부터 열·행 주소·열·행 병합, 32 테두리 채움, 6의 bit 2 제목 칸). 리스트는 LIST_HEADER와 그 뒤 같은 레벨 문단들이다.
+몸 레코드가 없는 컨트롤과 모르는 ID는 hp:ctrl/hp:unknownObject/hp:subList 아래로 그 아래 문단을 옮기고(처리부가 모르는
+요소라 블록이 없고 장부가 글자를 살린다, unknown_control), 아는 컨트롤에서 어느 리스트에도 들지 않은 문단도 그 뒤에 같은
+길로 둔다(글자를 조용히 잃지 않는다).
 
 옮겨 쓰기 장부: 글자 레코드(PARA_TEXT 전부와 덧말·글자 겹침 CTRL_HEADER)마다 원본에서 따로 디코드한 정규 문자열 R(r)과
 트리에서 r로 표시된 hp:t들의 글자를 문서 순서로 이은 T(r)이 정확히 같거나, r을 기록과 함께 건너뛰었어야 한다. 처리부가
@@ -31,6 +34,7 @@ from ..pdf.parser import COVERAGE_MISMATCH
 from .stream import Record
 
 PARA_HEADER, PARA_TEXT, PARA_CHAR_SHAPE, PARA_LINE_SEG, CTRL_HEADER, LIST_HEADER = 0x42, 0x43, 0x44, 0x45, 0x47, 0x48
+TABLE = 0x4D
 # 사양 표에 있는 태그(DocInfo 0x10–0x20·0x5C·0x5E·0x60·0x61, 본문 0x42–0x5D·0x5F·0x62·0x73): 그 밖은 unknown_record
 KNOWN_TAGS = frozenset([*range(0x10, 0x21), *range(0x42, 0x5E), 0x5E, 0x5F, 0x60, 0x61, 0x62, 0x73])
 MAX_NODES = 4_000_000  # 문서 전체 옮겨 쓴 요소 수
@@ -40,7 +44,9 @@ LINE_SEG = 36  # PARA_LINE_SEG 항목 크기(실측 43,744개 모두)
 INLINE8 = frozenset((4, 5, 6, 7, 8, 9, 19, 20))  # 인라인 컨트롤(8 WCHAR)
 EXTENDED = frozenset((1, 2, 3, 11, 12, 14, 15, 16, 17, 18, 21, 22, 23))  # 확장 컨트롤(8 WCHAR, CTRL_HEADER와 짝)
 INLINE_TAGS = {9: f"{HP}tab", 8: f"{HP}titleMark", 10: f"{HP}lineBreak", 30: f"{HP}nbSpace", 31: f"{HP}fwSpace"}
-P, RUN, T, CTRL = f"{HP}p", f"{HP}run", f"{HP}t", f"{HP}ctrl"
+P, RUN, T, CTRL, SUBLIST = f"{HP}p", f"{HP}run", f"{HP}t", f"{HP}ctrl", f"{HP}subList"
+TBL, TR, TC, CAPTION = f"{HP}tbl", f"{HP}tr", f"{HP}tc", f"{HP}caption"
+SIDES = ("LEFT", "RIGHT", "TOP", "BOTTOM")  # 캡션 속성 bit 0–1(짝 표 캡션 3개 모두 2 → TOP)
 # 글자 없는 자리 컨트롤(빈 hp:ctrl). 필드(%로 시작)도 같다. 리스트·문단이 달리면 모르는 컨트롤 경로다
 PLACES = frozenset(("secd", "cold", "atno", "nwno", "pghd", "pgct", "pgnp", "idxm", "bokm", "form", "tcps", "tdut"))
 TEXT_CONTROLS = frozenset(("tcps", "tdut"))  # 글자가 CTRL_HEADER 몸에 있다(HWPX도 쓰지 않는다): 수만 남긴다
@@ -134,6 +140,7 @@ class _Writer:
         self.skipped: set[int] = set()  # 기록과 함께 건너뛴 글자 레코드
         self.regions: list[Region] = []
         self.unknown: set[int] = set()  # unknown_control을 남긴 문단(id)
+        self.used: set[int] = set()  # 리스트로 옮긴 PARA_HEADER 순번(어느 리스트에도 들지 않은 문단을 찾는다)
 
     def node(self, parent: ET.Element, tag: str, depth: int, **attrs: str) -> ET.Element:
         self.nodes.count += 1
@@ -290,9 +297,8 @@ class _Writer:
                 else:
                     self.control(run, value, p, anchor, depth + 2)  # type: ignore[arg-type]
         flush()
-        while cursor < len(order):  # 글자 뒤 경계(빈 런)
+        if cursor < len(order):  # 글자 뒤 경계는 빈 런 하나로 접는다(처리부는 글자 없는 런의 글자 모양을 쓰지 않는다)
             run = self.node(p, RUN, depth + 1, charPrIDRef=chosen[order[cursor]])
-            cursor += 1
         if run is None:
             run = self.node(p, RUN, depth + 1, charPrIDRef=chosen[order[0]] if order else "0")
         for record in controls[ext:]:  # 짝 없는 컨트롤은 문단 끝 자리 개체로
@@ -317,26 +323,103 @@ class _Writer:
         return pos
 
     def control(self, run: ET.Element, record: Record, p: ET.Element, anchor: int, depth: int) -> None:
-        """CTRL_HEADER 하나(depth는 hp:ctrl의 깊이). 자리 컨트롤은 빈 hp:ctrl, 덧말·글자 겹침은 글자 수만, 그 밖은
-        hp:unknownObject 아래로 그 아래 문단들(레코드 차례)을 옮긴다."""
+        """CTRL_HEADER 하나(depth는 런 아래 요소의 깊이). 자리 컨트롤은 빈 hp:ctrl, 덧말·글자 겹침은 글자 수만, 아는
+        개체는 그 요소, 몸 레코드가 없거나 모르는 ID는 hp:unknownObject 아래로 그 아래 문단들(레코드 차례)을 옮긴다.
+        아는 개체에서 어느 리스트에도 들지 않은 문단은 그 뒤 hp:unknownObject로 옮긴다."""
         ident = control_id(record.body)
         paras = self.paragraphs(record)
         lists = any(r.tag == LIST_HEADER for r in self.descendants(record))
-        ctrl = self.node(run, CTRL, depth)
         simple = ident in PLACES or ident.startswith("%")
         if simple and not paras and not lists:
+            self.node(run, CTRL, depth)
             if ident in TEXT_CONTROLS:
                 chars = ink(control_text(record.body, ident, f"{self.location}#{record.index}"))
                 self.skipped.add(record.index)
                 if chars:
                     self.region("control-text", CONTROL_TEXT, anchor, "chars", chars)
             return
+        build = {"tbl ": self.table}.get(ident)
+        if build is None or not build(run, record, anchor, depth):
+            self.unknown_object(run, paras, p, anchor, depth)
+            return
+        rest = [header for header in paras if header.index not in self.used]
+        if rest:
+            self.unknown_object(run, rest, p, anchor, depth)
+
+    def unknown_object(self, run: ET.Element, paras: list[Record], p: ET.Element, anchor: int, depth: int) -> None:
+        """hp:ctrl/hp:unknownObject/hp:subList 아래 문단들(처리부가 모르는 요소: 장부가 글자를 살린다)."""
         if id(p) not in self.unknown:
             self.unknown.add(id(p))
             self.region("unknown-control", UNKNOWN_CONTROL, anchor)
-        sub = self.node(self.node(ctrl, f"{HP}unknownObject", depth + 1), f"{HP}subList", depth + 2)
+        ctrl = self.node(run, CTRL, depth)
+        self.sublist(self.node(ctrl, f"{HP}unknownObject", depth + 1), paras, anchor, depth + 2)
+
+    def sublist(self, parent: ET.Element, paras: list[Record], anchor: int, depth: int) -> ET.Element:
+        """hp:subList(depth) 아래 문단들."""
+        sub = self.node(parent, SUBLIST, depth)
         for header in paras:
-            self.paragraph(sub, header, anchor, depth + 3)
+            self.used.add(header.index)
+            self.paragraph(sub, header, anchor, depth + 1)
+        return sub
+
+    def lists(self, siblings: list[Record], anchor: int) -> list[tuple[Record, list[Record]]]:
+        """형제 레코드들의 리스트: LIST_HEADER마다 그 뒤 이어지는 같은 레벨 PARA_HEADER들. 선언한 문단 수(INT16)와
+        다르면 실제 수를 쓰고 record_inconsistent(list_paragraphs = 차이)."""
+        out: list[tuple[Record, list[Record]]] = []
+        open_ = False  # 마지막 리스트에 문단이 이어 붙을 수 있나(문단 아닌 형제가 끊는다)
+        for r in siblings:
+            if r.tag == LIST_HEADER:
+                out.append((r, []))
+                open_ = True
+            elif r.tag == PARA_HEADER and open_:
+                out[-1][1].append(r)
+            else:
+                open_ = False
+        for header, paras in out:
+            declared = struct.unpack_from("<h", header.body)[0] if len(header.body) >= 2 else 0
+            if declared != len(paras):
+                self.region("record-inconsistent", RECORD_INCONSISTENT, anchor, "list_paragraphs",
+                            abs(declared - len(paras)))
+        return out
+
+    def caption(self, parent: ET.Element, item: tuple[Record, list[Record]], anchor: int, depth: int) -> None:
+        """캡션 리스트 → hp:caption@side(depth) + hp:subList. 캡션 속성은 LIST_HEADER 오프셋 8 UINT32."""
+        header, paras = item
+        if len(header.body) < 12:
+            raise ParseError("LIST_HEADER caption record too short", f"{self.location}#{header.index}")
+        side = SIDES[struct.unpack_from("<I", header.body, 8)[0] & 3]
+        self.sublist(self.node(parent, CAPTION, depth, side=side), paras, anchor, depth + 1)
+
+    def table(self, run: ET.Element, record: Record, anchor: int, depth: int) -> bool:
+        """표: TABLE 앞 리스트는 캡션(첫째), 뒤 리스트는 칸(레코드 차례, 행 주소가 바뀔 때 새 hp:tr). TABLE이 없으면
+        거짓(모르는 컨트롤 길)."""
+        kids = record.children
+        k = next((i for i, r in enumerate(kids) if r.tag == TABLE), None)
+        if k is None:
+            return False
+        body = kids[k].body
+        if len(body) < 8:
+            raise ParseError("TABLE record too short", f"{self.location}#{kids[k].index}")
+        rows, cols = struct.unpack_from("<HH", body, 4)
+        tbl = self.node(run, TBL, depth, rowCnt=str(rows), colCnt=str(cols))
+        captions = self.lists(kids[:k], anchor)
+        if captions:
+            self.caption(tbl, captions[0], anchor, depth + 1)
+        tr: ET.Element | None = None
+        row = -1
+        for header, paras in self.lists(kids[k + 1:], anchor):
+            cell = header.body
+            if len(cell) < 34:
+                raise ParseError("LIST_HEADER cell record too short", f"{self.location}#{header.index}")
+            col, at, colspan, rowspan = struct.unpack_from("<HHHH", cell, 8)
+            if tr is None or at != row:
+                tr, row = self.node(tbl, TR, depth + 1), at
+            tc = self.node(tr, TC, depth + 2, header=str(struct.unpack_from("<H", cell, 6)[0] >> 2 & 1),
+                           borderFillIDRef=str(struct.unpack_from("<H", cell, 32)[0]))
+            self.sublist(tc, paras, anchor, depth + 3)
+            self.node(tc, f"{HP}cellAddr", depth + 3, rowAddr=str(at), colAddr=str(col))
+            self.node(tc, f"{HP}cellSpan", depth + 3, rowSpan=str(rowspan), colSpan=str(colspan))
+        return True
 
     @staticmethod
     def descendants(record: Record) -> list[Record]:

@@ -290,6 +290,40 @@ def list_header(level: int, paragraphs: int) -> bytes:
     return record(LIST_HEADER, level, struct.pack("<hI", paragraphs, 0))
 
 
+# ---- 개체 쓰기 도구(리스트·표) ----
+TABLE = 0x4D
+SIDES = ("LEFT", "RIGHT", "TOP", "BOTTOM")
+OBJECT = bytes(42)  # 개체 공통 속성 자리(CTRL_HEADER 몸의 ID 뒤, 파서는 읽지 않는다)
+
+
+def listed(level: int, *paras: bytes, tail: bytes = b"", ext: int = 0, count: int | None = None) -> bytes:
+    """리스트: LIST_HEADER(level, 문단 수 INT16 + 속성 UINT32 + 확장 속성 UINT16 + tail) + 같은 레벨 문단들(paras는
+    paragraph(level=level)로 직렬화한 문단 하나씩, count가 있으면 그 수를 선언한다)."""
+    head = struct.pack("<hIH", len(paras) if count is None else count, 0, ext)
+    return record(LIST_HEADER, level, head + tail) + b"".join(paras)
+
+
+def caption(level: int, *paras: bytes, side: str = "BOTTOM") -> bytes:
+    """캡션 리스트(30B LIST_HEADER: 오프셋 8 캡션 속성 bit 0–1 방향, 폭, 간격, 최대 길이, 0 8바이트)."""
+    return listed(level, *paras, tail=struct.pack("<IIhI", SIDES.index(side), 0, 0, 0) + bytes(8))
+
+
+def cell(level: int, row: int, col: int, *paras: bytes, span: tuple[int, int] = (1, 1), header: bool = False,
+         fill: int = 1) -> bytes:
+    """표 칸 리스트(47B LIST_HEADER: 오프셋 6의 bit 2 제목 칸, 8부터 열·행 주소, 열·행 병합(span = (행, 열)), 폭·높이,
+    여백 넷, 32 테두리 채움 id, 0 13바이트)."""
+    tail = struct.pack("<HHHHII", col, row, span[1], span[0], 0, 0) + bytes(8) + struct.pack("<H", fill) + bytes(13)
+    return listed(level, *paras, tail=tail, ext=4 if header else 0)
+
+
+def table(level: int, rows: int, cols: int, *cells: bytes, caption: bytes = b"") -> bytes:
+    """표 컨트롤(level): [캡션 리스트] + TABLE(속성, 행·열 수, 칸 간격, 안쪽 여백, 행마다 칸 수, 테두리 채움, 영역 0) +
+    칸 리스트들(레벨 level + 1로 만든 것)."""
+    body = struct.pack("<IHHH", 0, rows, cols, 0) + bytes(8) + struct.pack(f"<{rows}H", *[cols] * rows)
+    return control("tbl ", level, caption, record(TABLE, level + 1, body + struct.pack("<HH", 1, 0)), *cells,
+                   body=OBJECT)
+
+
 def paragraph(*items: str | list[int], level: int = 0, pr: int = 0, style: int = 0,
               shapes: Sequence[tuple[int, int]] = ((0, 0),), lines: int | None = 1, controls: Sequence[bytes] = (),
               nchars: int | None = None, text: Sequence[int] | None = None) -> bytes:

@@ -127,8 +127,8 @@ def test_surrogates_in_control_info_words_neither_pair_nor_count():
     # 가0, 탭1–8(부가 정보에 대리쌍), 나9, 모르는 인라인 컨트롤10–17(부가 정보에 대리쌍), 문단 끝18
     text = B.units("가", [9, 0xD800, 0xDC00, 0, 0, 0, 0, 9], "나", [5, 0x41, 0xD800, 0xDC00, 0, 0, 0, 5], B.PARA_END)
     result = section(B.paragraph(text=text, shapes=((0, 1), (3, 2), (12, 3), (14, 4))))
-    # 경계 3은 탭 안이라 1로 당긴다. 낱말이 아닌 모르는 컨트롤 안 경계(12·14)는 당기지 않고 글자 뒤 빈 런이 된다
-    assert shape(result.root[0]) == [("1", [("가", [])]), ("2", [(None, [("tab", "나")])]), ("3", []), ("4", [])]
+    # 경계 3은 탭 안이라 1로 당긴다. 낱말이 아닌 모르는 컨트롤 안 경계(12·14)는 당기지 않고 글자 뒤 빈 런 하나로 접힌다
+    assert shape(result.root[0]) == [("1", [("가", [])]), ("2", [(None, [("tab", "나")])]), ("3", [])]
     assert reasons(result) == [("unknown_control_char", "chars", 1)] and result.audit.ok
 
 
@@ -201,6 +201,61 @@ def test_unknown_record_tags_are_counted_per_section():
     result = section(B.paragraph("글") + B.record(0x3FF, 0, b"x") + B.record(0x200, 1))
     assert reasons(result) == [("unknown_record", "records", 2)]
     assert result.regions[0].region_id == "s0-unknown-record" and result.audit.ok
+
+
+def cells(tbl: ET.Element) -> list[list[tuple]]:
+    """행마다 칸 (header, borderFillIDRef, rowAddr, colAddr, rowSpan, colSpan, 문단 글자들)."""
+    out = []
+    for tr in tbl.iterfind(f"{HP}tr"):
+        row = []
+        for tc in tr.iterfind(f"{HP}tc"):
+            addr, span = tc.find(f"{HP}cellAddr"), tc.find(f"{HP}cellSpan")
+            texts = ["".join(t.text or "" for t in p.iter(f"{HP}t")) for p in tc.find(f"{HP}subList")]
+            row.append((tc.get("header"), tc.get("borderFillIDRef"), addr.get("rowAddr"), addr.get("colAddr"),
+                        span.get("rowSpan"), span.get("colSpan"), texts))
+        out.append(row)
+    return out
+
+
+def test_tables_become_hp_tbl_with_caption_cells_spans_header_bits_and_fills():
+    tbl = B.table(1, 2, 3, B.cell(2, 0, 0, B.paragraph("구분", level=2), header=True),
+                  B.cell(2, 0, 1, B.paragraph("값", level=2), header=True, fill=2),
+                  B.cell(2, 0, 2, B.paragraph("비고", level=2), span=(2, 1)),
+                  B.cell(2, 1, 0, B.paragraph("인건비", level=2), B.paragraph("둘째 줄", level=2), span=(1, 2)),
+                  caption=B.caption(2, B.paragraph("표 1. 지어낸 표", level=2), side="TOP"))
+    result = section(B.paragraph("표 앞", B.extended(11, "tbl "), "뒤", controls=[tbl]))
+    assert shape(result.root[0]) == [("0", [("표 앞", []), ("tbl", ["caption", "tr", "tr"]), ("뒤", [])])]
+    found = result.root[0].find(f"{HP}run/{HP}tbl")
+    assert (found.get("rowCnt"), found.get("colCnt"), found.find(f"{HP}caption").get("side")) == ("2", "3", "TOP")
+    assert [shape(p)[0][1][0][0] for p in found.find(f"{HP}caption/{HP}subList")] == ["표 1. 지어낸 표"]
+    assert cells(found) == [[("1", "1", "0", "0", "1", "1", ["구분"]), ("1", "2", "0", "1", "1", "1", ["값"]),
+                             ("0", "1", "0", "2", "2", "1", ["비고"])],
+                            [("0", "1", "1", "0", "1", "2", ["인건비", "둘째 줄"])]]
+    assert result.regions == [] and result.audit.ok
+
+
+def test_table_lists_out_of_count_and_paragraphs_outside_any_list_keep_their_text():
+    tbl = B.control("tbl ", 1, B.record(B.TABLE, 2, struct.pack("<IHH", 0, 1, 1)),
+                    B.cell(2, 0, 0, B.paragraph("칸 글", level=2)).replace(struct.pack("<hIH", 1, 0, 0),
+                                                                          struct.pack("<hIH", 3, 0, 0)),
+                    B.record(B.CTRL_HEADER, 2, b"xxxx"), B.paragraph("리스트 밖 문단", level=2))
+    result = section(B.paragraph(B.extended(11, "tbl "), controls=[tbl]))
+    assert shape(result.root[0]) == [("0", [("tbl", ["tr"]), ("ctrl", ["unknownObject"])])]
+    assert reasons(result) == [("record_inconsistent", "list_paragraphs", 2), ("unknown_control", None, None)]
+    assert result.audit.ok
+    short_cell = B.record(B.TABLE, 2, bytes(8)) + B.record(B.LIST_HEADER, 2, bytes(33))
+    short_caption = B.record(B.LIST_HEADER, 2, bytes(11)) + B.record(B.TABLE, 2, bytes(8))
+    for broken, what, at in ((B.record(B.TABLE, 2, bytes(7)), "TABLE", 5), (short_cell, "LIST_HEADER cell", 6),
+                             (short_caption, "LIST_HEADER caption", 5)):  # 문단 머리 0~3, 컨트롤 4
+        with pytest.raises(ParseError, match=f"{what} record too short") as info:
+            section(B.paragraph(B.extended(11, "tbl "), controls=[B.control("tbl ", 1, broken)]))
+        assert info.value.location == f"a.hwp:BodyText/Section0#{at}"
+
+
+def test_char_shape_bounds_after_the_text_fold_into_one_empty_run():
+    many = [(0, 1)] + [(10 + k, k % 7) for k in range(5000)]
+    result = section(B.paragraph("가나다", shapes=many))
+    assert shape(result.root[0]) == [("1", [("가나다", [])]), ("0", [])]
 
 
 TWO = (B.paragraph("첫째", B.TAB, "문단") + B.paragraph("둘째 문단")
