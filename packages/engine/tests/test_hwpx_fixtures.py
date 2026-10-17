@@ -96,7 +96,7 @@ def test_headings_follow_the_pdf_size_rule_and_empty_has_no_blocks():
 
 def test_detection_is_by_extension_case_insensitive_and_folders_pick_hwpx(tmp_path):
     assert isinstance(detect_parser("보고서.HWPX", default_parsers(ocr=False, layout=False)), HwpxParser)
-    for name in ("a.hwpx", "b.HWPX", "c.hwp"):
+    for name in ("a.hwpx", "b.HWPX", "c.hwt"):
         (tmp_path / name).write_bytes(b"x")
     extensions = frozenset(e for p in default_parsers(ocr=False, layout=False) for e in p.extensions)
     entries, skipped = batch.expand([tmp_path], False, extensions)
@@ -110,7 +110,7 @@ def test_cli_parse_exit_codes_and_viewer_without_pages(tmp_path, capsys, monkeyp
     tree = DocumentTree.model_validate(json.loads(capsys.readouterr().out))
     assert tree.blocks[0].text == "2026년 지어낸 사업 계획"
     broken = tmp_path / "깨진.hwpx"
-    broken.write_bytes(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\0" * 504)
+    broken.write_bytes(b"\0" * 512)
     assert main(["parse", str(broken), "--db", str(db)]) == 4
     assert "not an HWPX" in capsys.readouterr().err
     (raw,) = re.findall(r'<script type="application/json" id="ko-data">(.*?)</script>', render_html(tree), re.DOTALL)

@@ -73,9 +73,9 @@ def test_a_valid_package_lists_sections_in_spine_order_and_reads_xml():
 
 
 @pytest.mark.parametrize("data", [b"not a zip at all", b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\0" * 504, b""])
-def test_bytes_that_are_not_a_zip_are_refused_naming_hwp5(data):
+def test_bytes_that_are_not_a_zip_are_refused(data):
     error = refused(data, "not an HWPX")
-    assert "HWP 5.0" in error.reason and error.location == "a.hwpx"
+    assert error.reason == "not an HWPX (zip) package" and error.location == "a.hwpx"
 
 
 def test_encrypted_member_duplicate_name_and_too_many_members_are_refused(monkeypatch):
