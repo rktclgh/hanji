@@ -1,6 +1,7 @@
 """HWP 레코드 → OWPML 요소 트리 옮겨 쓰기(HWP 스펙 §7.1·§7.2, HP-A의 §7.3)와 옮겨 쓰기 장부(§6)·예산(§5.4)."""
 
 import importlib.util
+import struct
 import tracemalloc
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -86,7 +87,6 @@ def test_surrogate_pairs_lone_surrogates_unknown_control_chars_and_trailing_char
     assert info.value.location == "a.hwp:BodyText/Section0#1"
 
 
-
 def test_surrogates_pair_only_inside_one_span_of_ordinary_characters():
     text = B.units("가\U0001f600", B.TAB, "\U0001f600나", [0xD800], B.LINE_BREAK, [0xDC00], "다", B.PARA_END)
     result = section(B.paragraph(text=text))
@@ -103,6 +103,24 @@ def test_char_shape_bounds_split_a_span_but_never_a_surrogate_pair():
     assert shape(result.root[0]) == [("1", [("가", [])]), ("2", [("나", [])]), ("3", [("\U0001f600다", [])]),
                                      ("4", [("�", [])]), ("5", [("라", [])]), ("6", [("�", [])])]
     assert reasons(result) == [("invalid_utf16", "chars", 2)] and result.audit.ok
+
+
+def odd_text(*items: str | list[int], tail: bytes = b"\x00") -> bytes:
+    """PARA_TEXT 몸 끝에 바이트 하나가 더 붙은(홀수 길이) 문단. PARA_HEADER의 글자 수는 WCHAR 수와 같다."""
+    body = b"".join(struct.pack("<H", w) for w in B.units(*items) + B.PARA_END)
+    return B.paragraph(text=B.units(*items) + B.PARA_END).replace(
+        B.record(B.PARA_TEXT, 1, body), B.record(B.PARA_TEXT, 1, body + tail))
+
+
+def test_an_odd_byte_at_the_end_of_para_text_is_recorded_as_invalid_utf16_without_changing_the_text():
+    result = section(odd_text("가나"))
+    assert shape(result.root[0]) == [("0", [("가나", [])])]
+    assert reasons(result) == [("invalid_utf16", "chars", 1)] and result.audit.ok
+    # 짝 없는 대리 문자와 같은 문단 기록 하나에 센다(글자 수 2), 짝수 길이 몸은 기록이 없다
+    both = section(odd_text("가", [0xD800], "나"))
+    assert shape(both.root[0]) == [("0", [("가�나", [])])]
+    assert reasons(both) == [("invalid_utf16", "chars", 2)] and both.audit.ok
+    assert reasons(section(B.paragraph("가나"))) == []
 
 
 def test_surrogates_in_control_info_words_neither_pair_nor_count():
@@ -126,6 +144,7 @@ def test_a_long_paragraph_is_transcoded_without_a_python_object_per_character():
         tracemalloc.stop()
     assert result.audit.ok and len(result.root[0].find(f"{HP}run/{HP}t").text) == n
     assert peak < 10 * 2 * n  # 입력(WCHAR 2B)의 10배 미만(지금 약 4배, 글자마다 객체를 만들면 90배 안팎)
+
 
 def test_extended_controls_pair_with_ctrl_headers_in_order_and_unknown_ones_carry_their_paragraphs():
     cell = B.control("tbl ", 1, B.list_header(2, 2), B.paragraph("칸 첫째", level=2), B.paragraph("칸 둘째", level=2))
@@ -167,7 +186,6 @@ def test_text_in_overlap_and_ruby_controls_is_counted_and_skipped():
     assert info.value.location == "a.hwp:BodyText/Section0#4"
 
 
-
 def test_text_controls_outside_paragraphs_are_audited_with_their_record_location():
     # 문단을 거치지 않는 덧말·글자 겹침(레벨 0, 다른 컨트롤 바로 아래)은 옮겨 쓰지 않고 장부만 읽는다
     with pytest.raises(ParseError, match="CTRL_HEADER tdut record too short") as info:
@@ -177,6 +195,7 @@ def test_text_controls_outside_paragraphs_are_audited_with_their_record_location
     with pytest.raises(ParseError, match="CTRL_HEADER tcps record too short") as info:
         section(B.paragraph(B.extended(11, "gso "), controls=[nested]))
     assert info.value.location == "a.hwp:BodyText/Section0#5"
+
 
 def test_unknown_record_tags_are_counted_per_section():
     result = section(B.paragraph("글") + B.record(0x3FF, 0, b"x") + B.record(0x200, 1))

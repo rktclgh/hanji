@@ -185,7 +185,8 @@ class _Writer:
         body = text.body if text is not None else b""
         view = memoryview(body)
         n = len(units)
-        bad = unknown = ext = mismatch = 0
+        bad = len(body) % 2  # 홀수 길이 몸의 남는 바이트 하나도 짝 없는 대리 문자처럼 센다
+        unknown = ext = mismatch = 0
         end = None
         j = 0
         location = f"{self.location}#{text.index}" if text is not None else self.location
