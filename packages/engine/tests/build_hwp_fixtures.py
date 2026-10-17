@@ -2,13 +2,13 @@
 
 자체 OLE 복합 파일(MS-CFB) 쓰기 도구: 512B 섹터(major 3) 또는 4096B(major 4), FAT·mini FAT·디렉터리, 고정 차례(경로
 이름 차례, 형제는 CFB 비교 규칙 차례로 right에 잇는다), 시각 0. 레코드 쓰기 도구: 레코드 머리(0xFFF 확장 크기),
-FileHeader, raw deflate. 테스트는 이 파일을 importlib로 읽어 쓰기 도구를 쓰고, tamper로 직렬화 직전 배치를 고쳐
-잘못된 파일을 만든다.
+FileHeader, raw deflate, DocInfo(build_hwpx_fixtures.header()와 같은 인자). 테스트는 이 파일을 importlib로 읽어
+쓰기 도구를 쓰고, tamper로 직렬화 직전 배치를 고쳐 잘못된 파일을 만든다.
 """
 
 import struct
 import zlib
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 
 SIGNATURE = bytes.fromhex("d0cf11e0a1b11ae1")
@@ -162,3 +162,53 @@ def deflate(data: bytes) -> bytes:
     """머리 없는 raw deflate(한컴 문서의 압축 스트림과 같은 꼴, wbits −15)."""
     packer = zlib.compressobj(9, zlib.DEFLATED, -15)
     return packer.compress(data) + packer.flush()
+
+
+# ---- DocInfo 쓰기 도구 ----
+DOCUMENT_PROPERTIES, ID_MAPPINGS, BORDER_FILL, CHAR_SHAPE, PARA_SHAPE = 0x10, 0x11, 0x14, 0x15, 0x19
+HEADS = ("NONE", "OUTLINE", "NUMBER", "BULLET")
+
+
+def colorref(color: str) -> int:
+    """"#RRGGBB" → COLORREF 0x00BBGGRR, "none" → 0xFFFFFFFF(HWPX faceColor="none"과 같은 값)."""
+    if color == "none":
+        return 0xFFFFFFFF
+    r, g, b = (int(color[k:k + 2], 16) for k in (1, 3, 5))
+    return r | g << 8 | b << 16
+
+
+def para_shape(kind: str = "NONE", level: int = 0) -> bytes:
+    """PARA_SHAPE 54B: 속성 1의 bit 23–24 문단 머리 종류, bit 25–27 수준. 나머지는 0."""
+    return struct.pack("<I", HEADS.index(kind) << 23 | level << 25) + bytes(50)
+
+
+def char_shape(height: int = 1000, bold: bool = False, rel: int = 100) -> bytes:
+    """CHAR_SHAPE 74B: 언어별 글꼴 id·장평·자간·상대 크기(rel)·위치, 기준 크기, 속성(bit 1 굵게), 나머지 0."""
+    return (bytes(14) + bytes([100] * 7) + bytes(7) + bytes([rel] * 7) + bytes(7)
+            + struct.pack("<iI", height, 2 if bold else 0) + bytes(24))
+
+
+def border_fill(color: str = "none", kind: int = 1) -> bytes:
+    """BORDER_FILL: 테두리 32B(0) + 채우기 종류 + (단색이면 배경색·무늬색·무늬 종류) + 추가 채우기 길이 0."""
+    fill = struct.pack("<I", kind) + (struct.pack("<IIi", colorref(color), 0, -1) if kind & 1 else b"")
+    return bytes(32) + fill + struct.pack("<I", 0)
+
+
+def docinfo(headings: Mapping[int, tuple[str, int]] = (), chars: Mapping[int, tuple[int, bool]] = (),
+            fills: Mapping[int, str] = (), sections: int = 1, extra: Sequence[bytes] = ()) -> bytes:
+    """DocInfo 레코드(풀린 바이트). 인자는 build_hwpx_fixtures.header()와 같다(문단 모양 0 NONE·글자 모양 0 10pt·
+    테두리 채움 1 none은 늘 있다). HWP id는 순번이라 id가 0(테두리 채움은 1)부터 이어져야 한다. extra는 끝에 붙일
+    레코드(레벨 1)."""
+    headings = {0: ("NONE", 0), **dict(headings)}
+    chars = {0: (1000, False), **dict(chars)}
+    fills = {1: "none", **dict(fills)}
+    assert list(headings) == list(range(len(headings))) and list(chars) == list(range(len(chars)))
+    assert list(fills) == list(range(1, len(fills) + 1))
+    counts = [0] * 18
+    counts[8], counts[9], counts[13] = len(fills), len(chars), len(headings)
+    out = [record(DOCUMENT_PROPERTIES, 0, struct.pack("<H", sections) + bytes(24)),
+           record(ID_MAPPINGS, 0, struct.pack("<18i", *counts))]
+    out += [record(BORDER_FILL, 1, border_fill(color)) for color in fills.values()]
+    out += [record(CHAR_SHAPE, 1, char_shape(height, bold)) for height, bold in chars.values()]
+    out += [record(PARA_SHAPE, 1, para_shape(kind, level)) for kind, level in headings.values()]
+    return b"".join(out) + b"".join(extra)
