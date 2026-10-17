@@ -398,6 +398,27 @@ def test_an_unknown_shape_nested_in_a_container_leaves_one_unknown_control_and_i
     assert [t.text for t in result.root.iter(f"{HP}t")] == ["묶음 속 모르는 도형 글"]
 
 
+def test_an_unknown_shape_in_a_container_inside_a_text_box_flags_only_the_inner_paragraph():
+    inner = B.gso(4, B.container(5, B.pic(6, 1, top=False), B.component(6, "$unk", top=False)))
+    box = B.rect(2, B.paragraph("글상자 글", B.extended(11, "gso "), level=3, controls=[inner]))
+    result = section(B.paragraph("앞", B.extended(11, "gso "), controls=[B.gso(1, box)]))
+    assert reasons(result) == [("unknown_control", None, None)] and result.audit.ok
+    assert [t.text for t in result.root.iter(f"{HP}t")] == ["앞", "글상자 글"]
+    # 바깥 묶음에서 먼저 빠진 도형은 안쪽 컨트롤이 끝나도 바깥 문단 표시로 남는다
+    deep = B.gso(5, B.container(6, B.component(7, "$unk", top=False)))
+    outer = B.gso(1, B.container(2, B.component(3, "$unk", top=False), B.rect(3, B.paragraph(
+        "묶음 속 글상자 글", B.extended(11, "gso "), level=4, controls=[deep]), top=False)))
+    result = section(B.paragraph("앞", B.extended(11, "gso "), controls=[outer]))
+    assert reasons(result) == [("unknown_control", None, None)] * 2 and result.audit.ok
+
+
+def test_an_unknown_first_component_with_a_readable_textart_second_is_skipped_with_the_record():
+    both = B.gso(1, B.component(2, "$unk") + B.textart(2, "둘째 글맵시"))
+    result = section(B.paragraph("앞", B.extended(11, "gso "), controls=[both]))
+    assert next(result.root.iter(f"{HP}textart"), None) is None
+    assert reasons(result) == [("unknown_control", None, None)] and result.audit == transcode.Audit(0, 0, 0)
+
+
 def test_a_readable_textart_under_a_second_component_is_skipped_with_the_record_not_an_orphan():
     both = B.gso(1, B.pic(2, 1) + B.textart(2, "둘째 글맵시"))
     result = section(B.paragraph("앞", B.extended(11, "gso "), controls=[both]))

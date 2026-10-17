@@ -383,16 +383,23 @@ class _Writer:
         builders = {"tbl ": self.table, "gso ": self.gso, "eqed": self.equation, "secd": self.masterpages,
                     **dict.fromkeys(LISTED, self.listed)}
         build = builders.get(ident)
-        self.dropped = False
-        if build is None or not build(run, record, anchor, depth):
+        outer, self.dropped = self.dropped, False  # 묶음에서 빠진 도형 표시는 컨트롤마다 따로 둔다(안쪽이 바깥으로 새지 않게)
+        try:
+            built = build is not None and build(run, record, anchor, depth)
+            dropped = self.dropped
+        finally:
+            self.dropped = outer
+        if ident == "gso ":
+            later = [r for r in record.children if r.tag == SHAPE_COMPONENT][1:]
+            if later:  # 둘째 이후 SHAPE_COMPONENT는 옮기지 않는다(글자는 아래 남는 문단 길). 첫째를 몰라도 같다
+                self.flag_unknown(p, anchor)
+                for r in later:
+                    self.skipped.update(x.index for x in self.descendants(r) if x.tag == TEXTART)  # 기록과 함께 건너뜀
+        if not built:
             self.unknown_object(run, paras, p, anchor, depth)
             return
-        if self.dropped:  # 묶음 안에서 모르는 도형이 빠졌다(만든 요소 없음): 문단마다 한 번 기록
+        if dropped:  # 묶음 안에서 모르는 도형이 빠졌다(만든 요소 없음): 문단마다 한 번 기록
             self.flag_unknown(p, anchor)
-        if ident == "gso " and sum(r.tag == SHAPE_COMPONENT for r in record.children) > 1:
-            self.flag_unknown(p, anchor)  # 둘째 이후 SHAPE_COMPONENT는 옮기지 않는다(글자는 아래 남는 문단 길)
-            for later in [r for r in record.children if r.tag == SHAPE_COMPONENT][1:]:
-                self.skipped.update(r.index for r in self.descendants(later) if r.tag == TEXTART)  # 기록과 함께 건너뜀
         rest = [header for header in paras if header.index not in self.used]
         if rest:
             self.unknown_object(run, rest, p, anchor, depth)
