@@ -1,6 +1,7 @@
 """HWP 레코드 → OWPML 요소 트리 옮겨 쓰기(HWP 스펙 §7.1·§7.2, HP-A의 §7.3)와 옮겨 쓰기 장부(§6)·예산(§5.4)."""
 
 import importlib.util
+import tracemalloc
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -85,6 +86,47 @@ def test_surrogate_pairs_lone_surrogates_unknown_control_chars_and_trailing_char
     assert info.value.location == "a.hwp:BodyText/Section0#1"
 
 
+
+def test_surrogates_pair_only_inside_one_span_of_ordinary_characters():
+    text = B.units("가\U0001f600", B.TAB, "\U0001f600나", [0xD800], B.LINE_BREAK, [0xDC00], "다", B.PARA_END)
+    result = section(B.paragraph(text=text))
+    # 대리쌍은 구간 끝·컨트롤 옆에서도 묶이고, 제어 문자를 사이에 둔 대리 문자 둘은 짝이 아니다
+    assert shape(result.root[0]) == [("0", [("가\U0001f600", [("tab", "\U0001f600나�"), ("lineBreak", "�다")])])]
+    assert reasons(result) == [("invalid_utf16", "chars", 2)] and result.audit.ok
+
+
+def test_char_shape_bounds_split_a_span_but_never_a_surrogate_pair():
+    # 가0 나1 대리쌍2–3 다4 짝 없는 상위 대리5 라6 짝 없는 하위 대리7 문단 끝8
+    text = B.units("가나\U0001f600다", [0xD800], "라", [0xDC00], B.PARA_END)
+    result = section(B.paragraph(text=text, shapes=((0, 1), (1, 2), (3, 3), (5, 4), (6, 5), (7, 6))))
+    # 경계 3은 대리쌍 안이라 2로 당긴다. 짝 없는 대리 문자 앞뒤 경계(5·6·7)는 그대로 끊는다
+    assert shape(result.root[0]) == [("1", [("가", [])]), ("2", [("나", [])]), ("3", [("\U0001f600다", [])]),
+                                     ("4", [("�", [])]), ("5", [("라", [])]), ("6", [("�", [])])]
+    assert reasons(result) == [("invalid_utf16", "chars", 2)] and result.audit.ok
+
+
+def test_surrogates_in_control_info_words_neither_pair_nor_count():
+    # 가0, 탭1–8(부가 정보에 대리쌍), 나9, 모르는 인라인 컨트롤10–17(부가 정보에 대리쌍), 문단 끝18
+    text = B.units("가", [9, 0xD800, 0xDC00, 0, 0, 0, 0, 9], "나", [5, 0x41, 0xD800, 0xDC00, 0, 0, 0, 5], B.PARA_END)
+    result = section(B.paragraph(text=text, shapes=((0, 1), (3, 2), (12, 3), (14, 4))))
+    # 경계 3은 탭 안이라 1로 당긴다. 낱말이 아닌 모르는 컨트롤 안 경계(12·14)는 당기지 않고 글자 뒤 빈 런이 된다
+    assert shape(result.root[0]) == [("1", [("가", [])]), ("2", [(None, [("tab", "나")])]), ("3", []), ("4", [])]
+    assert reasons(result) == [("unknown_control_char", "chars", 1)] and result.audit.ok
+
+
+def test_a_long_paragraph_is_transcoded_without_a_python_object_per_character():
+    n = 200_000
+    cfb = Compound(B.compound({"BodyText/Section0": B.paragraph("가" * n, B.TAB, "끝")}), "a.hwp")
+    top = Reader(cfb, compressed=False).tree("BodyText/Section0")
+    tracemalloc.start()
+    try:
+        result = transcode.section(top, 0, 0, "a.hwp:BodyText/Section0", Nodes())
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert result.audit.ok and len(result.root[0].find(f"{HP}run/{HP}t").text) == n
+    assert peak < 10 * 2 * n  # 입력(WCHAR 2B)의 10배 미만(지금 약 4배, 글자마다 객체를 만들면 90배 안팎)
+
 def test_extended_controls_pair_with_ctrl_headers_in_order_and_unknown_ones_carry_their_paragraphs():
     cell = B.control("tbl ", 1, B.list_header(2, 2), B.paragraph("칸 첫째", level=2), B.paragraph("칸 둘째", level=2))
     data = B.paragraph(B.extended(2, "secd"), B.extended(2, "cold"), "앞", B.extended(3, "%hlk"), "링크", B.FIELD_END,
@@ -125,6 +167,17 @@ def test_text_in_overlap_and_ruby_controls_is_counted_and_skipped():
     assert info.value.location == "a.hwp:BodyText/Section0#4"
 
 
+
+def test_text_controls_outside_paragraphs_are_audited_with_their_record_location():
+    # 문단을 거치지 않는 덧말·글자 겹침(레벨 0, 다른 컨트롤 바로 아래)은 옮겨 쓰지 않고 장부만 읽는다
+    with pytest.raises(ParseError, match="CTRL_HEADER tdut record too short") as info:
+        section(B.paragraph("앞") + B.control("tdut", 0, body=b"\x05\x00"))
+    assert info.value.location == "a.hwp:BodyText/Section0#4"
+    nested = B.control("gso ", 1, B.control("tcps", 2, body=b"\x09\x00"))
+    with pytest.raises(ParseError, match="CTRL_HEADER tcps record too short") as info:
+        section(B.paragraph(B.extended(11, "gso "), controls=[nested]))
+    assert info.value.location == "a.hwp:BodyText/Section0#5"
+
 def test_unknown_record_tags_are_counted_per_section():
     result = section(B.paragraph("글") + B.record(0x3FF, 0, b"x") + B.record(0x200, 1))
     assert reasons(result) == [("unknown_record", "records", 2)]
@@ -141,9 +194,9 @@ REAL_AUDIT = transcode.audit
 def audit_with(monkeypatch, mutate) -> transcode.Audit:
     """장부 판정 직전에 옮겨 쓴 트리를 고친다(결함 주입)."""
 
-    def wrapped(records, root, marks, skipped):
+    def wrapped(records, root, marks, skipped, location):
         mutate(root)
-        return REAL_AUDIT(records, root, marks, skipped)
+        return REAL_AUDIT(records, root, marks, skipped, location)
 
     monkeypatch.setattr(transcode, "audit", wrapped)
     result = section(TWO)

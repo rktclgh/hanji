@@ -11,8 +11,9 @@ styleIDRef), PARA_CHAR_SHAPE 경계마다 hp:run(charPrIDRef), 글자는 hp:t(�
 트리에서 r로 표시된 hp:t들의 글자를 문서 순서로 이은 T(r)이 정확히 같거나, r을 기록과 함께 건너뛰었어야 한다. 처리부가
 읽지 않는 자리(hp:t 자신의 tail, 그 밖 요소의 text·tail)의 글자는 떠돌이(stray)로 센다. 표시는 요소 속성이 아니라 옆
 사전(id(요소) → 레코드 순번)이다(처리부가 보는 트리를 바꾸지 않는다). 요소 수는 문서 전체 MAX_NODES, 트리 깊이는
-MAX_XML_DEPTH 안이다(넘으면 ParseError)."""
+MAX_XML_DEPTH 안이다(넘으면 ParseError). 보통 글자(≥ 0x20)는 글자마다 객체를 만들지 않고 구간째 디코드한다."""
 
+import re
 import struct
 import sys
 import xml.etree.ElementTree as ET
@@ -34,6 +35,8 @@ PARA_HEADER, PARA_TEXT, PARA_CHAR_SHAPE, PARA_LINE_SEG, CTRL_HEADER, LIST_HEADER
 KNOWN_TAGS = frozenset([*range(0x10, 0x21), *range(0x42, 0x5E), 0x5E, 0x5F, 0x60, 0x61, 0x62, 0x73])
 MAX_NODES = 4_000_000  # 문서 전체 옮겨 쓴 요소 수
 LINE_SEG = 36  # PARA_LINE_SEG 항목 크기(실측 43,744개 모두)
+# 제어 문자 너비 표는 runs(옮겨 쓰기)와 canonical(R(r))이 함께 쓴다. 표는 사양·실측과 맞다. 틀리면 양쪽이 같이
+# 삼키므로 장부는 못 잡는다(쌍둥이 골든·실문서 확장 컨트롤 100% 짝이 막는다). 디코드는 따로 한다
 INLINE8 = frozenset((4, 5, 6, 7, 8, 9, 19, 20))  # 인라인 컨트롤(8 WCHAR)
 EXTENDED = frozenset((1, 2, 3, 11, 12, 14, 15, 16, 17, 18, 21, 22, 23))  # 확장 컨트롤(8 WCHAR, CTRL_HEADER와 짝)
 INLINE_TAGS = {9: f"{HP}tab", 8: f"{HP}titleMark", 10: f"{HP}lineBreak", 30: f"{HP}nbSpace", 31: f"{HP}fwSpace"}
@@ -47,6 +50,10 @@ UNKNOWN_CONTROL = "unknown_control"
 CONTROL_TEXT = "control_text_skipped"
 RECORD_INCONSISTENT = "record_inconsistent"
 UNKNOWN_RECORD = "unknown_record"
+# 보통 글자(≥ 0x20) WCHAR의 이어진 구간(LE 바이트 두 개씩, 소유 반복이라 되짚기 기억이 없다)
+SPAN = re.compile(rb"(?:[\x20-\xff][\x00-\xff]|[\x00-\x1f][\x01-\xff])*+")
+LONE = re.compile(r"[\ud800-\udfff]")  # surrogatepass 디코드 뒤 남은 짝 없는 대리 문자
+NATIVE16 = "utf-16-le" if sys.byteorder == "little" else "utf-16-be"
 
 
 def wchars(body: bytes) -> array:
@@ -62,24 +69,15 @@ def control_id(body: bytes) -> str:
     return body[3::-1].decode("latin-1") if len(body) >= 4 else ""
 
 
+def decode16(raw: bytes | memoryview, codec: str = "utf-16-le") -> tuple[str, int]:
+    """UTF-16 바이트 → 글자(대리쌍 묶음)와 짝 없는 대리 문자 수(U+FFFD로 바꾼다). runs·utf16이 쓴다(canonical의
+    PARA_TEXT는 따로 디코드한다)."""
+    return LONE.subn("�", str(raw, codec, "surrogatepass"))
+
+
 def utf16(units: array) -> tuple[str, int]:
     """WCHAR들 → 글자(대리쌍 묶음)와 짝 없는 대리 문자 수(U+FFFD로 바꾼다)."""
-    out: list[str] = []
-    bad = 0
-    j = 0
-    while j < len(units):
-        w = units[j]
-        if 0xD800 <= w < 0xDC00 and j + 1 < len(units) and 0xDC00 <= units[j + 1] < 0xE000:
-            out.append(chr(0x10000 + (w - 0xD800 << 10) + units[j + 1] - 0xDC00))
-            j += 2
-            continue
-        if 0xD800 <= w < 0xE000:
-            out.append("�")
-            bad += 1
-        else:
-            out.append(chr(w))
-        j += 1
-    return "".join(out), bad
+    return decode16(units.tobytes(), NATIVE16)
 
 
 def control_text(body: bytes, ident: str, location: str) -> str:
@@ -180,29 +178,27 @@ class _Writer:
 
     def runs(self, p: ET.Element, units: array, text: Record | None, bounds: list, controls: list[Record],
              anchor: int, depth: int) -> None:
-        """글자를 낱말 단위(보통 글자·대리쌍·컨트롤)로 나누고, 글자 모양 경계(컨트롤 안이면 그 시작으로 당긴다)마다
-        hp:run을 연다. 같은 자리 경계가 둘이면 뒤 것을 쓴다."""
-        tokens: list[tuple[int, int, str, object]] = []  # (시작, 길이, 종류, 값)
+        """글자를 낱말 단위(보통 글자 구간·컨트롤·표지)로 나누고, 글자 모양 경계(컨트롤·대리쌍 안이면 그 시작으로
+        당긴다)마다 hp:run을 연다. 같은 자리 경계가 둘이면 뒤 것을 쓴다. 보통 글자 구간은 바이트 조각째 디코드하고
+        구간 안 경계에서만 끊는다(당긴 경계는 대리쌍을 가르지 않는다)."""
+        tokens: list[tuple[int, int, str, object]] = []  # (시작, 길이, 종류, 값). 보통 글자 구간은 "span" 하나
+        body = text.body if text is not None else b""
+        view = memoryview(body)
+        n = len(units)
         bad = unknown = ext = mismatch = 0
         end = None
         j = 0
         location = f"{self.location}#{text.index}" if text is not None else self.location
-        while j < len(units):
-            w = units[j]
-            if w >= 0x20:
-                if 0xD800 <= w < 0xDC00 and j + 1 < len(units) and 0xDC00 <= units[j + 1] < 0xE000:
-                    tokens.append((j, 2, "char", chr(0x10000 + (w - 0xD800 << 10) + units[j + 1] - 0xDC00)))
-                    j += 2
-                    continue
-                if 0xD800 <= w < 0xE000:
-                    bad += 1
-                    tokens.append((j, 1, "char", "�"))
-                else:
-                    tokens.append((j, 1, "char", chr(w)))
-                j += 1
+        while j < n:
+            stop = SPAN.match(body, 2 * j, 2 * n).end() // 2  # type: ignore[union-attr]
+            if stop > j:  # 보통 글자 구간(대리 문자도 여기)
+                bad += decode16(view[2 * j:2 * stop])[1]
+                tokens.append((j, stop - j, "span", None))
+                j = stop
                 continue
+            w = units[j]
             if w in INLINE8 or w in EXTENDED:
-                if j + 8 > len(units):
+                if j + 8 > n:
                     raise ParseError("truncated control in PARA_TEXT", location)
                 if w in EXTENDED:
                     ident = units[j + 1] | units[j + 2] << 16
@@ -230,13 +226,13 @@ class _Writer:
                 unknown += 1
             j += 1
         mismatch += max(0, len(controls) - ext)
-        trailing = len(units) - end - 1 if end is not None else 0
+        trailing = n - end - 1 if end is not None else 0
         for name, reason, value in (("chars", INVALID_UTF16, bad), ("chars", UNKNOWN_CONTROL_CHAR, unknown),
                                     ("control_mismatch", RECORD_INCONSISTENT, mismatch),
                                     ("trailing_chars", RECORD_INCONSISTENT, trailing)):
             if value:
                 self.region(reason.replace("_", "-"), reason, anchor, name, value)
-        starts = sorted({(self.snap(int(pos), tokens), k) for k, (pos, _) in enumerate(bounds)})
+        starts = sorted({(self.snap(int(pos), tokens, units), k) for k, (pos, _) in enumerate(bounds)})
         chosen: dict[int, str] = {}
         for pos, k in starts:
             chosen[pos] = str(bounds[k][1])
@@ -255,19 +251,32 @@ class _Writer:
             buffer.clear()
 
         cursor = 0
-        for start, _, kind, value in tokens:
+        for start, length, kind, value in tokens:
             if run is None or (cursor < len(order) and order[cursor] <= start):
                 flush()
                 t = last = None
                 while cursor < len(order) and order[cursor] <= start:
                     cursor += 1
                 run = self.node(p, RUN, depth + 1, charPrIDRef=chosen[order[max(cursor - 1, 0)]] if order else "0")
-            if kind in ("char", "inline"):
+            if kind in ("span", "char", "inline"):
                 if t is None:
                     t = last = self.node(run, T, depth + 2)
                     if text is not None:
                         self.marks[id(t)] = text.index
-                if kind == "char":
+                if kind == "span":
+                    a, stop = start, start + length
+                    while cursor < len(order) and order[cursor] < stop:  # 구간 안 경계: 끊고 새 런
+                        cut = order[cursor]
+                        buffer.append(decode16(view[2 * a:2 * cut])[0])
+                        flush()
+                        cursor += 1
+                        run = self.node(p, RUN, depth + 1, charPrIDRef=chosen[cut])
+                        t = last = self.node(run, T, depth + 2)
+                        if text is not None:
+                            self.marks[id(t)] = text.index
+                        a = cut
+                    buffer.append(decode16(view[2 * a:2 * stop])[0])
+                elif kind == "char":
                     buffer.append(str(value))
                 else:
                     flush()
@@ -289,8 +298,8 @@ class _Writer:
             self.control(run, record, p, anchor, depth + 2)
 
     @staticmethod
-    def snap(pos: int, tokens: list[tuple[int, int, str, object]]) -> int:
-        """경계가 낱말(컨트롤 8 WCHAR·대리쌍) 안이면 그 시작으로."""
+    def snap(pos: int, tokens: list[tuple[int, int, str, object]], units: array) -> int:
+        """경계가 낱말(컨트롤 8 WCHAR, 보통 글자 구간 안의 대리쌍) 안이면 그 시작으로."""
         lo, hi = 0, len(tokens)
         while lo < hi:  # pos 이하에서 시작하는 마지막 낱말
             mid = (lo + hi) // 2
@@ -299,7 +308,11 @@ class _Writer:
             else:
                 hi = mid
         if lo and tokens[lo - 1][0] < pos < tokens[lo - 1][0] + tokens[lo - 1][1]:
-            return tokens[lo - 1][0]
+            if tokens[lo - 1][2] != "span":
+                return tokens[lo - 1][0]
+            # 구간 안: 앞이 상위·여기가 하위 대리 문자면 대리쌍 한가운데(구간 안 상위 대리 문자는 늘 짝의 앞이다)
+            if 0xD800 <= units[pos - 1] < 0xDC00 and 0xDC00 <= units[pos] < 0xE000:
+                return pos - 1
         return pos
 
     def control(self, run: ET.Element, record: Record, p: ET.Element, anchor: int, depth: int) -> None:
@@ -340,30 +353,32 @@ class _Writer:
         return [r for r in self.descendants(record) if r.tag == PARA_HEADER]
 
 
-def canonical(record: Record) -> str:
+def canonical(record: Record, location: str) -> str:
     """R(r): 옮겨 쓰기와 따로 디코드한 정규 문자열. PARA_TEXT는 보통 글자(대리쌍 묶음, 짝 없는 대리 문자 → U+FFFD)와
-    표지 글자(탭 \\t, 줄바꿈 \\n, 묶음 빈칸 \\x1e, 고정폭 빈칸 \\x1f, 하이픈 -), 그 밖 제어 문자·컨트롤은 뺀다."""
+    표지 글자(탭 \\t, 줄바꿈 \\n, 묶음 빈칸 \\x1e, 고정폭 빈칸 \\x1f, 하이픈 -), 그 밖 제어 문자·컨트롤은 뺀다.
+    runs와 다른 길: 제어 문자 자리를 WCHAR마다 찾고 그 사이 바이트를 errors="replace"로 디코드한다(짝 없는 대리
+    WCHAR 하나 → U+FFFD 하나). location은 스트림 위치(덧말·글자 겹침 몸이 짧으면 ParseError에 #순번을 붙인다)."""
     if record.tag == CTRL_HEADER:
-        return control_text(record.body, control_id(record.body), "")
-    units = wchars(record.body)
+        return control_text(record.body, control_id(record.body), f"{location}#{record.index}")
+    raw = record.body
+    even = memoryview(raw)[:len(raw) - len(raw) % 2]
+    units = even.cast("H") if sys.byteorder == "little" else wchars(raw)  # 복사 없이 WCHAR로 본다
     out: list[str] = []
-    marks = {10: "\n", 30: "\x1e", 31: "\x1f", 24: "-"}
-    plain: list[int] = []
-    j = 0
+    marks = {9: "\t", 10: "\n", 30: "\x1e", 31: "\x1f", 24: "-"}
+    a = j = 0
     while j < len(units):
         w = units[j]
         if w >= 0x20:
-            plain.append(w)
             j += 1
             continue
-        out.append(utf16(array("H", plain))[0])
-        plain = []
-        if w == 9:
-            out.append("\t")
-        elif w in marks:
+        if j > a:
+            out.append(str(even[2 * a:2 * j], "utf-16-le", "replace"))
+        if w in marks:
             out.append(marks[w])
         j += 8 if w in INLINE8 or w in EXTENDED else 1
-    out.append(utf16(array("H", plain))[0])
+        a = j
+    if len(units) > a:
+        out.append(str(even[2 * a:], "utf-16-le", "replace"))
     return "".join(out)
 
 
@@ -403,8 +418,9 @@ def stray(root: ET.Element) -> int:
     return count
 
 
-def audit(records: list[Record], root: ET.Element, marks: dict[int, int], skipped: set[int]) -> Audit:
-    """모든 글자 레코드(PARA_TEXT, 덧말·글자 겹침 CTRL_HEADER)를 레벨·부모와 상관없이 훑어 판정한다."""
+def audit(records: list[Record], root: ET.Element, marks: dict[int, int], skipped: set[int], location: str) -> Audit:
+    """모든 글자 레코드(PARA_TEXT, 덧말·글자 겹침 CTRL_HEADER)를 레벨·부모와 상관없이 훑어 판정한다. location은 구역
+    스트림 위치("{파일}:{스트림}", 오류에 #순번을 붙인다)."""
     found = tree_texts(root, marks)
     mismatched = orphans = 0
     stack = list(reversed(records))
@@ -417,7 +433,7 @@ def audit(records: list[Record], root: ET.Element, marks: dict[int, int], skippe
         if record.index in skipped:
             mismatched += text is not None
             continue
-        expected = canonical(record)
+        expected = canonical(record, location)
         if text == expected or (text is None and expected == ""):
             continue
         if text is None:
@@ -452,7 +468,7 @@ def section(records: list[Record], index: int, base: int, location: str, nodes: 
     if unknown:
         result.regions.append(Region("unknown-record", "paragraph", UNKNOWN_RECORD, index, base,
                                      gate("records", unknown, None), f"s{index}-unknown-record"))
-    result.audit = audit(records, root, writer.marks, writer.skipped)
+    result.audit = audit(records, root, writer.marks, writer.skipped, location)
     if not result.audit.ok:
         checks = tuple(GateCheck(name=name, passed=value == 0, value=value, threshold="==0") for name, value in (
             ("mismatched", result.audit.mismatched), ("orphans", result.audit.orphans),
