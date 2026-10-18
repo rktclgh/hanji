@@ -1,10 +1,12 @@
 """HWP 쌍둥이 골든(build_hwp_fixtures.py --check, HWP 스펙 §11.1)과 연결: 엔진 수집, CLI parse, 폴더 수집, 같은 원본."""
 
 import importlib.util
+import io
 import json
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from hanji import LocalEngine, MemoryStore, batch
 from hanji.cli import main
@@ -58,6 +60,21 @@ def test_the_twin_key_catches_a_one_character_change_a_changed_heading_path_and_
     extra = json.loads(json.dumps(base))
     extra[1]["regions"].append({"region_id": "s0-p0-x-0"})  # 처리 이력 하나 더
     assert BUILDER.twin_key(*extra) != BUILDER.expected_key("basic")
+
+
+def test_object_twins_need_no_dropped_records_and_the_check_sees_picture_pixels():
+    assert set(BUILDER.DROPPED) == {"basic"}  # 표·그림·주석 쌍둥이는 HWPX 기대값을 하나도 빼지 않는다
+    data = (ROOT / "inputs" / "figures.hwp").read_bytes()
+    assert BUILDER.twin_ok("figures.hwp", data)
+    buf = io.BytesIO()
+    Image.new("RGB", (4, 2), (1, 2, 3)).save(buf, format="BMP")  # 같은 크기(4×2)의 다른 화소: 트리 키는 같다
+    bins, streams = BUILDER.FIGURE_BINS
+    swapped = BUILDER.document(BUILDER.from_section(BUILDER.HX.FIGURES), head=BUILDER.from_header(BUILDER.HX.header(),
+                               bins), extra={**streams, "BinData/BIN0003.bmp": buf.getvalue()})
+    tree, history = BUILDER.golden("figures.hwp", swapped)
+    assert BUILDER.twin_key(tree.model_dump(mode="json"), history.model_dump(mode="json")) == BUILDER.expected_key(
+        "figures")
+    assert not BUILDER.twin_ok("figures.hwp", swapped)  # 그림 하나의 화소만 달라도 쌍둥이가 아니다
 
 
 def test_the_basic_twin_differs_from_hwpx_only_by_the_dropped_highlight_record():

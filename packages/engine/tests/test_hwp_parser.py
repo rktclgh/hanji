@@ -1,6 +1,7 @@
 """HWP 파서 연결(HWP 스펙 §3·§8·§9·§11.2): 공유 처리부와 두 장부, 형식 엿보기, 배포용 미리보기, 구역 차례, 등록."""
 
 import importlib.util
+import struct
 from pathlib import Path
 
 import pytest
@@ -46,6 +47,43 @@ def test_a_compressed_document_reads_headings_lists_and_paragraphs_with_both_led
     assert parsed.regions == () and all(c.ok for c in counts) and all(a.ok for a in audits) and len(audits) == 2
 
 
+def test_pictures_read_their_bin_data_stream_and_keep_the_caption_link():
+    head = B.docinfo(bins=[B.bin_data(1, "png"), B.bin_data(kind=B.LINK)])
+    caption = B.caption(2, B.paragraph("그림 1. 지어낸 그림", level=2))
+    pics = [B.gso(1, B.pic(2, 1), caption=caption), B.gso(1, B.pic(2, 2)), B.gso(1, B.pic(2, 7))]
+    data = B.document(b"".join(B.paragraph(B.extended(11, "gso "), controls=[pic]) for pic in pics), head=head,
+                      compressed=True, extra={"BinData/BIN0001.png": B.deflate(HX.GRAY_PNG)})
+    parsed, counts, audits = HwpParser()._parse(data, "a.hwp")
+    figure, caption_block, linked, missing = parsed.blocks
+    assert (figure["kind"], caption_block["kind"], caption_block["text"]) == ("figure", "caption", "그림 1. 지어낸 그림")
+    assert figure["figure"]["caption_ref"] == 1 and figure["figure"]["dpi"] == 6  # 캡션 블록 순번, 6화소 ÷ 1인치
+    assert len(parsed.assets) == 1 and "figure" not in linked and "figure" not in missing
+    assert reasons(parsed) == ["figure_image_linked", "figure_image_missing"]
+    assert all(c.ok for c in counts) and all(a.ok for a in audits)
+
+
+def test_a_wmf_picture_becomes_a_figure_without_an_image_and_figure_image_unsupported():
+    head = B.docinfo(bins=[B.bin_data(1, "wmf")])
+    data = B.document(B.paragraph(B.extended(11, "gso "), controls=[B.gso(1, B.pic(2, 1))]), head=head,
+                      extra={"BinData/BIN0001.wmf": HX.FAKE_WMF})
+    parsed, counts, audits = HwpParser()._parse(data, "a.hwp")
+    assert [b["kind"] for b in parsed.blocks] == ["figure"] and "figure" not in parsed.blocks[0]
+    assert parsed.assets == {} and reasons(parsed) == ["figure_image_unsupported"]
+    assert all(c.ok for c in counts) and all(a.ok for a in audits)
+
+
+def test_masterpage_text_is_counted_after_all_sections_like_hwpx():
+    first = B.section_def(1, [B.paragraph("첫 바탕쪽", level=2)], [B.paragraph(level=2)])
+    second = B.section_def(1, [B.paragraph("둘째 구역 바탕쪽", level=2)])
+    data = B.document(B.paragraph(B.extended(2, "secd"), "첫 구역", controls=[first]),
+                      B.paragraph(B.extended(2, "secd"), "둘째 구역", controls=[second]), head=B.docinfo(sections=2))
+    parsed, counts, audits = HwpParser()._parse(data, "a.hwp")
+    assert shown(parsed) == [("paragraph", "첫 구역", 1.0), ("paragraph", "둘째 구역", 1.0)]
+    assert [(r.fallback_reason, r.region_id, r.gate.checks[0].value) for r in parsed.regions] == [
+        ("masterpage_text_skipped", "masterpage-0", 4), ("masterpage_text_skipped", "masterpage-2", 7)]
+    assert all(c.ok for c in counts) and all(a.ok for a in audits)
+
+
 def test_unknown_controls_rescue_their_text_at_section_end_and_both_ledgers_agree():
     table = B.control("tbl ", 1, B.list_header(2, 1), B.paragraph("칸 글", level=2))
     deep = B.list_header(64, 0)
@@ -59,6 +97,17 @@ def test_unknown_controls_rescue_their_text_at_section_end_and_both_ledgers_agre
     assert shown(parsed)[2] == ("paragraph", "칸 글", 0.3)  # 닻 문단마다 구조 문단 하나
     assert len(shown(parsed)) == 4 and shown(parsed)[3][1].startswith("깊이 2\n깊이 4\n") and shown(parsed)[3][2] == 0.3
     assert reasons(parsed) == ["unknown_control", "unknown_control"] + ["unknown_control"] * 31 + ["unassigned_text"]
+    assert counts[0].ok and counts[0].rescued > 0 and audits[0].ok
+
+
+def test_a_caption_shaped_list_after_table_is_rescued_once_and_the_document_still_parses():
+    table = B.control("tbl ", 1, B.record(B.TABLE, 2, struct.pack("<IHH", 0, 1, 1)),
+                      B.cell(2, 0, 0, B.paragraph("칸 글", level=2)), B.caption(2, B.paragraph("뒤에 온 캡션", level=2)))
+    parsed, counts, audits = HwpParser()._parse(B.document(B.paragraph("표 앞", B.extended(11, "tbl "),
+                                                                        controls=[table])), "a.hwp")
+    assert [text for _, text, _ in shown(parsed)].count("뒤에 온 캡션") == 1
+    assert "".join(text for _, text, _ in shown(parsed)).count("칸 글") == 1
+    assert reasons(parsed) == ["record_inconsistent", "unknown_control", "unassigned_text"]
     assert counts[0].ok and counts[0].rescued > 0 and audits[0].ok
 
 

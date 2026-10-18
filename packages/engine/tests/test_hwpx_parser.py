@@ -120,6 +120,16 @@ def test_masterpage_text_is_skipped_with_a_record():
         "masterpage_text_skipped", "masterpage-0", 5)
 
 
+def test_spine_items_outside_contents_leave_one_record():
+    items = [("js", "Scripts/headerScripts.js", "application/x-javascript", True)]
+    parsed, _ = parse(B.section(B.para(B.run(B.t("본문")))), items=items, spine=["header", "section0", "js"],
+                      extra={"Scripts/headerScripts.js": b"var x;"})
+    assert texts(parsed) == [("paragraph", "본문")]
+    (region,) = parsed.regions
+    assert (region.fallback_reason, region.region_id, region.kind, region.gate.checks[0].value) == (
+        "spine_item_skipped", "spine-skipped", "paragraph", 1)
+
+
 def test_missing_header_and_wrong_section_root_are_parse_errors():
     data = B.package(B.section(B.para()))
     with zipfile.ZipFile(BytesIO(data)) as z:

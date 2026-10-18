@@ -2,12 +2,12 @@
 
 복합 파일(cfb.py)을 열고 FileHeader(암호·DRM은 ParseError)와 DocInfo → Styles(docinfo.py)를 읽은 뒤, BodyText/Section{n}
 (0부터 빈틈 없이)마다 레코드 트리를 OWPML 요소 트리로 옮겨 쓰고(transcode.py, 옮겨 쓰기 장부) HWPX 구역 처리부
-(hwpx/owpml.py)를 그대로 돌린다. 트리는 구역마다 버린다. 배포용 문서는 본문을 읽지 않고 암호화되지 않은 미리보기 글
-(PrvText)만 부분 복원으로 낸다(§9). 형식 엿보기: zip이면 HWPX 파서로 넘기고(실제로 HWPX인 .hwp), HWP 3.x 서명은
-ParseError. HP-A는 그림(BinData)을 읽지 않는다: 개체 컨트롤은 모르는 컨트롤 경로라 그림 요소를 만들지 않는다."""
+(hwpx/owpml.py)를 그대로 돌린다. 트리는 구역마다 버린다. 그림 바이트는 DocInfo BIN_DATA가 가리키는 BinData 스트림에서
+읽고(pictures.py), 바탕쪽 글자는 읽지 않고 HWPX처럼 수만 남긴다. 배포용 문서는 본문을 읽지 않고 암호화되지 않은 미리보기
+글(PrvText)만 부분 복원으로 낸다(§9). 형식 엿보기: zip이면 HWPX 파서로 넘기고(실제로 HWPX인 .hwp), HWP 3.x 서명은
+ParseError."""
 
 import re
-from collections.abc import Mapping
 
 from hanji_contracts import GateResult, RegionRecord
 
@@ -16,12 +16,12 @@ from ..base import ParsedSource
 from ..flowdoc import Region, finish, gate
 from ..flowledger import ink
 from ..hwpx import HwpxParser
-from ..hwpx.container import Item
-from ..hwpx.owpml import _Doc, _finish, _Section
+from ..hwpx.owpml import MASTERPAGE_TEXT, _Doc, _finish, _Section
 from ..pdf.group import RESCUED_CONFIDENCE
 from . import transcode
 from .cfb import Compound
 from .docinfo import flatten, read_styles
+from .pictures import BinData
 from .stream import HWP3_SIGNATURE, Reader, file_header
 from .transcode import INVALID_UTF16, Audit, Nodes, utf16, wchars
 
@@ -30,18 +30,6 @@ SECTION = re.compile(r"BodyText/Section(0|[1-9][0-9]*)")
 PRVTEXT_BYTES = 1024 * 1024  # 배포용 미리보기 글은 이만큼만 읽는다
 DISTRIBUTION = "distribution_preview_only"
 LINES = re.compile(r"\r\n|\n")
-
-
-class _NoPictures:
-    """HP-A의 그림 원천: 비어 있다(BinData는 HP-B의 pictures.py). 처리부는 hp:pic이 있을 때만 부른다."""
-
-    items: Mapping[str, Item] = {}
-
-    def has(self, member: str) -> bool:
-        return False
-
-    def binary(self, member: str) -> bytes:
-        raise ParseError("HWP pictures are not read yet", member)
 
 
 def _sections(cfb: Compound) -> list[str]:
@@ -108,22 +96,29 @@ class HwpParser:
         reader = Reader(cfb, header.compressed)
         if not cfb.has("DocInfo"):
             raise ParseError("missing DocInfo stream", name)
-        styles = read_styles(flatten(reader.tree("DocInfo")), f"{name}:DocInfo")
+        records = flatten(reader.tree("DocInfo"))
+        styles = read_styles(records, f"{name}:DocInfo")
         if header.distribution:
             blocks, regions = _distribution(cfb)
             return ParsedSource(mime=MIME, blocks=blocks, regions=regions), (), ()
-        doc = _Doc(name, styles, _NoPictures())
+        doc = _Doc(name, styles, BinData(cfb, records, header.compressed, f"{name}:DocInfo"))
         nodes = Nodes()
         audits: list[Audit] = []
+        masters: list[int] = []  # 바탕쪽 리스트마다 공백 아닌 글자 수(문서 차례)
         base = 0
         for index, path in enumerate(_sections(cfb)):
             result = transcode.section(reader.tree(path), index, base, f"{name}:{path}", nodes)
             doc.regions.extend(result.regions)
             audits.append(result.audit)
+            masters.extend(result.masters)
             section = _Section(doc, index, result.root, base)
             section.build()
             base += len(result.root)
             del section, result  # 다음 구역 전에 트리를 버린다
+        for k, chars in enumerate(masters):  # HWPX 마스터 쪽 멤버와 같은 기록(구역 처리 뒤, 문서 차례)
+            if chars:
+                doc.regions.append(Region("masterpage-text", "paragraph", MASTERPAGE_TEXT, 0, 0,
+                                          gate("chars", chars, None), f"masterpage-{k}"))
         blocks, regions = _finish(doc)
         return (ParsedSource(mime=MIME, blocks=blocks, assets=doc.budget.assets, regions=regions), tuple(doc.counts),
                 tuple(audits))

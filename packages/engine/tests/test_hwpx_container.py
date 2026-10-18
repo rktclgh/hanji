@@ -135,6 +135,23 @@ def test_spine_and_manifest_mismatches_are_refused(change, match, where):
     assert error.location == f"a.hwpx:{where}"
 
 
+def test_spine_items_outside_contents_are_counted_and_not_read():
+    """한컴이 spine에 넣는 Contents/ 밖 항목(스크립트)은 읽지 않고 센다. 멤버가 없어도 된다(읽지 않는다)."""
+    items = [("js", "Scripts/headerScripts.js", "application/x-javascript", True),
+             ("gone", "Scripts/missing.js", "application/x-javascript", True)]
+    package = Package(B.package(SECTION, items=items, spine=["header", "js", "section0", "gone"],
+                                extra={"Scripts/headerScripts.js": b"var x;"}), "a.hwpx")
+    assert package.sections == ("Contents/section0.xml",) and package.skipped == 2
+    assert Package(B.package(SECTION), "a.hwpx").skipped == 0
+    twice = [("js", "Scripts/a.js", "text/javascript", True), ("js2", "Scripts/a.js", "text/javascript", True)]
+    refused(B.package(SECTION, items=twice, spine=["header", "section0", "js", "js2"]),
+            "refers to 'Scripts/a.js' twice")
+    for href in ("./Scripts/a.js", "Scripts/../Contents/section1.xml", "Scripts\\a.js", "contents/section0.xml",
+                 "CONTENTS/section1.xml"):  # Contents의 대소문자 변형은 밖이 아니다
+        data = B.package(SECTION, items=[("x", href, "text/javascript", True)], spine=["header", "section0", "x"])
+        assert refused(data, "unsupported spine item").location == "a.hwpx:Contents/content.hpf"
+
+
 def test_no_sections_an_orphan_section_and_a_missing_content_hpf_are_refused():
     assert refused(B.package(), "no sections").location == "a.hwpx:Contents/content.hpf"
     error = refused(B.package(SECTION, extra={"Contents/section7.xml": SECTION.encode()}), "not in the spine")
