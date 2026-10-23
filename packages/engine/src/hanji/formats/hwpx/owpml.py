@@ -37,6 +37,7 @@ LINESEGS, LINESEG, LINE_BREAK = f"{HP}linesegarray", f"{HP}lineseg", f"{HP}lineB
 TEXTART, HIDDEN = f"{HP}textart", f"{HP}hiddenComment"
 TBL, TR, TC, CELL_ADDR, CELL_SPAN = f"{HP}tbl", f"{HP}tr", f"{HP}tc", f"{HP}cellAddr", f"{HP}cellSpan"
 PIC, IMG, CUR_SZ, CAPTION, CONTAINER = f"{HP}pic", f"{HC}img", f"{HP}curSz", f"{HP}caption", f"{HP}container"
+ORG_SZ = f"{HP}orgSz"
 CTRL, DRAW_TEXT, EQUATION, SCRIPT = f"{HP}ctrl", f"{HP}drawText", f"{HP}equation", f"{HP}script"
 SHAPES = frozenset(f"{HP}{n}" for n in ("rect", "ellipse", "arc", "polygon", "curve", "connectLine", "line"))
 EMBEDDED = frozenset(f"{HP}{n}" for n in ("ole", "chart", "video"))  # 그림 성격 개체(이미지 없는 그림)
@@ -360,10 +361,11 @@ class _Section:
             if isinstance(result, images.Png):
                 key = self.doc.budget.add(result.data)
                 if key is not None:
-                    size = pic.find(CUR_SZ)
+                    size, org = pic.find(CUR_SZ), pic.find(ORG_SZ)
+                    shown = images.dpi(result.width, size.get("width") if size is not None else None,
+                                       org.get("width") if org is not None else None)
                     return {"asset": key, "mime": "image/png", "width_px": result.width, "height_px": result.height,
-                            "dpi": images.dpi(result.width, size.get("width") if size is not None else None),
-                            "category": "image"}
+                            "dpi": shown, "category": "image"}
                 reason = FIGURE_BUDGET
                 self.doc.pictures[item.href] = reason  # 담지 못한 PNG 바이트는 들고 있지 않는다(used는 줄지 않는다)
             else:

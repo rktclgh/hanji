@@ -109,9 +109,11 @@ def content(sections: int, items: Sequence[tuple[str, str, str, bool]] = (), spi
             + "".join(f'<opf:itemref idref="{ref}"/>' for ref in refs) + "</opf:spine></opf:package>")
 
 
-def pic(ref: str, caption: str = "", width: int = 7200) -> str:
-    """hp:pic(표시 너비 width HWPUNIT, 7200 = 1인치). shapeComment는 한컴이 자동으로 쓰는 개체 설명 자리다."""
-    return (f'<hp:pic id="1"><hp:curSz width="{width}" height="3600"/>{caption}'
+def pic(ref: str, caption: str = "", width: int = 7200, org: tuple[int, int] | None = None) -> str:
+    """hp:pic(표시 너비 width HWPUNIT, 7200 = 1인치, org는 처음 폭·높이 hp:orgSz). shapeComment는 한컴이 자동으로 쓰는
+    개체 설명 자리다."""
+    first = f'<hp:orgSz width="{org[0]}" height="{org[1]}"/>' if org is not None else ""
+    return (f'<hp:pic id="1">{first}<hp:curSz width="{width}" height="3600"/>{caption}'
             f'<hc:img binaryItemIDRef="{ref}" bright="0" contrast="0" effect="REAL_PIC" alpha="0"/>'
             f"<hp:shapeComment>그림입니다.</hp:shapeComment></hp:pic>")
 
@@ -275,7 +277,7 @@ FIGURES = section(
     para(run(pic("image5"))),
     para(run(pic("image6"))),
     para(run(pic("image9"))),
-    para(run(pic("image3", caption(para(run(t("그림 1. 지어낸 막대 그림")))), width=0))),
+    para(run(pic("image3", caption(para(run(t("그림 1. 지어낸 막대 그림")))), width=0, org=(14400, 7200)))),
     para(run(pic("image5", caption(para(run(t("그림 2. 이미지 없는 그림의 캡션"))))))),
     para(run(pic("image2", caption(para(run(t("그림 3. 위에 둔 캡션"))), side="TOP")))),
     para(run(container(pic("image3"), pic("image1")))),

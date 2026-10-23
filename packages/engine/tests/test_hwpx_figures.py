@@ -46,7 +46,7 @@ def test_figures_golden_blocks_assets_and_records():
     assert shapes == [
         ("paragraph", 0, None), ("figure", 1, (4, 4, 4)), ("figure", 2, (8, 8, 4)), ("figure", 3, (4, 2, 4)),
         ("figure", 4, (4000, 2, 400)), ("figure", 5, (4, 4, 4)), ("figure", 6, None), ("figure", 7, None),
-        ("figure", 8, None), ("figure", 9, (4, 2, 96)), ("caption", 9, None), ("figure", 10, None),
+        ("figure", 8, None), ("figure", 9, (4, 2, 2)), ("caption", 9, None), ("figure", 10, None),
         ("caption", 10, None), ("caption", 11, None), ("figure", 11, (8, 8, 8)), ("figure", 12, (4, 2, 4)),
         ("figure", 12, (4, 4, 4)), ("paragraph", 13, None), ("paragraph", 13, None)]
     blocks = tree.blocks
@@ -155,6 +155,16 @@ def test_dpi_uses_the_display_width_and_falls_back_to_96():
     assert images.dpi(400, "7200") == 400 and images.dpi(400, "14400") == 200
     assert images.dpi(400, None) == 96 and images.dpi(400, "0") == 96 and images.dpi(400, "4294965095") == 96
     assert images.dpi(400, "x") == 96
+
+
+def test_dpi_uses_the_original_width_when_the_current_width_is_zero():
+    """한컴은 현재 폭이 처음 폭과 같으면 curSz 폭을 0으로 적는다: 그때는 orgSz 폭이 표시 너비다."""
+    assert images.dpi(400, "0", "14400") == 200 and images.dpi(400, None, "7200") == 400
+    assert images.dpi(400, "7200", "14400") == 400  # 현재 폭이 있으면 그것
+    assert images.dpi(400, "0", "0") == 96 and images.dpi(400, "0", None) == 96 and images.dpi(400, "0", "y") == 96
+    assert images.dpi(400, "x", "7200") == 96 and images.dpi(400, "4294965095", "7200") == 96  # 깨진 현재 폭은 그대로
+    parsed, _ = one_picture(B.GRAY_PNG, width=0, org=(3600, 1800))
+    assert parsed.blocks[0]["figure"]["dpi"] == 12  # 6화소 ÷ 0.5인치
 
 
 def test_embedded_objects_are_figures_without_images_and_containers_keep_order():

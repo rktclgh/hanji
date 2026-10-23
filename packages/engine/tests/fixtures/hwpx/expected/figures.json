@@ -6,7 +6,7 @@
   "source": {
     "name": "figures.hwpx",
     "mime": "application/hwp+zip",
-    "content_hash": "sha256:6c85a8ea0b323ba1dd5c65bb3093a76caaedfaef03ca596543239389d31506ed",
+    "content_hash": "sha256:1f946a5968b4cba3838b7c518fe082ff39ab4219d7e564802efe0d907c76f626",
     "page_count": null
   },
   "pages": [],
@@ -243,7 +243,7 @@
         "mime": "image/png",
         "width_px": 4,
         "height_px": 2,
-        "dpi": 96,
+        "dpi": 2,
         "category": "image",
         "caption_block_id": "b_91a824995fe6b3d9afeb6098"
       },

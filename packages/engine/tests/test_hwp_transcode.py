@@ -281,10 +281,13 @@ def test_drawing_objects_become_pictures_shapes_containers_and_embedded_objects(
     result = section(data)
     run = result.root[0].find(f"{HP}run")
     assert [tags(e) for e in run][1:] == [
-        ["pic", {}, [["curSz", {"width": "14400", "height": "7200"}, []], ["img", {"binaryItemIDRef": "3"}, []],
+        ["pic", {}, [["orgSz", {"width": "0", "height": "0"}, []], ["curSz", {"width": "14400", "height": "7200"}, []],
+                     ["img", {"binaryItemIDRef": "3"}, []],
                      ["caption", {"side": "BOTTOM"}, [["subList", {}, [["p", "그림 1"]]]]]]],
-        ["pic", {}, [["curSz", {"width": "0", "height": "0"}, []], ["img", {"binaryItemIDRef": "5"}, []]]],
-        ["container", {}, [["pic", {}, [["curSz", {"width": "7200", "height": "3600"}, []],
+        ["pic", {}, [["orgSz", {"width": "500", "height": "400"}, []], ["curSz", {"width": "0", "height": "0"}, []],
+                     ["img", {"binaryItemIDRef": "5"}, []]]],
+        ["container", {}, [["pic", {}, [["orgSz", {"width": "0", "height": "0"}, []],
+                                        ["curSz", {"width": "7200", "height": "3600"}, []],
                                         ["img", {"binaryItemIDRef": "1"}, []]]],
                            ["rect", {}, [["drawText", {}, [["subList", {}, [["p", "묶음 속 글상자"]]]]]]],
                            ["line", {}, []]]],

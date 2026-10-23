@@ -65,12 +65,20 @@ def _encode(image: Image.Image) -> Png:
     return Png(buf.getvalue(), image.width, image.height)
 
 
-def dpi(width_px: int, width_hwp: str | None) -> int:
-    """dpi = 그림 화소 너비 ÷ (표시 너비 HWPUNIT ÷ 7200). 표시 너비가 없거나 0·음수(부호 없는 값으로 저장된 음수)면 96."""
-    try:
-        width = int(width_hwp) if width_hwp is not None else 0
-    except ValueError:
-        width = 0
+def dpi(width_px: int, width_hwp: str | None, org_hwp: str | None = None) -> int:
+    """dpi = 그림 화소 너비 ÷ (표시 너비 HWPUNIT ÷ 7200). 표시 너비(curSz)가 없거나 0이면 처음 크기(orgSz) 너비를 쓴다:
+    한컴은 현재 폭이 처음 폭과 같으면 curSz 폭을 0으로 적는다. 쓸 너비가 없거나 0·음수(부호 없는 값으로 저장된 음수)면 96."""
+    width = _hwpunit(width_hwp)
+    if width == 0:
+        width = _hwpunit(org_hwp)
     if not 0 < width < 2**31:
         return 96
     return max(1, round(width_px * 7200 / width))
+
+
+def _hwpunit(value: str | None) -> int:
+    """HWPUNIT 정수. 없으면 0, 숫자가 아니면 −1(쓸 수 없는 값)."""
+    try:
+        return int(value) if value is not None else 0
+    except ValueError:
+        return -1

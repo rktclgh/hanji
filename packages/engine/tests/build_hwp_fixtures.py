@@ -355,9 +355,10 @@ def picture(level: int, ref: int) -> bytes:
     return record(SC_PICTURE, level, bytes(71) + struct.pack("<H", ref) + bytes(18))
 
 
-def pic(level: int, ref: int, width: int = 7200, height: int = 3600, top: bool = True) -> bytes:
-    """그림 SHAPE_COMPONENT(level). 처음 크기는 0이라 현재 크기가 늘 다르다(같으면 HWPX처럼 curSz 0)."""
-    return component(level, "$pic", picture(level + 1, ref), top=top, size=(width, height))
+def pic(level: int, ref: int, width: int = 7200, height: int = 3600, top: bool = True,
+        first: tuple[int, int] = (0, 0)) -> bytes:
+    """그림 SHAPE_COMPONENT(level). 처음 크기는 기본 0이라 현재 크기가 늘 다르다(같은 쪽은 HWPX처럼 curSz 0)."""
+    return component(level, "$pic", picture(level + 1, ref), top=top, size=(width, height), first=first)
 
 
 def rect(level: int, *paras: bytes, top: bool = True) -> bytes:
@@ -515,9 +516,11 @@ def _component(element: ET.Element, level: int, top: bool) -> bytes:
     """그리기 개체 요소 → SHAPE_COMPONENT(level). 그림 id "imageK"는 BIN_DATA 순번 K다(from_items)."""
     name = element.tag.removeprefix(OWPML)
     if name == "pic":
-        size = element.find(f"{OWPML}curSz")
+        size, org = element.find(f"{OWPML}curSz"), element.find(f"{OWPML}orgSz")
         ref = element.find(f"{CORE_NS}img").get("binaryItemIDRef")
-        return pic(level, int(ref.removeprefix("image")), int(size.get("width")), int(size.get("height")), top=top)
+        first = (int(org.get("width")), int(org.get("height"))) if org is not None else (0, 0)
+        now = [int(size.get(k)) or v for k, v in zip(("width", "height"), first)]  # curSz 0은 처음 값과 같다는 뜻
+        return pic(level, int(ref.removeprefix("image")), *now, top=top, first=first)
     if name == "rect":
         return rect(level, *_paras(element.find(f"{OWPML}drawText"), level + 1), top=top)
     if name == "line":
