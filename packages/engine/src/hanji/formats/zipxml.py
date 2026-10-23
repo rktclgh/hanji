@@ -1,9 +1,11 @@
 """zip + XML 꾸러미를 믿을 수 없는 입력으로 읽는 공용 부분(HWPX·OOXML). 멤버는 정확한 이름으로만 열고 디스크에 풀지
 않는다. 읽는 바이트는 상한까지만 읽고(zip 머리의 선언 크기를 믿지 않는다), XML은 트리를 만들기 전에 expat로 DOCTYPE·
 깊이를 거른다. 상한 값은 부르는 쪽이 Limits로 넘긴다(형식마다 모듈 상수를 호출 때 읽어 몽키패치가 그대로 작동한다).
-실패는 ParseError(원인, "{파일 이름}:{멤버 이름}")."""
+멤버 데이터 몇 바이트가 빠지거나 더해져 EOCD의 중앙 디렉터리 위치가 틀린 zip은 로컬 머리를 확인해 적힌 위치로 읽는다
+(손상 멤버만 잃는다). 실패는 ParseError(원인, "{파일 이름}:{멤버 이름}")."""
 
 import io
+import struct
 import xml.etree.ElementTree as ET
 import zipfile
 import zlib
@@ -14,6 +16,7 @@ from xml.parsers import expat
 from ..errors import ParseError
 
 Prefixes = dict[str, frozenset[str]]  # 접두어 → 그 파트의 xmlns:접두어 선언에 나온 이름공간 URI들
+LOCAL, END, END64 = b"PK\x03\x04", b"PK\x05\x06", b"PK\x06\x07"  # 로컬 머리, EOCD, zip64 EOCD 위치 표시
 
 
 class TooLarge(Exception):
@@ -84,6 +87,61 @@ def scan(data: bytes, location: str, max_depth: int) -> Prefixes:
     return {prefix: frozenset(uris) for prefix, uris in seen.items()}
 
 
+def _directory(data: bytes) -> tuple[int, int] | None:
+    """(zipfile이 모든 멤버 위치에 더한 값, 중앙 디렉터리 실제 위치). 더한 값 = 실제 위치 − EOCD에 적힌 위치: 앞에 다른
+    바이트가 붙은 zip이면 맞고, 멤버 데이터가 줄거나 는 zip이면 손상 뒤 멤버에만 맞는다. EOCD가 없거나 zip64면 None."""
+    end = data.rfind(END, max(0, len(data) - 65_557))  # EOCD 22B + 주석 최대 65535B
+    if end < 20 or end + 22 > len(data) or data[end - 20:end - 16] == END64:
+        return None
+    size, offset = struct.unpack_from("<II", data, end + 12)
+    return end - size - offset, end - size
+
+
+def _start(data: bytes, offset: int, name: str) -> int | None:
+    """offset에 이름이 name인 로컬 머리가 있으면 그 멤버 데이터의 시작 위치, 아니면 None."""
+    if offset < 0 or offset + 30 > len(data) or data[offset:offset + 4] != LOCAL:
+        return None
+    (flags,) = struct.unpack_from("<H", data, offset + 6)
+    n, m = struct.unpack_from("<HH", data, offset + 26)
+    try:
+        found = data[offset + 30:offset + 30 + n].decode("utf-8" if flags & 0x800 else "cp437")
+    except UnicodeDecodeError:
+        return None
+    return offset + 30 + n + m if found == name else None
+
+
+def _relocate(data: bytes, infos: list[zipfile.ZipInfo]) -> dict[str, zipfile.ZipInfo | None]:
+    """zipfile이 옮긴 위치에 로컬 머리가 없고 적힌 위치(옮기기 전)에 같은 이름의 머리가 있는 멤버 → 그 위치를 가리키는 새
+    ZipInfo(공개 속성만 옮긴다: zipfile 내부 값을 고치지 않는다). 데이터가 다음 멤버 머리나 중앙 디렉터리를 넘으면 None
+    (겹친 멤버라 읽지 않는다, zipfile의 겹침 검사와 같은 뜻)."""
+    found = _directory(data)
+    if found is None or found[0] == 0:
+        return {}
+    shift, directory = found
+    offsets = {info.filename: info.header_offset for info in infos}
+    for info in infos:
+        if _start(data, info.header_offset, info.filename) is None and \
+                _start(data, info.header_offset - shift, info.filename) is not None:
+            offsets[info.filename] = info.header_offset - shift
+    starts = sorted({*offsets.values(), directory})
+    moved: dict[str, zipfile.ZipInfo | None] = {}
+    for info in infos:
+        offset = offsets[info.filename]
+        if offset == info.header_offset:
+            continue
+        begin = _start(data, offset, info.filename)
+        bound = next((s for s in starts if s > offset), directory)
+        if begin is None or begin + info.compress_size > bound:
+            moved[info.filename] = None
+            continue
+        fresh = zipfile.ZipInfo(info.filename)
+        for key in ("compress_type", "flag_bits", "CRC", "compress_size", "file_size", "extra"):
+            setattr(fresh, key, getattr(info, key))
+        fresh.header_offset = offset
+        moved[info.filename] = fresh
+    return moved
+
+
 class Archive:
     """열린 zip 꾸러미. 생성자가 zip과 멤버 목록(수·이름 중복·역슬래시·암호화·압축 방식)을 확인한다. 상한은 limits가
     호출 때마다 돌려준다(형식이 자기 모듈 상수로 만든다). xml_read·binary_read는 실제로 읽은 바이트 합이다."""
@@ -113,6 +171,7 @@ class Archive:
                 # BZIP2·LZMA는 읽기 상한 없이 풀리므로 거부한다(한컴·Office는 무압축·deflate만 쓴다)
                 raise ParseError("unsupported zip compression method", f"{name}:{info.filename}")
             self._infos[info.filename] = info
+        self._moved = _relocate(data, infos)  # 적힌 위치로 다시 찾은 멤버(None: 겹쳐서 읽지 않는다)
 
     def has(self, member: str) -> bool:
         return member in self._infos
@@ -124,6 +183,11 @@ class Archive:
         limits = self.limits()
         if info.file_size > limits.ratio_floor and info.file_size > limits.ratio * max(info.compress_size, 1):
             raise TooLarge(f"zip member compression ratio over {limits.ratio}")
+        if member in self._moved:
+            moved = self._moved[member]
+            if moved is None:
+                raise ParseError("cannot read zip member: overlapped entries", f"{self.name}:{member}")
+            info = moved
         try:
             with self._zip.open(info) as stream:
                 return stream.read(size)

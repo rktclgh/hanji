@@ -44,6 +44,28 @@ def test_archive_reads_the_limits_each_time_it_reads():
         zipxml.Archive(b"plain", "f.zip", "not a zip", lambda: LIMITS)
 
 
+def test_members_before_a_damaged_member_are_found_at_their_written_offsets():
+    """멤버 데이터 몇 바이트가 빠지면 EOCD의 중앙 디렉터리 위치가 틀리고 zipfile은 모든 멤버 위치를 그만큼 옮긴다(앞에
+    다른 바이트가 붙은 zip으로 본다). 손상 앞 멤버는 적힌 위치에서, 뒤 멤버는 옮긴 위치에서 읽고 손상 멤버만 잃는다."""
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("a.xml", b"<a>" + b"x" * 200 + b"</a>", zipfile.ZIP_DEFLATED)
+        z.writestr("m/img.bin", bytes(range(90)), zipfile.ZIP_STORED)
+        z.writestr("c.xml", b"<c>" + b"y" * 200 + b"</c>", zipfile.ZIP_DEFLATED)
+    data = buf.getvalue()
+    at = data.index(bytes(range(90))) + 40
+    broken = data[:at] + data[at + 3:]
+    with pytest.raises((zipfile.BadZipFile, ValueError, OSError)):  # zipfile만으로는 앞 멤버를 읽지 못한다
+        zipfile.ZipFile(BytesIO(broken)).read("a.xml")
+    archive = zipxml.Archive(broken, "f.zip", "not a zip", lambda: LIMITS)
+    assert archive.xml("a.xml", "a").text == "x" * 200 and archive.xml("c.xml", "c").text == "y" * 200
+    with pytest.raises(ParseError, match="cannot read zip member") as info:
+        archive.binary("m/img.bin")
+    assert info.value.location == "f.zip:m/img.bin"
+    prefixed = zipxml.Archive(b"junk" + data, "f.zip", "not a zip", lambda: LIMITS)  # 앞에 붙은 바이트는 그대로
+    assert prefixed.binary("m/img.bin") == bytes(range(90)) and prefixed.xml("a.xml", "a").text == "x" * 200
+
+
 def test_hwpx_modules_reexport_the_shared_objects():
     assert container.TooLarge is zipxml.TooLarge and container.OverBudget is zipxml.OverBudget
     assert issubclass(container.Package, zipxml.Archive)

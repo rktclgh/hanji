@@ -168,6 +168,19 @@ def test_a_picture_member_with_a_broken_zip_crc_loses_only_that_picture():
     assert reasons(parsed) == [("figure_image_unreadable", "s0-p1-figure-0")] and counts[0].ok
 
 
+def test_a_picture_member_that_lost_bytes_loses_only_that_picture():
+    """그림 멤버 데이터에서 3바이트가 빠진 파일(대량 코퍼스 실문서 하나): 중앙 디렉터리 위치가 틀려도 문서는 읽히고 그
+    그림만 잃는다."""
+    found = B.media(**PICS)
+    data = B.docx(B.document(B.p("앞 글"), B.p(B.drawing(B.pic("rIdP"))), B.p(B.drawing(B.pic("rIdJ"))), B.p("뒤 글")),
+                  styles_xml=STYLES, doc_rels=found["doc_rels"], extra=found["extra"])
+    at = data.index(B.GRAY_PNG) + len(B.GRAY_PNG) // 2
+    parsed, counts = DocxParser()._parse(data[:at] + data[at + 3:], "a.docx")
+    assert [(b["kind"], b["text"], "figure" in b) for b in parsed.blocks] == [
+        ("paragraph", "앞 글", False), ("figure", "", False), ("figure", "", True), ("paragraph", "뒤 글", False)]
+    assert reasons(parsed) == [("figure_image_unreadable", "s0-p1-figure-0")] and counts[0].ok
+
+
 CHART_URI = "http://schemas.openxmlformats.org/drawingml/2006/chart"
 DIAGRAM_URI = "http://schemas.openxmlformats.org/drawingml/2006/diagram"
 
