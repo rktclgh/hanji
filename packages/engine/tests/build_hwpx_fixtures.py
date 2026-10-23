@@ -63,6 +63,18 @@ def title_mark() -> str:
     return '<hp:titleMark ignore="0"/>'
 
 
+def dutmal(main: str, sub: str) -> str:
+    """덧말(본말 위에 작은 덧말 글자, hp:run 바로 아래)."""
+    return (f'<hp:dutmal posType="TOP" szRatio="0" option="0" styleIDRef="0" align="CENTER"><hp:mainText>'
+            f"{escape(main)}</hp:mainText><hp:subText>{escape(sub)}</hp:subText></hp:dutmal>")
+
+
+def compose(text: str, circle: str = "CHAR") -> str:
+    """글자 겹침(composeText 글자를 한 칸에 겹친다, hp:run 바로 아래). circle은 모양(SHAPE_CIRCLE이면 원 안 글자)."""
+    return (f'<hp:compose circleType="{circle}" charSz="-3" composeType="SPREAD" charPrCnt="10"'
+            f'{attrs(composeText=text)}/>')
+
+
 def run(*items: str, char: int = 0) -> str:
     return f'<hp:run charPrIDRef="{char}">{"".join(items)}</hp:run>'
 
@@ -330,7 +342,7 @@ NOTES = (
         para(run(t("둘째 구역 끝 문단이다."))),
     ),
 )
-# 수식·도형·묶음·OLE·글맵시의 캡션(표 캡션처럼 TOP·LEFT면 앞, 아니면 뒤, 칸 안이면 칸 글자)
+# 수식·도형·묶음·OLE·글맵시의 캡션(표 캡션처럼 TOP·LEFT면 앞, 아니면 뒤, 칸 안이면 칸 글자), 덧말·글자 겹침(그 자리 글자)
 OBJECTS = section(
     para(run(t("개체 캡션 예제 문단이다."))),
     para(run(equation("a over b", caption=caption(para(run(t("식 1. 지어낸 분수"))))))),
@@ -343,6 +355,10 @@ OBJECTS = section(
     para(run(tbl(1, 2, [tc(0, 0, para(run(t("칸 수식"), equation("x^2", caption=caption(para(run(t("칸 식 캡션")))))))),
                         tc(0, 1, para(run(rect(para(run(t("칸 글상자"))),
                                                caption=caption(para(run(t("칸 상자 캡션"))), side="TOP")))))]))),
+    para(run(t("덧말 앞 "), dutmal("본말", "덧말"), t(" 덧말 뒤"), dutmal("홀로", " ")), run(t(" 겹침 "), compose("가나")),
+         run(t(" 원 "), compose("1", circle="SHAPE_CIRCLE"), compose("21", circle="SHAPE_CIRCLE"),
+             compose("가", circle="SHAPE_CIRCLE"))),
+    para(run(tbl(1, 2, [tc(0, 0, para(run(t("칸 속 "), dutmal("칸 본말", "칸 덧말")))), tc(0, 1, para(run(compose("다"))))]))),
 )
 SAMPLES: dict[str, bytes] = {
     "basic.hwpx": package(*BASIC, head=BASIC_HEAD),

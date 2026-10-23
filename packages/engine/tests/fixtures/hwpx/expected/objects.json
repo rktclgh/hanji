@@ -6,7 +6,7 @@
   "source": {
     "name": "objects.hwpx",
     "mime": "application/hwp+zip",
-    "content_hash": "sha256:b2a73511108e8b2d7d79db87c0b8444d5fe450dc92ac93340532efe0e9d1d2fe",
+    "content_hash": "sha256:f9bb55d6f1e214988f9db00bf39dae5331f9299bcd0be4ef5cc287ea161c7762",
     "page_count": null
   },
   "pages": [],
@@ -288,6 +288,69 @@
         "kind": "flow",
         "section_path": [],
         "paragraph_index": 7
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_2e8e9bbecec54d303cc51771",
+      "content_hash": "c_89436f2367e454ba6eb23a25eb0f5c9e",
+      "order": 13,
+      "kind": "paragraph",
+      "text": "덧말 앞 본말(덧말) 덧말 뒤홀로 겹침 가나 원 ①㉑가",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 8
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_043a771da25730a8f4b876e9",
+      "content_hash": "c_1406f49e94dbeef599e33e699e0e4caf",
+      "order": 14,
+      "kind": "table",
+      "text": "칸 속 칸 본말(칸 덧말)\t다",
+      "table": {
+        "n_rows": 1,
+        "n_cols": 2,
+        "cells": [
+          {
+            "row": 0,
+            "col": 0,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "칸 속 칸 본말(칸 덧말)",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 0,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "다",
+            "header": "none",
+            "text_source": "native"
+          }
+        ]
+      },
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 9
       },
       "confidence": 1.0,
       "state": "det",

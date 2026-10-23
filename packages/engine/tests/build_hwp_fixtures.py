@@ -21,6 +21,7 @@ import importlib.util
 import json
 import struct
 import sys
+import unicodedata
 import xml.etree.ElementTree as ET
 import zlib
 from collections.abc import Callable, Mapping, Sequence
@@ -535,10 +536,35 @@ def _component(element: ET.Element, level: int, top: bool) -> bytes:
     raise ValueError(f"not a twin drawing object: {element.tag}")
 
 
+def ruby(main: str, sub: str) -> bytes:
+    """덧말(tdut) 몸(ID 뒤): 본말·덧말 글자, 위치·크기 비율·옵션·스타일·정렬 UINT32 다섯(사양 표 150)."""
+    return hwp_string(main) + hwp_string(sub) + struct.pack("<5I", 0, 0, 0, 0, 0)
+
+
+def overlap(text: str, border: int = 0) -> bytes:
+    """글자 겹침(tcps) 몸(ID 뒤): 겹칠 글자, 테두리 종류(1 원)·내부 글자 크기·펼침·글자 모양 수(10) + 글자 모양 id 10개
+    (사양 표 151, 실문서 꼬리 44B와 같은 꼴)."""
+    return hwp_string(text) + bytes([border, 253, 0, 10]) + bytes(40)
+
+
+def circled_glyph(text: str) -> str:
+    """HWP가 원 모양 글자 겹침에 저장하는 겹친 글자: 유니코드 분해가 '<circle> 그 글자'인 BMP 글자(처리부 표와 따로
+    유니코드 데이터에서 찾는다). 없으면 그대로."""
+    want = "<circle> " + " ".join(f"{ord(ch):04X}" for ch in text)
+    return next((chr(c) for c in range(0x2460, 0x10000) if unicodedata.decomposition(chr(c)) == want), text)
+
+
 def from_object(element: ET.Element, level: int) -> list[tuple[int, str, bytes]]:
     """런 안 개체·컨트롤 요소 → (확장 컨트롤 코드, 컨트롤 ID, 컨트롤 레코드(level))들. hp:ctrl 하나에 든 머리말·꼬리말
-    둘은 HWP 컨트롤 둘이다(처리부 출력이 같다)."""
+    둘은 HWP 컨트롤 둘이다(처리부 출력이 같다). 덧말·글자 겹침은 확장 컨트롤 23이다."""
     name = element.tag.removeprefix(OWPML)
+    if name == "dutmal":
+        texts = (element.findtext(f"{OWPML}mainText") or "", element.findtext(f"{OWPML}subText") or "")
+        return [(23, "tdut", control("tdut", level, body=ruby(*texts)))]
+    if name == "compose":  # 원 모양이면 HWP처럼 겹친 원문자를 테두리 1(원)과 함께 쓴다
+        text, circle = element.get("composeText", ""), element.get("circleType") == "SHAPE_CIRCLE"
+        body = overlap(circled_glyph(text), 1) if circle else overlap(text)
+        return [(23, "tcps", control("tcps", level, body=body))]
     if name == "tbl":
         rows = []
         for tc in element.iterfind(f"{OWPML}tr/{OWPML}tc"):

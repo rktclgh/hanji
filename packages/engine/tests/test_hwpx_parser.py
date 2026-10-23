@@ -1,6 +1,7 @@
 """HWPX 문단·제목·목록과 글자 장부(스펙 §5, §10). 합성 문서는 build_hwpx_fixtures.py의 쓰기 도구로 만든다."""
 
 import importlib.util
+import unicodedata
 import zipfile
 from io import BytesIO
 from pathlib import Path
@@ -8,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from hanji.errors import ParseError
-from hanji.formats.hwpx import owpml
+from hanji.formats.hwpx import ledger, owpml
 from hanji.formats.hwpx import parser as hwpx
 from hanji.formats.hwpx.parser import HwpxParser
 from hanji_contracts import FlowLocator
@@ -108,6 +109,61 @@ def test_text_inside_objects_survives_as_a_rescued_paragraph_at_the_section_end(
     (region,) = parsed.regions
     assert (region.fallback_reason, region.region_id, region.gate.checks[0].value) == (
         "unassigned_text", "s0-p0-unassigned-text-0", 10)
+
+
+def test_ruby_text_follows_its_main_text_in_parentheses_and_overlaps_keep_their_characters_in_place(monkeypatch):
+    """덧말은 그 자리에 본말(덧말)(덧말이 비면 본말만), 글자 겹침은 겹친 글자 문단·칸 글자에 든다. 본말·덧말·겹친
+    글자는 장부 출처라 빠지면 살리고(unassigned_text) 두 번 들면 coverage_mismatch다."""
+    s = B.section(B.para(B.run(B.t("앞 "), B.dutmal("본말", "덧말"), B.t(" 뒤 "), B.compose("가나"), B.dutmal("홀로", ""))),
+                  B.para(B.run(B.tbl(1, 2, [B.tc(0, 0, B.para(B.run(B.dutmal("칸", "덧")))),
+                                            B.tc(0, 1, B.para(B.run(B.compose("다"))))]))))
+    parsed, (count,) = parse(s)
+    assert texts(parsed) == [("paragraph", "앞 본말(덧말) 뒤 가나홀로"), ("table", "칸(덧)\t다")]
+    assert count.ok and count.source == 13 and parsed.regions == ()
+    monkeypatch.setattr(owpml._Section, "ruby", lambda self, element: [])
+    parsed, (count,) = parse(s)
+    assert texts(parsed)[0] == ("paragraph", "앞  뒤")
+    assert texts(parsed)[2:] == [("paragraph", "본말덧말가나홀로"), ("paragraph", "칸덧\n다")]
+    assert count.ok and count.rescued == 11 and reasons(parsed) == ["unassigned_text"]
+    real = owpml._Section.bundles
+    monkeypatch.undo()
+    monkeypatch.setattr(owpml._Section, "bundles", lambda self, p, anchor: real(self, p, anchor) + [
+        b for b in real(self, p, anchor) if b[0] is not None and self.ledger.sources[b[0]].element.tag != owpml.T])
+    parsed, (count,) = parse(s)
+    assert count.doubled == 4 and reasons(parsed) == ["coverage_mismatch"]  # 본말·덧말·겹친 글자·홀로
+
+
+def test_the_circled_table_is_exactly_the_unicode_circle_decompositions_of_the_five_ranges_and_zero():
+    """원문자 표는 파서와 무관한 유니코드 데이터로 확인한다: 모든 항목의 분해가 '<circle> 그 글자'이고 BMP 글자다. 범위는
+    ⓪ 0, ①–⑳, ㉑–㉟, ㊱–㊿, ⓐ–ⓩ, Ⓐ–Ⓩ뿐이다(원문자 한글·한자 등은 넣지 않는다)."""
+    for text, glyph in ledger.CIRCLED.items():
+        assert unicodedata.decomposition(glyph) == "<circle> " + " ".join(f"{ord(ch):04X}" for ch in text), text
+        assert ord(glyph) <= 0xFFFF
+    keys = {str(n) for n in range(51)} | {chr(c) for c in range(0x61, 0x7B)} | {chr(c) for c in range(0x41, 0x5B)}
+    assert set(ledger.CIRCLED) == keys
+    assert ledger.circled("21", "SHAPE_CIRCLE") == "㉑" and ledger.circled("51", "SHAPE_CIRCLE") == "51"
+    assert ledger.circled("가", "SHAPE_CIRCLE") == "가" and ledger.circled("12", "SHAPE_RECTANGLE") == "12"
+    assert ledger.circled("1", "CHAR") == "1" and ledger.circled("1", None) == "1"
+
+
+def test_circled_overlaps_become_circled_characters_and_the_ledger_counts_them_on_its_own(monkeypatch):
+    """원 모양(SHAPE_CIRCLE) 글자 겹침은 글자 전체가 표에 있으면 원문자 하나, 아니면 그대로(사각형 등 다른 모양도
+    그대로). 장부 n은 처리부와 따로 센다: 처리부만 표를 잃으면 두 자("21")가 partial로 잡힌다."""
+    s = B.section(B.para(B.run(B.compose("1", circle="SHAPE_CIRCLE"), B.compose("21", circle="SHAPE_CIRCLE"),
+                               B.compose("가", circle="SHAPE_CIRCLE"), B.compose("21", circle="SHAPE_RECTANGLE"),
+                               B.compose("①"))))
+    parsed, (count,) = parse(s)
+    assert texts(parsed) == [("paragraph", "①㉑가21①")] and count.ok and count.source == 6
+    monkeypatch.setattr(owpml, "circled", lambda text, circle: text)  # 처리부만 표를 잃는다
+    parsed, (count,) = parse(s)
+    assert texts(parsed) == [("paragraph", "121가21①")] and count.partial == 1
+    assert reasons(parsed) == ["coverage_mismatch"]
+
+
+def test_a_text_box_holding_only_ruby_or_an_overlap_still_records_shape_text():
+    for inner in (B.dutmal("본말", "덧"), B.compose("가")):
+        parsed, (count,) = parse(B.section(B.para(B.run(B.rect(B.para(B.run(inner)))))))
+        assert reasons(parsed) == ["shape_text"] and count.ok
 
 
 def test_masterpage_text_is_skipped_with_a_record():

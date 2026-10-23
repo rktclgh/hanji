@@ -4,8 +4,9 @@
 
 구역마다 트리를 받아 블록 명세로 바꾼 뒤 버린다. 최상위 문단(hs:sec 바로 아래 hp:p)마다 문단 글자 블록(개요 수준 → 제목,
 번호·글머리 → 목록 항목, 그 밖 문단)을 낸다. 위치는 FlowLocator(제목 경로, 최상위 문단 순번). 글자 장부(ledger.py)가
-모든 hp:t·글맵시 글자를 세고, 한 번도 넣지 않은 글자는 구역 끝 구조 문단(신뢰도 0.3)으로 살린다(처리 이력
-unassigned_text). 장부가 맞지 않으면 처리 이력 coverage_mismatch(파싱은 실패하지 않는다). 개요 수준을 쓰지 않는 문서는
+모든 hp:t·글맵시·덧말(본말·덧말)·글자 겹침 글자를 세고, 한 번도 넣지 않은 글자는 구역 끝 구조 문단(신뢰도 0.3)으로
+살린다(처리 이력 unassigned_text). 덧말은 그 자리에 본말(덧말), 글자 겹침은 겹친 글자(원 모양이면 유니코드 원문자)로
+문단 글자에 든다. 장부가 맞지 않으면 처리 이력 coverage_mismatch(파싱은 실패하지 않는다). 개요 수준을 쓰지 않는 문서는
 PDF와 같은 글꼴 크기 규칙으로 제목을 고른다(_finish).
 
 문단에 박힌 개체는 문단 글자 블록 뒤에 나타난 순서대로 블록이 된다(HWPX 스펙 §5.2): 표(1×1은 상자라 풀고, 칸 안 개체는
@@ -30,7 +31,7 @@ from ..pdf.parser import COVERAGE_MISMATCH, UNASSIGNED_TEXT
 from . import images, tables
 from .container import HC, HP, Item, OverBudget, TooLarge
 from .header import CharShape, Styles
-from .ledger import INLINE, T, Bundle, Counts, Ledger, ink, source_chars
+from .ledger import INLINE, SOURCE_CHARS, T, Bundle, Counts, Ledger, circled, ink, source_chars
 from .tables import RawCell, number
 
 P, RUN, SUBLIST = f"{HP}p", f"{HP}run", f"{HP}subList"
@@ -39,6 +40,8 @@ TEXTART, HIDDEN = f"{HP}textart", f"{HP}hiddenComment"
 TBL, TR, TC, CELL_ADDR, CELL_SPAN = f"{HP}tbl", f"{HP}tr", f"{HP}tc", f"{HP}cellAddr", f"{HP}cellSpan"
 PIC, IMG, CUR_SZ, CAPTION, CONTAINER = f"{HP}pic", f"{HC}img", f"{HP}curSz", f"{HP}caption", f"{HP}container"
 ORG_SZ = f"{HP}orgSz"
+DUTMAL, MAIN_TEXT, SUB_TEXT, COMPOSE = f"{HP}dutmal", f"{HP}mainText", f"{HP}subText", f"{HP}compose"
+PRINTED = frozenset((f"{HP}t", MAIN_TEXT, SUB_TEXT, COMPOSE))  # 글상자 글자(shape_text)로 보는 출처
 CTRL, DRAW_TEXT, EQUATION, SCRIPT = f"{HP}ctrl", f"{HP}drawText", f"{HP}equation", f"{HP}script"
 SHAPES = frozenset(f"{HP}{n}" for n in ("rect", "ellipse", "arc", "polygon", "curve", "connectLine", "line"))
 EMBEDDED = frozenset(f"{HP}{n}" for n in ("ole", "chart", "video"))  # 그림 성격 개체(이미지 없는 그림)
@@ -96,6 +99,18 @@ def _t_text(t: ET.Element) -> tuple[str, bool]:
         unknown = unknown or bool(inner.strip())
         parts.append(child.tail or "")
     return "".join(parts), unknown
+
+
+def _source_text(element: ET.Element) -> str:
+    """장부 출처 하나의 블록 글자(블록·살리기가 함께 쓴다): hp:t는 _t_text, 글맵시는 속성, 글자 겹침은 원 모양이면
+    원문자(circled), 덧말 본말·덧말은 안 글자. 장부 n은 ledger.SOURCE_CHARS가 따로 센다."""
+    if element.tag == T:
+        return _t_text(element)[0]
+    if element.tag == TEXTART:
+        return element.get("text", "")
+    if element.tag == COMPOSE:
+        return circled(element.get("composeText", ""), element.get("circleType"))
+    return "".join(element.itertext())
 
 
 def _lines(p: ET.Element) -> int:
@@ -156,8 +171,9 @@ class _Section:
                 if element.tag == T:
                     self.ledger.add(element, source_chars(element), max(anchor, self.base), para, hidden)
                     continue
-                if element.tag == TEXTART:
-                    self.ledger.add(element, ink(element.get("text", "")), max(anchor, self.base), para, hidden)
+                count = SOURCE_CHARS.get(element.tag)
+                if count is not None:
+                    self.ledger.add(element, count(element), max(anchor, self.base), para, hidden)
                 if element.tag == HIDDEN and not hidden:
                     chars = sum(source_chars(t) for t in element.iter(T))
                     self.region("hidden-comment", "paragraph", HIDDEN_COMMENT, max(anchor, self.base),
@@ -169,11 +185,27 @@ class _Section:
         self.doc.regions.append(Region(tag, kind, reason, self.index, anchor, gate))
 
     def bundles(self, p: ET.Element, anchor: int) -> list[Bundle]:
-        """문단 hp:run들의 hp:t 글자를 순서대로(개체 안 글자는 들지 않는다). 출처마다 묶음 하나."""
+        """문단 hp:run들의 hp:t·덧말·글자 겹침 글자를 순서대로(개체 안 글자는 들지 않는다). 출처마다 묶음 하나."""
         out: list[Bundle] = []
         for run in p.iterfind(RUN):
-            for t in run.iterfind(T):
-                out.append(self.source_bundle(t, anchor, p))
+            for child in run:
+                if child.tag == T:
+                    out.append(self.source_bundle(child, anchor, p))
+                elif child.tag in (DUTMAL, COMPOSE):
+                    out += self.ruby(child)
+        return out
+
+    def ruby(self, element: ET.Element) -> list[Bundle]:
+        """덧말은 본말 뒤 괄호 안 덧말(덧말이 공백뿐이면 본말만), 글자 겹침은 겹친 글자(원 모양이면 원문자). 글자 요소가
+        출처다(괄호는 끼운 구분자)."""
+        if element.tag == COMPOSE:
+            return [(self.ledger.source_of(element), _source_text(element))]
+        out: list[Bundle] = []
+        main, sub = element.find(MAIN_TEXT), element.find(SUB_TEXT)
+        if main is not None:
+            out.append((self.ledger.source_of(main), _source_text(main)))
+        if sub is not None and _source_text(sub).strip():
+            out += [(None, "("), (self.ledger.source_of(sub), _source_text(sub)), (None, ")")]
         return out
 
     def source_bundle(self, t: ET.Element, anchor: int, p: ET.Element) -> Bundle:
@@ -262,7 +294,9 @@ class _Section:
             self.caption(caption, anchor)
 
     def has_text(self, element: ET.Element) -> bool:
-        return any(self.ledger.sources[self.ledger.source_of(t)].n for t in element.iter(T))
+        """그 아래 인쇄 글자 출처(hp:t·덧말·글자 겹침) 가운데 n > 0인 것이 있나(shape_text 기록)."""
+        index = self.ledger.index
+        return any(self.ledger.sources[index[id(e)]].n for e in element.iter() if e.tag in PRINTED and id(e) in index)
 
     def shape(self, element: ET.Element, anchor: int) -> None:
         """도형의 글상자(drawText/subList) 문단마다 문단 블록. 글자가 있는 도형마다 shape_text."""
@@ -439,6 +473,8 @@ class _Section:
                 for child in run:
                     if child.tag == T:
                         out.append(self.source_bundle(child, anchor, p))
+                    elif child.tag in (DUTMAL, COMPOSE):
+                        out += self.ruby(child)
                     else:
                         self.inline(child, anchor, after, out)
         return out
@@ -554,10 +590,7 @@ class _Section:
                 source = self.ledger.sources[k]
                 if i and source.para != self.ledger.sources[keys[i - 1]].para:
                     bundles.append((None, "\n"))
-                if source.element.tag == TEXTART:
-                    bundles.append((k, source.element.get("text", "")))
-                else:
-                    bundles.append((k, _t_text(source.element)[0]))
+                bundles.append((k, _source_text(source.element)))
             if self.emit("paragraph", bundles, anchor, confidence=RESCUED_CONFIDENCE):
                 rescued += sum(ink(text) for _, text in bundles)
         if rescued:
