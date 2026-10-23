@@ -6,7 +6,7 @@ styleIDRef), PARA_CHAR_SHAPE 경계마다 hp:run(charPrIDRef, 글자 뒤 경계�
 k번째 자식 CTRL_HEADER와 짝짓는다. 컨트롤: 글자 없는 자리 컨트롤(필드·단 정의·쪽 번호 등)은 빈 hp:ctrl, 덧말·글자 겹침은
 글자 수만(control_text_skipped), 표는 hp:tbl(TABLE 레코드의 행·열 수, 그 앞 리스트는 캡션, 뒤 리스트는 칸: LIST_HEADER
 오프셋 8부터 열·행 주소·열·행 병합, 32 테두리 채움, 6의 bit 2 제목 칸), 그리기 개체(gso)는 첫 SHAPE_COMPONENT의 종류
-ID로 hp:pic(그림 레코드 오프셋 71의 BinData 순번, 현재 크기가 처음 크기와 같으면 curSz 0 — HWPX와 같다)·도형(첫 리스트는
+ID로 hp:pic(그림 레코드 오프셋 71의 BinData 순번, 현재 폭·높이가 처음 것과 같으면 그 curSz 값 0 — HWPX와 같다)·도형(첫 리스트는
 hp:drawText)·hp:container(자식 SHAPE_COMPONENT마다, ID는 한 번만 적힌다)·hp:ole·hp:chart·hp:video·hp:textart@text, 그 앞
 리스트는 캡션, 수식은 hp:equation/hp:script(EQEDIT 스크립트), 머리말·꼬리말은 hp:ctrl/hp:header·hp:footer
 @applyPageType(몸 오프셋 4 bit 0–1: 양쪽·짝·홀), 각주·미주·숨은 설명은 hp:ctrl/hp:footNote·hp:endNote·hp:hiddenComment, 모두
@@ -519,9 +519,9 @@ class _Writer:
             first = struct.unpack_from("<II", record.body, base + 12)  # 처음 폭·높이
             now = struct.unpack_from("<II", record.body, base + 20)  # 현재 폭·높이
             pic = self.node(parent, f"{HP}pic", depth)
-            # 현재 크기가 처음 크기와 같으면 HWPX는 curSz를 0으로 적는다(짝 그림 263개 모두)
-            self.node(pic, f"{HP}curSz", depth + 1, width=str(0 if now == first else now[0]),
-                      height=str(0 if now == first else now[1]))
+            # 현재 폭·높이가 처음 것과 같으면 HWPX는 그 값을 0으로 적는다(폭·높이 따로, 짝 그림 196개 모두)
+            cur = [0 if a == b else a for a, b in zip(now, first)]
+            self.node(pic, f"{HP}curSz", depth + 1, width=str(cur[0]), height=str(cur[1]))
             image = next((r for r in kids if r.tag == PICTURE), None)
             if image is not None:
                 if len(image.body) < 73:
