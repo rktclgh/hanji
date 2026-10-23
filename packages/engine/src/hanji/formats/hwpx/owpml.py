@@ -566,11 +566,14 @@ class _Section:
         return out
 
     def sizes(self, p: ET.Element) -> Counter[tuple[float, bool]]:
-        """문단 런들의 (0.5pt 단위 크기, 굵기)별 공백 아닌 글자 수."""
+        """문단 런들의 (0.5pt 단위 크기, 굵기)별 공백 아닌 글자 수. 덧말의 본말·글자 겹침 글자도 그 런 크기로 센다(작게
+        찍히는 덧말 글자는 세지 않는다)."""
         out = Counter[tuple[float, bool]]()
         for run in p.iterfind(RUN):
             shape = self.doc.styles.chars.get(run.get("charPrIDRef", ""), NO_SHAPE)
             n = sum(ink(_t_text(t)[0]) for t in run.iterfind(T))
+            n += sum(ink(_source_text(c)) for c in run.iterfind(COMPOSE))
+            n += sum(ink(_source_text(m)) for d in run.iterfind(DUTMAL) for m in d.iterfind(MAIN_TEXT))
             if n:
                 out[(step(shape.size), shape.bold)] += n
         return out

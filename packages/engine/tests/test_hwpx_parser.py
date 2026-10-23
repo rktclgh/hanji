@@ -353,6 +353,16 @@ def test_without_outline_levels_large_short_paragraphs_are_headings_by_size():
     assert counts[0].ok
 
 
+def test_ruby_and_composed_text_count_toward_the_heading_size_weights():
+    """덧말·글자 겹침만 든 문단도 그 런의 글자 크기로 센다(본말·겹친 글자만, 작게 찍히는 덧말 글자는 세지 않는다)."""
+    s = B.section(B.para(B.run(B.t(BODY * 2))),
+                  B.para(B.run(B.dutmal("덧말뿐인 큰 제목", "작은 덧말 글자를 길게 붙인다"), char=4), lines=1),
+                  B.para(B.run(B.compose("겹침큰제목"), char=1), lines=1))
+    parsed, counts = parse(s, head=SIZES)
+    assert [(b["kind"], b.get("level")) for b in parsed.blocks] == [("paragraph", None), ("heading", 1), ("heading", 2)]
+    assert counts[0].ok
+
+
 def test_the_representative_size_is_weighted_by_characters_and_bold_needs_a_majority():
     """첫 런만 크고 굵어도 글자 수 과반이 본문 크기·보통이면 문단이다(첫 런만 보지 않는다)."""
     s = B.section(B.para(B.run(B.t(BODY * 2))),
