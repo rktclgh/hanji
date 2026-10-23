@@ -99,7 +99,8 @@ def _directory(data: bytes) -> tuple[int, int] | None:
 
 
 def _start(data: bytes, offset: int, name: str) -> int | None:
-    """offset에 이름이 name인 로컬 머리가 있으면 그 멤버 데이터의 시작 위치, 아니면 None."""
+    """offset에 이름이 name인 로컬 머리가 있으면 그 멤버 데이터의 시작 위치, 아니면 None. 이름은 zipfile.open처럼 로컬
+    머리 자기 UTF-8 플래그로 디코드한다(중앙 항목 플래그가 아니다: 둘이 다르면 zipfile도 그 멤버를 열지 못한다)."""
     if offset < 0 or offset + 30 > len(data) or data[offset:offset + 4] != LOCAL:
         return None
     (flags,) = struct.unpack_from("<H", data, offset + 6)
@@ -136,7 +137,8 @@ def _relocate(data: bytes, infos: list[zipfile.ZipInfo], name: str) -> dict[str,
         if begin is not None:  # 머리가 없는 멤버는 zipfile이 열지 못한다
             spans.append((offset, begin, info))
     spans.sort(key=lambda span: span[0])
-    bounds = [span[0] for span in spans[1:]] + [directory]
+    # 경계는 다음 머리와 중앙 디렉터리 시작 가운데 앞쪽(디렉터리 extra 안에 박은 머리도 디렉터리를 넘지 못한다)
+    bounds = [min(span[0], directory) for span in spans[1:]] + [directory]
     found_again = sorted(again.values())
     moved: dict[str, zipfile.ZipInfo | None] = {}
     for (offset, begin, info), bound in zip(spans, bounds, strict=True):

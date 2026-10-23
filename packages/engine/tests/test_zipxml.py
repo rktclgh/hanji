@@ -69,17 +69,18 @@ def test_members_before_a_damaged_member_are_found_at_their_written_offsets():
     assert prefixed._moved == {}  # 내부 값: 옮긴 위치에 모두 머리가 있어 다시 찾은 멤버가 없다
 
 
-def _local(name: bytes, data: bytes, size: int | None = None, extra: bytes = b"") -> bytes:
+def _local(name: bytes, data: bytes, size: int | None = None, extra: bytes = b"", flags: int = 0) -> bytes:
     """무압축 로컬 머리 + 데이터(size: 머리에 적을 크기, 없으면 실제 길이)."""
     size = len(data) if size is None else size
-    return struct.pack("<4sHHHHHIIIHH", b"PK\x03\x04", 20, 0, 0, 0, 0x21, zlib.crc32(data), size, size,
+    return struct.pack("<4sHHHHHIIIHH", b"PK\x03\x04", 20, flags, 0, 0, 0x21, zlib.crc32(data), size, size,
                        len(name), len(extra)) + name + extra + data
 
 
-def _central(name: bytes, data: bytes, offset: int, size: int | None = None, extra: bytes = b"") -> bytes:
+def _central(name: bytes, data: bytes, offset: int, size: int | None = None, extra: bytes = b"",
+             flags: int = 0) -> bytes:
     """무압축 중앙 디렉터리 항목(적힌 위치 offset)."""
     size = len(data) if size is None else size
-    return struct.pack("<4sHHHHHHIIIHHHHHII", b"PK\x01\x02", 20, 20, 0, 0, 0, 0x21, zlib.crc32(data), size,
+    return struct.pack("<4sHHHHHHIIIHHHHHII", b"PK\x01\x02", 20, 20, flags, 0, 0, 0x21, zlib.crc32(data), size,
                        size, len(name), len(extra), 0, 0, 0, 0, offset) + name + extra
 
 
@@ -97,15 +98,16 @@ def _end(directory: bytes, count: int, offset: int) -> bytes:
     return struct.pack("<4sHHHHIIH", b"PK\x05\x06", 0, 0, count, count, len(directory), offset, 0)
 
 
-def _covering(outer: bytes) -> bytes:
+def _covering(outer: bytes, local: int = 0, central: int = 0) -> bytes:
     """조작 파일: 중앙 디렉터리 위치가 실제보다 작아(zipfile은 앞에 붙은 바이트로 본다) 앞 멤버 outer는 옮긴 위치에서,
-    뒤 멤버 m.xml은 적힌 위치에서 찾는데 outer의 데이터가 m.xml을 덮는다. 중앙 디렉터리 순서는 물리 순서와 다르다."""
+    뒤 멤버 m.xml은 적힌 위치에서 찾는데 outer의 데이터가 m.xml을 덮는다. 중앙 디렉터리 순서는 물리 순서와 다르다.
+    local·central은 outer의 로컬 머리·중앙 항목 플래그."""
     inner = _local(b"m.xml", b"<m>z</m>")
     shift = len(inner) + 40
     body = b"q" * 10 + inner
-    entry = _local(outer, body)
+    entry = _local(outer, body, flags=local)
     written = shift + 30 + len(outer) + 10  # m의 적힌 위치(outer의 데이터 안)
-    directory = _central(b"m.xml", b"<m>z</m>", written) + _central(outer, body, 0)
+    directory = _central(b"m.xml", b"<m>z</m>", written) + _central(outer, body, 0, flags=central)
     return b"\0" * shift + entry + directory + _end(directory, 2, len(entry))
 
 
@@ -155,6 +157,41 @@ def test_overlap_between_two_members_left_in_place_stays_a_member_error():
     with pytest.raises(ParseError, match="cannot read zip member") as info:
         archive.binary("e.bin")
     assert info.value.location == "f.zip:e.bin"
+
+
+def test_header_names_are_decoded_with_the_local_header_flags_like_zipfile():
+    """zipfile.open은 로컬 머리 이름을 그 머리 자기 UTF-8 플래그(0x800)로 디코드해 orig_filename(중앙 항목 플래그로
+    디코드)과 견준다. 다시 찾기·겹침 검사도 같은 규칙이라 두 플래그가 다른 멤버는 zipfile처럼 어디서도 읽지 않고, 그
+    멤버가 다시 찾은 멤버를 덮어도 같은 바이트를 두 번 읽지 않는다."""
+    name = "그림.xml".encode()
+    for local, central in ((0x800, 0), (0, 0x800)):
+        entry = _local(name, b"<a>1</a>", flags=local)
+        directory = _central(name, b"<a>1</a>", 0, flags=central)
+        intact = entry + directory + _end(directory, 1, len(entry))
+        with pytest.raises(zipfile.BadZipFile, match="differ"):  # 손상이 없어도 zipfile이 열지 못한다
+            zipfile.ZipFile(BytesIO(intact)).read(name.decode("utf-8" if central else "cp437"))
+        archive = zipxml.Archive(_covering("그림.bin".encode(), local, central), "f.zip", "not a zip", lambda: LIMITS)
+        assert archive.xml("m.xml", "m").text == "z"
+        with pytest.raises(ParseError, match="differ"):
+            archive.binary("그림.bin".encode().decode("utf-8" if central else "cp437"))
+
+
+def test_members_found_again_inside_the_central_directory_are_not_read():
+    """중앙 디렉터리 extra(zipfile은 모르는 종류를 건너뛴다) 안에 로컬 머리 둘을 박으면 두 멤버의 적힌 위치가 모두
+    디렉터리 뒤다. 경계는 다음 머리와 디렉터리 시작 가운데 앞쪽이라 디렉터리 바이트를 멤버로 읽지 않는다."""
+    x, y = _local(b"x.xml", b"<x>1</x>"), _local(b"y.xml", b"<y>2</y>")
+    extra = struct.pack("<HH", 0xCAFE, len(x + y)) + x + y
+    pad, shift = b"\0" * 20, 7
+    written = len(pad) + 46 + len(b"x.xml") + 4  # x의 적힌 위치(x 중앙 항목의 extra 안)
+    directory = (_central(b"x.xml", b"<x>1</x>", written, extra=extra)
+                 + _central(b"y.xml", b"<y>2</y>", written + len(x)))
+    data = pad + directory + _end(directory, 2, len(pad) - shift)
+    assert zipfile.ZipFile(BytesIO(data)).namelist() == ["x.xml", "y.xml"]  # zipfile은 이 파일을 연다
+    archive = zipxml.Archive(data, "f.zip", "not a zip", lambda: LIMITS)
+    for member in ("x.xml", "y.xml"):
+        with pytest.raises(ParseError, match="cannot read zip member") as info:
+            archive.xml(member, None)
+        assert info.value.location == f"f.zip:{member}"
 
 
 def test_hwpx_modules_reexport_the_shared_objects():
