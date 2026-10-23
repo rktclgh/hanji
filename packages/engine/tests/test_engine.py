@@ -311,7 +311,7 @@ def test_parser_assets_must_match_the_figure_blocks(tmp_path, assets, message):
 def test_parser_regions_go_to_the_processing_history(tmp_path):
     region = RegionRecord(region_id="p1-table-in-figure-1", kind="table", chosen="det", attempts=[Attempt(layer="det")],
                           locator={"kind": "page", "page": 1, "bbox": {"x0": 0.1, "y0": 0.1, "x1": 0.5, "y1": 0.3}},
-                          fallback_reason="ruled table inside a figure was dropped (figure wins)")
+                          fallback_reason="table_in_figure_dropped")
     engine = LocalEngine(MemoryStore(), parsers=[FigureParser(regions=(region,))])
     ref = engine.ingest(str(write(tmp_path / "a.fig", "가\n")))
     assert engine.history(ref.document_id).regions == (region,)

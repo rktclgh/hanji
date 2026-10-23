@@ -191,8 +191,8 @@ def test_figure_wins_drops_the_table_inside_and_records_it_in_the_history(monkey
     fake_layout(monkeypatch, ("chart", 0.9, (90.0, 130.0, 410.0, 200.0)))
     on = PdfParser(ocr=False).parse(data, "g.pdf")
     assert [b["kind"] for b in on.blocks] == ["paragraph", "figure"]
-    assert [(r.region_id, r.kind, r.attempts[0].model_id) for r in on.regions] == [
-        ("p1-table-in-figure-1", "table", "PP-DocLayout_plus-L")]
+    assert [(r.region_id, r.kind, r.attempts[0].model_id, r.fallback_reason) for r in on.regions] == [
+        ("p1-table-in-figure-1", "table", "PP-DocLayout_plus-L", "table_in_figure_dropped")]
     assert glyphs(on.blocks) == glyphs(off.blocks)
 
 
@@ -210,7 +210,7 @@ def test_asset_limit_gives_figures_without_image_and_a_history_note(monkeypatch)
     red, blue = [b for b in capped.blocks if b["kind"] == "figure"]
     assert "figure" in red and "figure" not in blue and list(capped.assets) == [red["figure"]["asset"]]
     (note,) = capped.regions
-    assert (note.region_id, note.kind) == ("p1-figure-2", "figure") and "MAX_DOCUMENT_ASSET_BYTES" in note.fallback_reason
+    assert (note.region_id, note.kind, note.fallback_reason) == ("p1-figure-2", "figure", "figure_image_not_stored")
     engine = LocalEngine(MemoryStore(), [PdfParser(ocr=False, layout=False)])
     tree = engine.get_tree(engine.ingest_bytes(data, "two.pdf").document_id)
     assert [b.figure is not None for b in tree.blocks if b.kind == "figure"] == [True, False]
@@ -419,7 +419,7 @@ def test_image_boxes_are_found_once_per_page_and_no_page_is_kept_after_parsing(m
 
 
 def test_history_credits_the_model_only_for_figures_the_model_found(monkeypatch):
-    """리뷰 M3: 모델이 돈 쪽이라도 모델이 찾지 않은 이미지 객체 그림은 모델 이름 없이, 이유도 따로 적는다."""
+    """리뷰 M3: 모델이 돈 쪽이라도 모델이 찾지 않은 이미지 객체 그림은 모델 이름 없이 적는다(사유 코드는 같다)."""
     def chart_and_photo(c):
         for i in range(12):
             c.line(100, 580 + 10 * i, 500, 580 + 10 * i)
@@ -429,9 +429,8 @@ def test_history_credits_the_model_only_for_figures_the_model_found(monkeypatch)
     monkeypatch.setattr(figures, "ASSET_LIMIT", 0)
     parsed = PdfParser(ocr=False).parse(pdf(chart_and_photo), "cp.pdf")
     assert [(r.region_id, r.attempts[0].model_id, r.fallback_reason) for r in parsed.regions] == [
-        ("p1-figure-1", "PP-DocLayout_plus-L", pdf_parser.NO_IMAGE_MODEL),
-        ("p1-figure-2", None, pdf_parser.NO_IMAGE_PHOTO)]
-    assert pdf_parser.NO_IMAGE_MODEL != pdf_parser.NO_IMAGE_PHOTO
+        ("p1-figure-1", "PP-DocLayout_plus-L", "figure_image_not_stored"),
+        ("p1-figure-2", None, "figure_image_not_stored")]
 
 
 def test_a_page_needing_ocr_the_model_and_a_figure_crop_is_rendered_once(monkeypatch):
@@ -503,7 +502,7 @@ def test_unreliable_page_keeps_capped_figures_and_takes_only_the_asset_budget_le
     assert second(capped) == second(alone) and "figure" in second(alone)[0][1] and not second(alone)[1]
     assert "figure" not in capped.blocks[1] and {b["confidence"] for b in capped.blocks[:4]} == {0.2}
     assert [(r.region_id, r.fallback_reason) for r in capped.regions] == [
-        ("p1-unreliable-text-layer", "unreliable_text_layer_kept"), ("p1-figure-1", pdf_parser.NO_IMAGE_MODEL)]
+        ("p1-unreliable-text-layer", "unreliable_text_layer_kept"), ("p1-figure-1", pdf_parser.NO_IMAGE)]
     for parsed in (full, capped):  # 글자 장부: 이미지가 있든 없든 그림·캡션·문단 글자가 쪽마다 정확히 한 번
         assert [(p.coverage.in_blocks, p.coverage.hidden) for p in parsed.pages] == [
             (p.text_stats.chars, 0) for p in parsed.pages]

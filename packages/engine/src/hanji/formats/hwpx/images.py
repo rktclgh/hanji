@@ -44,11 +44,14 @@ def to_png(raw: bytes) -> Png | str:
 
 
 def _rgb(image: Image.Image) -> Image.Image:
-    """알파(RGBA·LA·투명 P)는 흰 바탕에 합치고, 나머지(CMYK·L·P 등)는 RGB로."""
+    """알파(RGBA·LA·PA·투명 P)는 흰 바탕에 합치고, RGB는 그대로, 나머지(CMYK·L·P 등)는 RGB로. 디코드한 그림 크기의
+    사본을 줄인다(같은 바이트): RGB는 사본이 없어 크게 줄고, 4000px 넘는 RGBA는 축소 버퍼가 최고점이라 차이가 작다."""
+    if image.mode == "RGB":
+        return image
     if image.mode in ("RGBA", "LA", "PA") or (image.mode == "P" and "transparency" in image.info):
-        rgba = image.convert("RGBA")
+        rgba = image if image.mode == "RGBA" else image.convert("RGBA")
         back = Image.new("RGB", rgba.size, (255, 255, 255))
-        back.paste(rgba, mask=rgba.getchannel("A"))
+        back.paste(rgba, mask=rgba)
         return back
     return image.convert("RGB")
 
@@ -65,12 +68,20 @@ def _encode(image: Image.Image) -> Png:
     return Png(buf.getvalue(), image.width, image.height)
 
 
-def dpi(width_px: int, width_hwp: str | None) -> int:
-    """dpi = 그림 화소 너비 ÷ (표시 너비 HWPUNIT ÷ 7200). 표시 너비가 없거나 0·음수(부호 없는 값으로 저장된 음수)면 96."""
-    try:
-        width = int(width_hwp) if width_hwp is not None else 0
-    except ValueError:
-        width = 0
+def dpi(width_px: int, width_hwp: str | None, org_hwp: str | None = None) -> int:
+    """dpi = 그림 화소 너비 ÷ (표시 너비 HWPUNIT ÷ 7200). 표시 너비(curSz)가 없거나 0이면 처음 크기(orgSz) 너비를 쓴다:
+    한컴은 현재 폭이 처음 폭과 같으면 curSz 폭을 0으로 적는다. 쓸 너비가 없거나 0·음수(부호 없는 값으로 저장된 음수)면 96."""
+    width = _hwpunit(width_hwp)
+    if width == 0:
+        width = _hwpunit(org_hwp)
     if not 0 < width < 2**31:
         return 96
     return max(1, round(width_px * 7200 / width))
+
+
+def _hwpunit(value: str | None) -> int:
+    """HWPUNIT 정수. 없으면 0, 숫자가 아니면 −1(쓸 수 없는 값)."""
+    try:
+        return int(value) if value is not None else 0
+    except ValueError:
+        return -1

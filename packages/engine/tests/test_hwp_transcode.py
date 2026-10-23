@@ -281,16 +281,29 @@ def test_drawing_objects_become_pictures_shapes_containers_and_embedded_objects(
     result = section(data)
     run = result.root[0].find(f"{HP}run")
     assert [tags(e) for e in run][1:] == [
-        ["pic", {}, [["curSz", {"width": "14400", "height": "7200"}, []], ["img", {"binaryItemIDRef": "3"}, []],
+        ["pic", {}, [["orgSz", {"width": "0", "height": "0"}, []], ["curSz", {"width": "14400", "height": "7200"}, []],
+                     ["img", {"binaryItemIDRef": "3"}, []],
                      ["caption", {"side": "BOTTOM"}, [["subList", {}, [["p", "그림 1"]]]]]]],
-        ["pic", {}, [["curSz", {"width": "0", "height": "0"}, []], ["img", {"binaryItemIDRef": "5"}, []]]],
-        ["container", {}, [["pic", {}, [["curSz", {"width": "7200", "height": "3600"}, []],
+        ["pic", {}, [["orgSz", {"width": "500", "height": "400"}, []], ["curSz", {"width": "0", "height": "0"}, []],
+                     ["img", {"binaryItemIDRef": "5"}, []]]],
+        ["container", {}, [["pic", {}, [["orgSz", {"width": "0", "height": "0"}, []],
+                                        ["curSz", {"width": "7200", "height": "3600"}, []],
                                         ["img", {"binaryItemIDRef": "1"}, []]]],
                            ["rect", {}, [["drawText", {}, [["subList", {}, [["p", "묶음 속 글상자"]]]]]]],
                            ["line", {}, []]]],
         ["ole", {}, []], ["chart", {}, []], ["textart", {"text": "지어낸 글맵시"}, []],
         ["ctrl", {}, [["unknownObject", {}, [["subList", {}, [["p", "모르는 도형 글"]]]]]]]]
     assert reasons(result) == [("unknown_control", None, None)] and result.audit.ok
+
+
+def test_picture_current_size_is_zeroed_per_dimension_like_hwpx():
+    """현재 크기는 폭·높이를 따로 처음 크기와 견준다: 같은 쪽만 0(대량 코퍼스 HWPX 짝 그림 196개 모두 이 규칙)."""
+    sizes = [((500, 400), (500, 400)), ((500, 400), (500, 300)), ((500, 400), (600, 400)), ((500, 400), (1, 2))]
+    shapes = [B.gso(1, B.component(2, "$pic", B.picture(3, 1), size=now, first=first)) for now, first in sizes]
+    run = section(B.paragraph(*[B.extended(11, "gso ")] * len(shapes), controls=shapes)).root[0].find(f"{HP}run")
+    assert [dict(pic.find(f"{HP}curSz").attrib) for pic in run.iterfind(f"{HP}pic")] == [
+        {"width": "0", "height": "0"}, {"width": "0", "height": "400"}, {"width": "500", "height": "0"},
+        {"width": "500", "height": "400"}]
 
 
 def test_equations_carry_their_script_and_caption_and_both_join_the_transcode_ledger(monkeypatch):

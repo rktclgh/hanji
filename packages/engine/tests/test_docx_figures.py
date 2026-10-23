@@ -66,6 +66,37 @@ def test_pictures_without_images_keep_their_place_and_reason():
         ("figure_image_missing", "s0-p4-figure-0"), ("figure_image_missing", "s0-p5-figure-0")]
 
 
+def test_a_picture_with_only_an_svg_image_is_unsupported_not_missing():
+    """r:embed 대체 그림 없이 asvg:svgBlip만 있고 그 관계가 있는 .svg 멤버를 가리키면 지원하지 않는 형식이다. SVG 관계가
+    없거나 멤버가 없거나 .svg가 아니면 지금처럼 없는 그림이다."""
+    rels = (("rIdV", f"{B.R}/image", "media/VECTOR2.SVG"), ("rIdG", f"{B.R}/image", "media/gone.svg"))
+    parsed, counts = parse(B.p(B.drawing(B.pic(svg="rIdS"))), B.p(B.drawing(B.pic(svg="rIdV"))),
+                           B.p(B.drawing(B.pic(svg="rIdG"))), B.p(B.drawing(B.pic(svg="rIdQ"))),
+                           B.p(B.drawing(B.pic(svg="rIdP"))), rels=rels,
+                           extra=(("word/media/VECTOR2.SVG", b"<svg/>"),))
+    assert [(b["kind"], "figure" in b) for b in parsed.blocks] == [("figure", False)] * 5
+    assert reasons(parsed) == [
+        ("figure_image_unsupported", "s0-p0-figure-0"), ("figure_image_unsupported", "s0-p1-figure-0"),
+        ("figure_image_missing", "s0-p2-figure-0"), ("figure_image_missing", "s0-p3-figure-0"),
+        ("figure_image_missing", "s0-p4-figure-0")] and counts[0].ok
+
+
+def test_a_picture_with_only_an_external_svg_image_is_linked_not_missing():
+    """r:link와 같게, SVG 관계가 외부(TargetMode External)면 따라가지 않는 연결 그림이다."""
+    rels = (("rIdX", f"{B.R}/image", "http://example.invalid/a.svg", "External"),)
+    parsed, counts = parse(B.p(B.drawing(B.pic(svg="rIdX"))), rels=rels)
+    assert [(b["kind"], "figure" in b) for b in parsed.blocks] == [("figure", False)]
+    assert reasons(parsed) == [("figure_image_linked", "s0-p0-figure-0")] and counts[0].ok
+
+
+def test_a_picture_with_only_a_linked_svg_image_is_linked_not_missing():
+    """asvg:svgBlip이 r:embed 대신 r:link로 밖의 SVG를 가리키면 a:blip@r:link와 같은 연결 그림이다."""
+    rels = (("rIdX", f"{B.R}/image", "http://example.invalid/a.svg", "External"),)
+    parsed, counts = parse(B.p(B.drawing(B.pic(svg_link="rIdX"))), rels=rels)
+    assert [(b["kind"], "figure" in b) for b in parsed.blocks] == [("figure", False)]
+    assert reasons(parsed) == [("figure_image_linked", "s0-p0-figure-0")] and counts[0].ok
+
+
 def test_size_limits_and_the_asset_budget_leave_figures_without_images(monkeypatch):
     monkeypatch.setattr(ox, "MAX_BINARY_BYTES", 100)
     parsed, _ = parse(B.p(B.drawing(B.pic("rIdJ"))), B.p(B.drawing(B.pic("rIdP"))))
@@ -140,6 +171,19 @@ def test_a_picture_member_with_a_broken_zip_crc_loses_only_that_picture():
     assert bytes(data).count(B.GRAY_PNG) == 1  # ZIP_STORED: 멤버 바이트가 그대로 한 번 들어 있다
     data[bytes(data).index(B.GRAY_PNG) + len(B.GRAY_PNG) // 2] ^= 0xFF  # 저장된 데이터 한 바이트를 깨 CRC를 어긋나게
     parsed, counts = DocxParser()._parse(bytes(data), "a.docx")
+    assert [(b["kind"], b["text"], "figure" in b) for b in parsed.blocks] == [
+        ("paragraph", "앞 글", False), ("figure", "", False), ("figure", "", True), ("paragraph", "뒤 글", False)]
+    assert reasons(parsed) == [("figure_image_unreadable", "s0-p1-figure-0")] and counts[0].ok
+
+
+def test_a_picture_member_that_lost_bytes_loses_only_that_picture():
+    """그림 멤버 데이터에서 3바이트가 빠진 파일(대량 코퍼스 실문서 하나): 중앙 디렉터리 위치가 틀려도 문서는 읽히고 그
+    그림만 잃는다."""
+    found = B.media(**PICS)
+    data = B.docx(B.document(B.p("앞 글"), B.p(B.drawing(B.pic("rIdP"))), B.p(B.drawing(B.pic("rIdJ"))), B.p("뒤 글")),
+                  styles_xml=STYLES, doc_rels=found["doc_rels"], extra=found["extra"])
+    at = data.index(B.GRAY_PNG) + len(B.GRAY_PNG) // 2
+    parsed, counts = DocxParser()._parse(data[:at] + data[at + 3:], "a.docx")
     assert [(b["kind"], b["text"], "figure" in b) for b in parsed.blocks] == [
         ("paragraph", "앞 글", False), ("figure", "", False), ("figure", "", True), ("paragraph", "뒤 글", False)]
     assert reasons(parsed) == [("figure_image_unreadable", "s0-p1-figure-0")] and counts[0].ok

@@ -29,8 +29,8 @@ from ...hwpx.tables import RawCell, build
 from ...pdf.group import RESCUED_CONFIDENCE, step
 from ...pdf.parser import COVERAGE_MISMATCH, UNASSIGNED_TEXT
 from ...zipxml import Prefixes
-from ..drawing import (A, A_BR, A_P, A_T, CHART, CHART_TEXT, P, R_EMBED, R_LINK, SHAPES, SMARTART, SMARTART_TEXT,
-                       Images, cache_chars, emu, graphic_parts, hidden_shape, smartart_shapes)
+from ..drawing import (A, A_BR, A_P, A_T, CHART, CHART_TEXT, P, SHAPES, SMARTART, SMARTART_TEXT, Images, cache_chars,
+                       emu, graphic_parts, hidden_shape, refs, smartart_shapes)
 from ..ledger import NORMAL, SOURCES, Note, Story, Walker, part_chars
 from ..package import MC, READ, R, Package, Rel, choose
 from . import tables
@@ -291,12 +291,11 @@ class _Slide:
             self.frame(shape)
 
     def picture(self, pic: ET.Element, anchor: int, ole: bool = False) -> None:
-        """그림(p:blipFill/a:blip, SVG 확장은 보지 않는다: r:embed가 대체 그림). dpi는 p:spPr/a:xfrm/a:ext@cx(그룹 변환은
-        적용하지 않는다). 동영상·소리·OLE 미리보기면 embedded_object."""
-        found = pic.find(f"{P}blipFill/{A}blip")
-        embed, link = (found.get(R_EMBED), found.get(R_LINK)) if found is not None else (None, None)
+        """그림(p:blipFill/a:blip, r:embed가 대체 그림이고 SVG 확장만 있으면 지원하지 않는 형식). dpi는
+        p:spPr/a:xfrm/a:ext@cx(그룹 변환은 적용하지 않는다). 동영상·소리·OLE 미리보기면 embedded_object."""
+        embed, link, svg = refs(pic.find(f"{P}blipFill/{A}blip"))
         ext = pic.find(f"{P}spPr/{A}xfrm/{A}ext")
-        self.image(self.doc.images.figure(self.host, embed, link, emu(ext.get("cx")) if ext is not None else None),
+        self.image(self.doc.images.figure(self.host, embed, link, emu(ext.get("cx")) if ext is not None else None, svg),
                    anchor)
         nvpr = pic.find(f"{P}nvPicPr/{P}nvPr")
         if ole or (nvpr is not None and any(e.tag in MEDIA for e in nvpr.iter())):
