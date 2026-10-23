@@ -525,8 +525,9 @@ def _component(element: ET.Element, level: int, top: bool) -> bytes:
         return rect(level, *_paras(element.find(f"{OWPML}drawText"), level + 1), top=top)
     if name == "line":
         return line(level, top=top)
-    if name == "container":
-        return container(level, *(_component(child, level + 1, False) for child in element))
+    if name == "container":  # 묶음의 캡션은 gso 캡션 리스트로 간다(from_object)
+        return container(level, *(_component(child, level + 1, False) for child in element
+                                   if child.tag != f"{OWPML}caption"))
     if name == "textart":
         return textart(level, element.get("text", ""))
     if name == "ole":
@@ -548,7 +549,8 @@ def from_object(element: ET.Element, level: int) -> list[tuple[int, str, bytes]]
         return [(11, "tbl ", table(level, int(element.get("rowCnt")), int(element.get("colCnt")), *rows,
                                    caption=_caption(element, level + 1)))]
     if name == "equation":
-        return [(11, "eqed", equation(level, element.findtext(f"{OWPML}script") or ""))]
+        return [(11, "eqed", equation(level, element.findtext(f"{OWPML}script") or "",
+                                      caption=_caption(element, level + 1)))]
     if name == "ctrl":
         out = []
         for child in element:
@@ -610,9 +612,10 @@ SAMPLES: dict[str, bytes] = {
                             extra=FIGURE_BINS[1]),
     "notes.hwp": document(*(from_section(s) for s in HX.NOTES), head=from_header(HX.header(), ONE_BIN[0]),
                           extra=ONE_BIN[1]),
+    "objects.hwp": document(from_section(HX.OBJECTS), head=from_header(HX.header())),
 }
 TWINS = {"basic.hwp": "basic", "headings.hwp": "headings", "empty.hwp": "empty", "basic-deflate.hwp": "basic",
-         "table.hwp": "table", "figures.hwp": "figures", "notes.hwp": "notes"}
+         "table.hwp": "table", "figures.hwp": "figures", "notes.hwp": "notes", "objects.hwp": "objects"}
 # HWP에 같은 구조가 없어 HWP 출력에 없는 HWPX 처리 이력(region_id): hp:t 안 모르는 요소(형광펜)
 DROPPED = {"basic": ("s1-p10-unknown-inline-0",)}
 ROOT = HERE / "fixtures" / "hwp"

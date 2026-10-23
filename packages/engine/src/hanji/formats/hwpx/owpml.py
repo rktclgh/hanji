@@ -10,7 +10,8 @@ PDF와 같은 글꼴 크기 규칙으로 제목을 고른다(_finish).
 
 문단에 박힌 개체는 문단 글자 블록 뒤에 나타난 순서대로 블록이 된다(HWPX 스펙 §5.2): 표(1×1은 상자라 풀고, 칸 안 개체는
 칸 글자로, 칸 안 그림은 표 뒤 그림 블록), 그림과 캡션(PNG 자산), 머리말·꼬리말, 글상자·도형 글자, 수식 스크립트,
-글맵시, OLE 등은 이미지 없는 그림. 각주·미주는 구역 끝(닻 문단 위치). 개체 조립은 개체 중첩만큼만 재귀한다(XML 깊이
+글맵시, OLE 등은 이미지 없는 그림. 수식·도형·묶음·글맵시·OLE 등의 캡션은 표 캡션처럼 TOP·LEFT면 개체 블록 앞, 아니면
+뒤의 캡션 블록(연결 없음, 칸 안이면 칸 글자). 각주·미주는 구역 끝(닻 문단 위치). 개체 조립은 개체 중첩만큼만 재귀한다(XML 깊이
 상한 256이 묶는다). 이름 앞 _는 형식 패키지(hwpx·hwp) 안에서만 쓴다는 뜻이다."""
 
 import xml.etree.ElementTree as ET
@@ -41,6 +42,8 @@ ORG_SZ = f"{HP}orgSz"
 CTRL, DRAW_TEXT, EQUATION, SCRIPT = f"{HP}ctrl", f"{HP}drawText", f"{HP}equation", f"{HP}script"
 SHAPES = frozenset(f"{HP}{n}" for n in ("rect", "ellipse", "arc", "polygon", "curve", "connectLine", "line"))
 EMBEDDED = frozenset(f"{HP}{n}" for n in ("ole", "chart", "video"))  # 그림 성격 개체(이미지 없는 그림)
+# 캡션을 표 캡션처럼 앞뒤에 내는 개체(그림은 이미지와 잇는 picture, 표는 table이 따로 한다)
+CAPTIONED = SHAPES | EMBEDDED | {EQUATION, CONTAINER, TEXTART}
 MARGINS = {f"{HP}header": "page_header", f"{HP}footer": "page_footer"}
 NOTES = (f"{HP}footNote", f"{HP}endNote")  # 구역 끝에 이 차례로
 FIGURE_LINKED = "figure_image_linked"  # isEmbeded="0"(외부 연결 그림: 경로를 따라가지 않는다)
@@ -225,6 +228,10 @@ class _Section:
 
     def obj(self, element: ET.Element, anchor: int) -> None:
         tag = element.tag
+        caption = element.find(CAPTION) if tag in CAPTIONED else None
+        before = caption is not None and caption.get("side") in ("TOP", "LEFT")
+        if caption is not None and before:
+            self.caption(caption, anchor)
         if tag == TBL:
             self.table(element, anchor)
         elif tag == PIC:
@@ -251,6 +258,8 @@ class _Section:
             for child in element:
                 if child.tag in MARGINS or child.tag in NOTES:
                     self.obj(child, anchor)
+        if caption is not None and not before:
+            self.caption(caption, anchor)
 
     def has_text(self, element: ET.Element) -> bool:
         return any(self.ledger.sources[self.ledger.source_of(t)].n for t in element.iter(T))
@@ -435,8 +444,16 @@ class _Section:
         return out
 
     def inline(self, element: ET.Element, anchor: int, after: list[ET.Element], out: list[Bundle]) -> None:
+        """칸 안 개체 하나의 글자(앞뒤 \\n). 캡션 글자는 개체 글자 앞(TOP·LEFT)이나 뒤에 따로 묶는다(OLE 등은 after가
+        표 뒤 블록으로)."""
         tag = element.tag
         inner: list[Bundle] = []
+        caption = element.find(CAPTION) if tag in CAPTIONED and tag not in EMBEDDED else None
+        lines = caption.find(SUBLIST) if caption is not None else None
+        words = self.cell(lines, anchor, after) if lines is not None else []
+        before = caption is not None and caption.get("side") in ("TOP", "LEFT")
+        if before and _join(words).strip():
+            out += [(None, "\n"), *words, (None, "\n")]
         if tag == TBL:
             inner = self.flatten(element, anchor, after)
         elif tag == CONTAINER:
@@ -466,6 +483,8 @@ class _Section:
                 self.inline(child, anchor, after, out)
         if inner:
             out += [(None, "\n"), *inner, (None, "\n")]
+        if not before and _join(words).strip():
+            out += [(None, "\n"), *words, (None, "\n")]
 
     def flatten(self, tbl: ET.Element, anchor: int, after: list[ET.Element]) -> list[Bundle]:
         """칸 안 표의 글자: 1×1은 그 문단 글자(기록 없음), 그 밖은 Table.plain_text()와 같은 모양(칸 \\t, 행 \\n)과

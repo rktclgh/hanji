@@ -122,16 +122,18 @@ def caption(*paras: str, side: str = "BOTTOM") -> str:
     return f'<hp:caption side="{side}"><hp:subList>{"".join(paras)}</hp:subList></hp:caption>'
 
 
-def container(*objects: str) -> str:
-    return f'<hp:container id="2">{"".join(objects)}</hp:container>'
+def container(*objects: str, caption: str = "") -> str:
+    return f'<hp:container id="2">{"".join(objects)}{caption}</hp:container>'
 
 
-def textart(text: str) -> str:
-    return f'<hp:textart id="6"{attrs(text=text)}/>'
+def textart(text: str, caption: str = "") -> str:
+    return f'<hp:textart id="6"{attrs(text=text)}>{caption}</hp:textart>' if caption else \
+        f'<hp:textart id="6"{attrs(text=text)}/>'
 
 
-def ole() -> str:
-    return '<hp:ole id="7" binaryItemIDRef="ole1"/>'
+def ole(caption: str = "") -> str:
+    return f'<hp:ole id="7" binaryItemIDRef="ole1">{caption}</hp:ole>' if caption else \
+        '<hp:ole id="7" binaryItemIDRef="ole1"/>'
 
 
 def tc(row: int, col: int, *paras: str, span: tuple[int, int] = (1, 1), header: bool = False, fill: int = 1) -> str:
@@ -148,14 +150,14 @@ def tbl(rows: int, cols: int, *trs: Sequence[str], caption: str = "", inline: bo
             + "".join(f"<hp:tr>{''.join(cells)}</hp:tr>" for cells in trs) + "</hp:tbl>")
 
 
-def rect(*paras: str) -> str:
+def rect(*paras: str, caption: str = "") -> str:
     """글상자(사각형 도형의 drawText)."""
-    return (f'<hp:rect id="3"><hp:drawText lastWidth="1000"><hp:subList>{"".join(paras)}</hp:subList>'
+    return (f'<hp:rect id="3">{caption}<hp:drawText lastWidth="1000"><hp:subList>{"".join(paras)}</hp:subList>'
             f"</hp:drawText></hp:rect>")
 
 
-def line() -> str:
-    return '<hp:line id="4"/>'
+def line(caption: str = "") -> str:
+    return f'<hp:line id="4">{caption}</hp:line>' if caption else '<hp:line id="4"/>'
 
 
 def ctrl(*items: str) -> str:
@@ -172,8 +174,8 @@ def note(kind: str, *paras: str) -> str:
     return (f'<hp:{kind} number="1"><hp:subList>{"".join(paras)}</hp:subList></hp:{kind}>')
 
 
-def equation(script: str) -> str:
-    return f'<hp:equation id="5"><hp:script>{escape(script)}</hp:script></hp:equation>'
+def equation(script: str, caption: str = "") -> str:
+    return f'<hp:equation id="5">{caption}<hp:script>{escape(script)}</hp:script></hp:equation>'
 
 
 def hidden(*paras: str) -> str:
@@ -328,6 +330,20 @@ NOTES = (
         para(run(t("둘째 구역 끝 문단이다."))),
     ),
 )
+# 수식·도형·묶음·OLE·글맵시의 캡션(표 캡션처럼 TOP·LEFT면 앞, 아니면 뒤, 칸 안이면 칸 글자)
+OBJECTS = section(
+    para(run(t("개체 캡션 예제 문단이다."))),
+    para(run(equation("a over b", caption=caption(para(run(t("식 1. 지어낸 분수"))))))),
+    para(run(rect(para(run(t("위 캡션을 단 글상자"))), caption=caption(para(run(t("상자 1. 위 캡션"))), side="TOP")))),
+    para(run(line(caption=caption(para(run(t("선 1. 왼쪽 캡션"))), side="LEFT")))),
+    para(run(container(rect(para(run(t("묶음 속 글상자")))), line(),
+                       caption=caption(para(run(t("묶음 1. 아래 캡션"))))))),
+    para(run(ole(caption=caption(para(run(t("개체 1. 오른쪽 캡션"))), side="RIGHT")))),
+    para(run(textart("지어낸 글맵시", caption=caption(para(run(t("글맵시 1. 위 캡션"))), side="TOP")))),
+    para(run(tbl(1, 2, [tc(0, 0, para(run(t("칸 수식"), equation("x^2", caption=caption(para(run(t("칸 식 캡션")))))))),
+                        tc(0, 1, para(run(rect(para(run(t("칸 글상자"))),
+                                               caption=caption(para(run(t("칸 상자 캡션"))), side="TOP")))))]))),
+)
 SAMPLES: dict[str, bytes] = {
     "basic.hwpx": package(*BASIC, head=BASIC_HEAD),
     "headings.hwpx": package(*HEADINGS, head=HEAD_SIZES),
@@ -335,6 +351,7 @@ SAMPLES: dict[str, bytes] = {
     "figures.hwpx": package(FIGURES, items=FIGURE_ITEMS, binaries=FIGURE_BINARIES),
     "table.hwpx": package(TABLE, head=TABLE_HEAD, items=FIGURE_ITEMS[:1], binaries={"BinData/image1.png": GRAY_PNG}),
     "notes.hwpx": package(*NOTES, items=FIGURE_ITEMS[:1], binaries={"BinData/image1.png": GRAY_PNG}),
+    "objects.hwpx": package(OBJECTS),
 }
 ROOT = Path(__file__).resolve().parent / "fixtures" / "hwpx"
 

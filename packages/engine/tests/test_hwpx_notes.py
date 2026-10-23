@@ -118,6 +118,23 @@ def test_objects_inside_notes_and_text_boxes_become_blocks_too():
     assert count.ok and [r.fallback_reason for r in parsed.regions] == ["shape_text", "equation_script"]
 
 
+def test_captions_on_equations_shapes_groups_and_objects_sit_like_table_captions_without_a_link():
+    """수식·도형·묶음·OLE·글맵시 캡션은 캡션 블록이다: 표 캡션처럼 TOP·LEFT면 개체 블록 앞, 아니면 뒤. 계약의 캡션
+    연결은 그림에만 있어 잇지 않는다. 칸 안 개체의 캡션은 칸 글자로 든다. 살린 글자는 없다."""
+    parsed, (count,) = HwpxParser()._parse(B.SAMPLES["objects.hwpx"], "objects.hwpx")
+    shown = [(b["kind"], b["text"], b["locator"].paragraph_index) for b in parsed.blocks]
+    assert [x for x in shown if x[2] <= 7] == [
+        ("paragraph", "개체 캡션 예제 문단이다.", 0), ("paragraph", "a over b", 1), ("caption", "식 1. 지어낸 분수", 1),
+        ("caption", "상자 1. 위 캡션", 2), ("paragraph", "위 캡션을 단 글상자", 2), ("caption", "선 1. 왼쪽 캡션", 3),
+        ("paragraph", "묶음 속 글상자", 4), ("caption", "묶음 1. 아래 캡션", 4), ("figure", "", 5),
+        ("caption", "개체 1. 오른쪽 캡션", 5), ("caption", "글맵시 1. 위 캡션", 6), ("paragraph", "지어낸 글맵시", 6),
+        ("table", "칸 수식\nx^2\n\n칸 식 캡션\t칸 상자 캡션\n\n칸 글상자", 7)]
+    assert all("caption_ref" not in b.get("figure", {}) for b in parsed.blocks)  # 그림만 잇는다
+    assert count.ok and count.rescued == 0
+    assert [r.fallback_reason for r in parsed.regions] == [
+        "equation_script", "shape_text", "shape_text", "embedded_object", "shape_text", "equation_script", "shape_text"]
+
+
 def test_a_footnote_inside_an_endnote_is_a_note_paragraph_not_rescued_text():
     inside = B.ctrl(B.note("footNote", p("미주 안 각주")))
     end = B.ctrl(B.note("endNote", B.para(B.run(B.t("미주"), inside))))
