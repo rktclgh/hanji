@@ -52,6 +52,16 @@ def test_paragraph_text_is_the_runs_t_text_with_inline_replacements():
     assert reasons(parsed) == []
 
 
+def test_a_hyphen_element_is_a_hyphen_like_hwp_and_the_ledger_counts_it(monkeypatch):
+    """hp:hypen(OWPML 철자)은 HWP 하이픈(WCHAR 24)처럼 -다. 장부 출처의 n에도 들어 빠지면 partial이다."""
+    s = B.section(B.para(B.run(B.t("하이", B.hypen(), "픈"))))
+    parsed, (count,) = parse(s)
+    assert texts(parsed) == [("paragraph", "하이-픈")] and count.ok and count.source == 4 and parsed.regions == ()
+    monkeypatch.setattr(owpml, "INLINE", {k: v for k, v in owpml.INLINE.items() if v != "-"})  # 처리부만 잃는다
+    parsed, (count,) = parse(s)
+    assert texts(parsed) == [("paragraph", "하이픈")] and count.partial == 1 and reasons(parsed) == ["coverage_mismatch"]
+
+
 def test_outline_levels_lists_and_section_paths_over_two_sections():
     """개요 0·1·7단계 → 제목 1·2·6, 번호·글머리 → 목록 항목, 모르는 paraPrIDRef → 문단. 빈 문단도 순번을 센다."""
     first = B.section(B.para(B.run(B.t("지어낸 큰 제목")), pr=1), B.para(), B.para(B.run(B.t("본문 문단")), pr=99),

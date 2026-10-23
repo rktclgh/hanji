@@ -467,7 +467,8 @@ HX = _hwpx_builder()
 OWPML = "{http://www.hancom.co.kr/hwpml/2011/paragraph}"
 HEAD_NS = "{http://www.hancom.co.kr/hwpml/2011/head}"
 CORE_NS = "{http://www.hancom.co.kr/hwpml/2011/core}"
-MARKS = {"tab": TAB, "lineBreak": LINE_BREAK, "nbSpace": NB_SPACE, "fwSpace": FW_SPACE, "titleMark": TITLE_MARK}
+MARKS = {"tab": TAB, "lineBreak": LINE_BREAK, "nbSpace": NB_SPACE, "fwSpace": FW_SPACE, "titleMark": TITLE_MARK,
+         "hypen": HYPHEN}
 
 
 def from_section(xml: str) -> bytes:

@@ -63,6 +63,11 @@ def title_mark() -> str:
     return '<hp:titleMark ignore="0"/>'
 
 
+def hypen() -> str:
+    """하이픈(OWPML 요소 이름의 철자 그대로, HWP WCHAR 24)."""
+    return "<hp:hypen/>"
+
+
 def dutmal(main: str, sub: str) -> str:
     """덧말(본말 위에 작은 덧말 글자, hp:run 바로 아래)."""
     return (f'<hp:dutmal posType="TOP" szRatio="0" option="0" styleIDRef="0" align="CENTER"><hp:mainText>'
@@ -359,6 +364,7 @@ OBJECTS = section(
          run(t(" 원 "), compose("1", circle="SHAPE_CIRCLE"), compose("21", circle="SHAPE_CIRCLE"),
              compose("가", circle="SHAPE_CIRCLE"))),
     para(run(tbl(1, 2, [tc(0, 0, para(run(t("칸 속 "), dutmal("칸 본말", "칸 덧말")))), tc(0, 1, para(run(compose("다"))))]))),
+    para(run(t("줄 끝 하이", hypen(), "픈 뒤 글자"))),
 )
 SAMPLES: dict[str, bytes] = {
     "basic.hwpx": package(*BASIC, head=BASIC_HEAD),

@@ -6,7 +6,7 @@
   "source": {
     "name": "objects.hwpx",
     "mime": "application/hwp+zip",
-    "content_hash": "sha256:f9bb55d6f1e214988f9db00bf39dae5331f9299bcd0be4ef5cc287ea161c7762",
+    "content_hash": "sha256:1b9f76a5d9bf00b1b293491a363411896e60ce46ec9ed849b47baf93252af9c4",
     "page_count": null
   },
   "pages": [],
@@ -351,6 +351,26 @@
         "kind": "flow",
         "section_path": [],
         "paragraph_index": 9
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_fc58fd14b6d53964b96e9fb4",
+      "content_hash": "c_b6f3f40fb21c8f162f34d4d8ef922097",
+      "order": 15,
+      "kind": "paragraph",
+      "text": "줄 끝 하이-픈 뒤 글자",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 10
       },
       "confidence": 1.0,
       "state": "det",

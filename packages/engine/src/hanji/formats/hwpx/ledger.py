@@ -9,8 +9,10 @@ from ..flowledger import Bundle, Counts, Ledger, Source, ink  # noqa: F401  (옮
 from .container import HP
 
 T = f"{HP}t"
+HYPEN = f"{HP}hypen"  # 하이픈(OWPML 요소 이름의 철자 그대로, HWP 하이픈 WCHAR 24처럼 -)
+# hp:t 안 요소 → 처리부 대치 글자(하이픈 -가 공백 아닌 유일한 대치 글자)
 INLINE = {f"{HP}tab": "\t", f"{HP}lineBreak": "\n", f"{HP}nbSpace": " ", f"{HP}fwSpace": " ",
-          f"{HP}titleMark": ""}  # hp:t 안 요소 → 대치 글자(모두 공백이거나 없음)
+          f"{HP}titleMark": "", HYPEN: "-"}
 
 
 TEXTART, MAIN_TEXT, SUB_TEXT, COMPOSE = f"{HP}textart", f"{HP}mainText", f"{HP}subText", f"{HP}compose"
@@ -39,11 +41,11 @@ def circled(text: str, circle_type: str | None) -> str:
 
 
 def source_chars(t: ET.Element) -> int:
-    """hp:t 출처의 n(x): t.text + 자식 요소 안 글자(문서 순서) + 자식 뒤 글자에서 공백 아닌 코드 포인트 수.
-    대치 글자는 모두 공백이라 들지 않는다. 블록 글자를 만드는 쪽과 따로 센다(같은 함수를 쓰면 빠뜨림이 감춰진다)."""
+    """hp:t 출처의 n(x): t.text + 자식 요소 안 글자(문서 순서) + 하이픈 요소마다 1 + 자식 뒤 글자에서 공백 아닌 코드 포인트
+    수(나머지 대치 글자는 공백이거나 없다). 블록 글자를 만드는 쪽(INLINE)과 따로 센다(같은 함수를 쓰면 빠뜨림이 감춰진다)."""
     count = ink(t.text or "")
     for child in t:
-        count += ink("".join(child.itertext()))  # 아는 인라인 요소 안 글자도 센다(대치 글자는 공백이라 들지 않는다)
+        count += (child.tag == HYPEN) + ink("".join(child.itertext()))  # 아는 인라인 요소 안 글자도 센다
         count += ink(child.tail or "")
     return count
 
