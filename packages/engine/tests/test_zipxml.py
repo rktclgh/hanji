@@ -69,34 +69,75 @@ def test_members_before_a_damaged_member_are_found_at_their_written_offsets():
     assert prefixed._moved == {}  # 내부 값: 옮긴 위치에 모두 머리가 있어 다시 찾은 멤버가 없다
 
 
-def _local(name: bytes, data: bytes) -> bytes:
-    """무압축 로컬 머리 + 데이터."""
-    return struct.pack("<4sHHHHHIIIHH", b"PK\x03\x04", 20, 0, 0, 0, 0x21, zlib.crc32(data), len(data), len(data),
+def _local(name: bytes, data: bytes, size: int | None = None) -> bytes:
+    """무압축 로컬 머리 + 데이터(size: 머리에 적을 크기, 없으면 실제 길이)."""
+    size = len(data) if size is None else size
+    return struct.pack("<4sHHHHHIIIHH", b"PK\x03\x04", 20, 0, 0, 0, 0x21, zlib.crc32(data), size, size,
                        len(name), 0) + name + data
 
 
-def _central(name: bytes, data: bytes, offset: int) -> bytes:
+def _central(name: bytes, data: bytes, offset: int, size: int | None = None) -> bytes:
     """무압축 중앙 디렉터리 항목(적힌 위치 offset)."""
-    return struct.pack("<4sHHHHHHIIIHHHHHII", b"PK\x01\x02", 20, 20, 0, 0, 0, 0x21, zlib.crc32(data), len(data),
-                       len(data), len(name), 0, 0, 0, 0, 0, offset) + name
+    size = len(data) if size is None else size
+    return struct.pack("<4sHHHHHHIIIHHHHHII", b"PK\x01\x02", 20, 20, 0, 0, 0, 0x21, zlib.crc32(data), size,
+                       size, len(name), 0, 0, 0, 0, 0, offset) + name
 
 
-def test_a_member_found_again_inside_an_earlier_member_refuses_the_file():
-    """조작 파일: 중앙 디렉터리 위치가 실제보다 작아(zipfile은 앞에 붙은 바이트로 본다) 앞 멤버 e는 옮긴 위치에서, 뒤
-    멤버 m은 적힌 위치에서 찾는데 e의 데이터가 m을 덮는다. zipfile은 m의 옮긴 위치까지 e를 허용하므로 같은 바이트를
-    두 번 읽게 된다. 옮기지 않은 앞 멤버와 다시 찾은 멤버가 겹치면 문서를 거부한다."""
+def _end(directory: bytes, count: int, offset: int) -> bytes:
+    """EOCD(중앙 디렉터리 크기, 적힌 위치 offset)."""
+    return struct.pack("<4sHHHHIIH", b"PK\x05\x06", 0, 0, count, count, len(directory), offset, 0)
+
+
+def _covering(outer: bytes) -> bytes:
+    """조작 파일: 중앙 디렉터리 위치가 실제보다 작아(zipfile은 앞에 붙은 바이트로 본다) 앞 멤버 outer는 옮긴 위치에서,
+    뒤 멤버 m.xml은 적힌 위치에서 찾는데 outer의 데이터가 m.xml을 덮는다. 중앙 디렉터리 순서는 물리 순서와 다르다."""
     inner = _local(b"m.xml", b"<m>z</m>")
     shift = len(inner) + 40
     body = b"q" * 10 + inner
-    entry = _local(b"e.bin", body)
-    written = shift + 30 + 5 + 10  # m의 적힌 위치(e의 데이터 안)
-    directory = _central(b"m.xml", b"<m>z</m>", written) + _central(b"e.bin", body, 0)  # 물리 순서와 다르다
-    start = shift + len(entry)
-    data = b"\0" * shift + entry + directory + struct.pack("<4sHHHHIIH", b"PK\x05\x06", 0, 0, 2, 2, len(directory),
-                                                           start - shift, 0)
-    assert zipfile.ZipFile(BytesIO(data)).read("e.bin") == body  # zipfile만으로는 e가 읽힌다
+    entry = _local(outer, body)
+    written = shift + 30 + len(outer) + 10  # m의 적힌 위치(outer의 데이터 안)
+    directory = _central(b"m.xml", b"<m>z</m>", written) + _central(outer, body, 0)
+    return b"\0" * shift + entry + directory + _end(directory, 2, len(entry))
+
+
+def test_a_member_found_again_inside_an_earlier_member_refuses_the_file():
+    """zipfile은 m의 옮긴 위치까지 e를 허용하므로 같은 바이트를 두 번 읽게 된다. 옮기지 않은 앞 멤버와 다시 찾은 멤버가
+    겹치면 문서를 거부한다."""
+    data = _covering(b"e.bin")
+    assert zipfile.ZipFile(BytesIO(data)).read("e.bin")[:10] == b"q" * 10  # zipfile만으로는 e가 읽힌다
     with pytest.raises(ParseError, match="overlapped zip members") as info:
         zipxml.Archive(data, "f.zip", "not a zip", lambda: LIMITS)
+    assert info.value.location == "f.zip:e.bin"
+
+
+def test_member_names_are_checked_as_written_in_the_headers():
+    """zipfile은 이름을 첫 NUL에서 자르고(윈도에서는 \\를 /로 바꾼다) 로컬 머리는 원래 이름과 견준다. NUL·역슬래시
+    이름은 거부하고, 겹침 검사도 원래 이름으로 머리를 찾는다(잘린 이름으로 찾으면 그 멤버가 검사에서 빠진다)."""
+    nul = _covering(b"e.bin\0x")
+    with pytest.raises(ParseError, match="NUL in zip member name") as info:
+        zipxml.Archive(nul, "f.zip", "not a zip", lambda: LIMITS)
+    assert info.value.location == "f.zip:e.bin"
+    with pytest.raises(ParseError, match="overlapped zip members"):
+        zipxml._relocate(nul, zipfile.ZipFile(BytesIO(nul)).infolist(), "f.zip")
+    with pytest.raises(ParseError, match="backslash in zip member name"):
+        zipxml.Archive(_covering(b"e\\bin"), "f.zip", "not a zip", lambda: LIMITS)
+
+
+def test_overlap_between_two_members_left_in_place_stays_a_member_error():
+    """다시 찾은 멤버(r)가 있어도 옮기지 않은 두 멤버(e·n)끼리의 겹침은 zipfile의 읽기 오류 그대로 그 멤버만 잃는다."""
+    first = _local(b"r.xml", b"<r>a</r>")
+    shift, at = len(first) + 5, len(first) + 20  # r의 옮긴 위치는 채움 바이트 안, e의 실제 위치
+    entry = _local(b"e.bin", b"w" * 10, size=25)  # 적힌 크기가 다음 멤버 머리를 넘는다
+    last = _local(b"n.xml", b"<n>b</n>")
+    directory = (_central(b"r.xml", b"<r>a</r>", 0) + _central(b"e.bin", b"w" * 10, at - shift, size=25)
+                 + _central(b"n.xml", b"<n>b</n>", at + len(entry) - shift))
+    start = at + len(entry) + len(last)
+    data = first + b"\0" * 20 + entry + last + directory + _end(directory, 3, start - shift)
+    archive = zipxml.Archive(data, "f.zip", "not a zip", lambda: LIMITS)
+    assert list(archive._moved) == ["r.xml"]  # 내부 값: r만 적힌 위치로 다시 찾았다
+    assert archive.xml("r.xml", "r").text == "a" and archive.xml("n.xml", "n").text == "b"
+    with pytest.raises(ParseError, match="cannot read zip member") as info:
+        archive.binary("e.bin")
     assert info.value.location == "f.zip:e.bin"
 
 

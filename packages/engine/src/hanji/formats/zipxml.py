@@ -4,6 +4,7 @@
 멤버 데이터 몇 바이트가 빠지거나 더해져 EOCD의 중앙 디렉터리 위치가 틀린 zip은 로컬 머리를 확인해 적힌 위치로 읽는다
 (손상 멤버만 잃는다). 실패는 ParseError(원인, "{파일 이름}:{멤버 이름}")."""
 
+import bisect
 import io
 import struct
 import xml.etree.ElementTree as ET
@@ -112,40 +113,43 @@ def _start(data: bytes, offset: int, name: str) -> int | None:
 
 def _relocate(data: bytes, infos: list[zipfile.ZipInfo], name: str) -> dict[str, zipfile.ZipInfo | None]:
     """zipfile이 옮긴 위치에 로컬 머리가 없고 적힌 위치(옮기기 전)에 같은 이름의 머리가 있는 멤버 → 그 위치를 가리키는 새
-    ZipInfo(공개 속성만 옮긴다: zipfile 내부 값을 고치지 않는다). 그런 멤버가 있으면 머리가 있는 모든 멤버의 구간(머리 +
-    compress_size)을 시작 순으로 놓고 다음 머리·중앙 디렉터리를 넘는지 본다(zipfile의 겹침 검사는 옮긴 위치 기준이라
-    믿지 않는다). 다시 찾은 멤버가 넘으면 None(손상 멤버라 읽지 않는다), 옮기지 않은 멤버가 넘으면 같은 바이트를 두
-    멤버로 읽을 수 있어 ParseError."""
+    ZipInfo(공개 속성만 옮긴다: zipfile 내부 값을 고치지 않는다). 머리 이름은 zipfile처럼 orig_filename과 견준다. 그런
+    멤버가 있으면 머리가 있는 모든 멤버의 구간(머리 + compress_size)을 시작 순으로 놓는다(zipfile의 겹침 검사는 옮긴
+    위치 기준이라 다시 찾은 멤버를 모른다). 다시 찾은 멤버가 다음 머리·중앙 디렉터리를 넘으면 None(손상 멤버라 읽지
+    않는다), 옮기지 않은 멤버가 다시 찾은 멤버의 머리를 덮으면 같은 바이트를 두 멤버로 읽을 수 있어 ParseError.
+    옮기지 않은 멤버끼리의 겹침은 zipfile의 읽기 오류에 맡긴다."""
     found = _directory(data)
     if found is None or found[0] == 0:
         return {}
     shift, directory = found
     again: dict[str, int] = {}
     for info in infos:
-        if _start(data, info.header_offset, info.filename) is None and \
-                _start(data, info.header_offset - shift, info.filename) is not None:
+        if _start(data, info.header_offset, info.orig_filename) is None and \
+                _start(data, info.header_offset - shift, info.orig_filename) is not None:
             again[info.filename] = info.header_offset - shift
     if not again:  # 앞에 바이트가 붙은 zip: zipfile 그대로 읽는다
         return {}
     spans: list[tuple[int, int, zipfile.ZipInfo]] = []  # (머리 위치, 데이터 시작, 멤버)
     for info in infos:
         offset = again.get(info.filename, info.header_offset)
-        begin = _start(data, offset, info.filename)
+        begin = _start(data, offset, info.orig_filename)
         if begin is not None:  # 머리가 없는 멤버는 zipfile이 열지 못한다
             spans.append((offset, begin, info))
     spans.sort(key=lambda span: span[0])
     bounds = [span[0] for span in spans[1:]] + [directory]
+    found_again = sorted(again.values())
     moved: dict[str, zipfile.ZipInfo | None] = {}
     for (offset, begin, info), bound in zip(spans, bounds, strict=True):
-        fits = begin + info.compress_size <= bound
+        end = begin + info.compress_size
         if info.filename not in again:
-            if not fits:
+            after = bisect.bisect_right(found_again, offset)  # 이 멤버 뒤 첫 다시 찾은 머리
+            if after < len(found_again) and found_again[after] < end:
                 raise ParseError("overlapped zip members", f"{name}:{info.filename}")
             continue
-        if not fits:
+        if end > bound:
             moved[info.filename] = None
             continue
-        fresh = zipfile.ZipInfo(info.filename)
+        fresh = zipfile.ZipInfo(info.orig_filename)
         for key in ("compress_type", "flag_bits", "CRC", "compress_size", "file_size", "extra"):
             setattr(fresh, key, getattr(info, key))
         fresh.header_offset = offset
@@ -154,7 +158,7 @@ def _relocate(data: bytes, infos: list[zipfile.ZipInfo], name: str) -> dict[str,
 
 
 class Archive:
-    """열린 zip 꾸러미. 생성자가 zip과 멤버 목록(수·이름 중복·역슬래시·암호화·압축 방식)을 확인한다. 상한은 limits가
+    """열린 zip 꾸러미. 생성자가 zip과 멤버 목록(수·이름 중복·역슬래시·NUL·암호화·압축 방식)을 확인한다. 상한은 limits가
     호출 때마다 돌려준다(형식이 자기 모듈 상수로 만든다). xml_read·binary_read는 실제로 읽은 바이트 합이다."""
 
     def __init__(self, data: bytes, name: str, not_zip: str, limits: Callable[[], Limits]) -> None:
@@ -174,8 +178,10 @@ class Archive:
         for info in infos:
             if info.filename in self._infos:
                 raise ParseError("duplicate zip member name", f"{name}:{info.filename}")
-            if "\\" in info.filename:  # 윈도와 다른 OS가 \를 다르게 읽으므로 모두 거부한다
+            if "\\" in info.orig_filename:  # 윈도와 다른 OS가 \를 다르게 읽으므로 모두 거부한다(윈도 zipfile은 /로 바꾼다)
                 raise ParseError("backslash in zip member name", f"{name}:{info.filename}")
+            if "\0" in info.orig_filename:  # zipfile은 이름을 첫 NUL에서 자르고 로컬 머리는 원래 이름과 견준다
+                raise ParseError("NUL in zip member name", f"{name}:{info.filename}")
             if info.flag_bits & 1:
                 raise ParseError("encrypted zip member", f"{name}:{info.filename}")
             if info.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
