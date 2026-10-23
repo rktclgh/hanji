@@ -143,6 +143,16 @@ def test_ruby_text_follows_its_main_text_in_parentheses_and_overlaps_keep_their_
     assert count.doubled == 4 and reasons(parsed) == ["coverage_mismatch"]  # 본말·덧말·겹친 글자·홀로
 
 
+def test_a_schema_foreign_t_inside_ruby_text_belongs_to_that_text_source_and_is_emitted_once():
+    """덧말 본말·덧말 안의 hp:t(스키마 밖)는 hp:t의 모르는 자식처럼 그 글자 출처의 것이다: 따로 출처가 되지 않으니
+    속글은 본말(덧말) 문단에 한 번만 든다. 장부는 ok이고 살린 글자도 coverage_mismatch도 없다(전에는 속글이 두 번 났다)."""
+    inner = ('<hp:dutmal posType="TOP" szRatio="0" option="0" styleIDRef="0" align="CENTER">'
+             "<hp:mainText>본말<hp:t>속글</hp:t></hp:mainText><hp:subText>덧</hp:subText></hp:dutmal>")
+    parsed, (count,) = parse(B.section(B.para(B.run(inner))))
+    assert texts(parsed) == [("paragraph", "본말속글(덧)")]
+    assert count.ok and count.rescued == 0 and count.source == count.in_blocks == 5 and parsed.regions == ()
+
+
 def test_the_circled_table_is_exactly_the_unicode_circle_decompositions_of_the_five_ranges_and_zero():
     """원문자 표는 파서와 무관한 유니코드 데이터로 확인한다: 모든 항목의 분해가 '<circle> 그 글자'이고 BMP 글자다. 범위는
     ⓪ 0, ①–⑳, ㉑–㉟, ㊱–㊿, ⓐ–ⓩ, Ⓐ–Ⓩ뿐이다(원문자 한글·한자 등은 넣지 않는다)."""

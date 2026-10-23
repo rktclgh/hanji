@@ -182,6 +182,8 @@ class _Section:
                 count = SOURCE_CHARS.get(element.tag)
                 if count is not None:
                     self.ledger.add(element, count(element), max(anchor, self.base), para, hidden)
+                    if element.tag in (MAIN_TEXT, SUB_TEXT):
+                        continue  # 안 글자는 그 출처의 것(hp:t와 같다)
                 if element.tag == HIDDEN and not hidden:
                     chars = sum(source_chars(t) for t in element.iter(T))
                     self.region("hidden-comment", "paragraph", HIDDEN_COMMENT, max(anchor, self.base),
