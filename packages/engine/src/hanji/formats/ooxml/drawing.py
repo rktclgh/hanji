@@ -92,16 +92,18 @@ class Images:
     def figure(self, part: str, embed: str | None, link: str | None, cx: int | None,
                svg: str | None = None) -> dict[str, Any] | str:
         """그림 블록의 figure 값 또는 이미지 없음 사유. embed·link·svg는 part의 관계 id다. 외부 관계와 r:link만 있는
-        그림은 figure_image_linked(따라가지 않는다), r:embed·r:link 없이 SVG 확장만 있고 그 관계가 있는 .svg 멤버를
-        가리키면 figure_image_unsupported(SVG는 지원하지 않는 형식), 관계·멤버가 없으면 figure_image_missing."""
+        그림은 figure_image_linked(따라가지 않는다), r:embed·r:link 없이 SVG 확장만 있고 그 관계가 외부면 같은 linked,
+        내부이고 있는 .svg 멤버를 가리키면 figure_image_unsupported(SVG는 지원하지 않는 형식), 관계·멤버가 없으면
+        figure_image_missing."""
         rels = self.package.rels(part)
         rel = rels.get(embed) if embed else None
         if rel is None:
             if link and not embed:
                 return FIGURE_LINKED
             vector = rels.get(svg) if svg and not embed else None
-            if vector is not None and vector.target is not None and vector.target.lower().endswith(".svg") \
-                    and self.package.has(vector.target):
+            if vector is not None and vector.target is None:  # 외부 SVG 관계는 r:link처럼 따라가지 않는다
+                return FIGURE_LINKED
+            if vector is not None and vector.target.lower().endswith(".svg") and self.package.has(vector.target):
                 return images.UNSUPPORTED
             return FIGURE_MISSING
         if rel.target is None:

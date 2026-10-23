@@ -81,6 +81,14 @@ def test_a_picture_with_only_an_svg_image_is_unsupported_not_missing():
         ("figure_image_missing", "s0-p4-figure-0")] and counts[0].ok
 
 
+def test_a_picture_with_only_an_external_svg_image_is_linked_not_missing():
+    """r:link와 같게, SVG 관계가 외부(TargetMode External)면 따라가지 않는 연결 그림이다."""
+    rels = (("rIdX", f"{B.R}/image", "http://example.invalid/a.svg", "External"),)
+    parsed, counts = parse(B.p(B.drawing(B.pic(svg="rIdX"))), rels=rels)
+    assert [(b["kind"], "figure" in b) for b in parsed.blocks] == [("figure", False)]
+    assert reasons(parsed) == [("figure_image_linked", "s0-p0-figure-0")] and counts[0].ok
+
+
 def test_size_limits_and_the_asset_budget_leave_figures_without_images(monkeypatch):
     monkeypatch.setattr(ox, "MAX_BINARY_BYTES", 100)
     parsed, _ = parse(B.p(B.drawing(B.pic("rIdJ"))), B.p(B.drawing(B.pic("rIdP"))))
