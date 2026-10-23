@@ -56,8 +56,8 @@ def textart_chars(element: ET.Element) -> int:
 
 
 def ruby_chars(element: ET.Element) -> int:
-    """덧말 본말·덧말 출처의 n(x): 요소 안 글자(문서 순서)."""
-    return sum(ink(part) for part in element.itertext())
+    """덧말 본말·덧말 출처의 n(x): 요소의 직접 글자(text와 자식 뒤 글자). 자식 요소는 따로 출처다."""
+    return ink(element.text or "") + sum(ink(child.tail or "") for child in element)
 
 
 def compose_chars(element: ET.Element) -> int:

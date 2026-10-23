@@ -104,7 +104,7 @@ def _t_text(t: ET.Element) -> tuple[str, bool]:
 
 def _source_text(element: ET.Element) -> str:
     """장부 출처 하나의 블록 글자(블록·살리기가 함께 쓴다): hp:t는 _t_text, 글맵시는 속성, 글자 겹침은 원 모양이면
-    원문자(circled), 수식 스크립트는 text(처리부가 늘 읽던 자리), 덧말 본말·덧말은 안 글자. 장부 n은 ledger.SOURCE_CHARS가
+    원문자(circled), 수식 스크립트는 text(처리부가 늘 읽던 자리), 덧말 본말·덧말은 직접 글자(자식 요소 안 글자는 그 자식의 출처). 장부 n은 ledger.SOURCE_CHARS가
     따로 센다."""
     if element.tag == SCRIPT:
         return element.text or ""
@@ -114,7 +114,7 @@ def _source_text(element: ET.Element) -> str:
         return element.get("text", "")
     if element.tag == COMPOSE:
         return circled(element.get("composeText", ""), element.get("circleType"))
-    return "".join(element.itertext())
+    return "".join([element.text or "", *(child.tail or "" for child in element)])  # 덧말: 직접 글자만
 
 
 def _lines(p: ET.Element) -> int:
@@ -182,8 +182,6 @@ class _Section:
                 count = SOURCE_CHARS.get(element.tag)
                 if count is not None:
                     self.ledger.add(element, count(element), max(anchor, self.base), para, hidden)
-                    if element.tag in (MAIN_TEXT, SUB_TEXT):
-                        continue  # 안 글자는 그 출처의 것(hp:t와 같다)
                 if element.tag == HIDDEN and not hidden:
                     chars = sum(source_chars(t) for t in element.iter(T))
                     self.region("hidden-comment", "paragraph", HIDDEN_COMMENT, max(anchor, self.base),

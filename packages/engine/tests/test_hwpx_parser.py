@@ -143,14 +143,39 @@ def test_ruby_text_follows_its_main_text_in_parentheses_and_overlaps_keep_their_
     assert count.doubled == 4 and reasons(parsed) == ["coverage_mismatch"]  # 본말·덧말·겹친 글자·홀로
 
 
-def test_a_schema_foreign_t_inside_ruby_text_belongs_to_that_text_source_and_is_emitted_once():
-    """덧말 본말·덧말 안의 hp:t(스키마 밖)는 hp:t의 모르는 자식처럼 그 글자 출처의 것이다: 따로 출처가 되지 않으니
-    속글은 본말(덧말) 문단에 한 번만 든다. 장부는 ok이고 살린 글자도 coverage_mismatch도 없다(전에는 속글이 두 번 났다)."""
-    inner = ('<hp:dutmal posType="TOP" szRatio="0" option="0" styleIDRef="0" align="CENTER">'
-             "<hp:mainText>본말<hp:t>속글</hp:t></hp:mainText><hp:subText>덧</hp:subText></hp:dutmal>")
-    parsed, (count,) = parse(B.section(B.para(B.run(inner))))
-    assert texts(parsed) == [("paragraph", "본말속글(덧)")]
-    assert count.ok and count.rescued == 0 and count.source == count.in_blocks == 5 and parsed.regions == ()
+def _ruby_with(child: str) -> str:
+    """스키마 밖: 덧말 본말 안에 child 요소가 든 덧말."""
+    return ('<hp:dutmal posType="TOP" szRatio="0" option="0" styleIDRef="0" align="CENTER">'
+            f"<hp:mainText>본말{child}</hp:mainText><hp:subText>덧</hp:subText></hp:dutmal>")
+
+
+def test_ruby_text_is_only_its_direct_text_and_a_schema_foreign_t_inside_is_rescued_once():
+    """덧말 본말·덧말의 글자는 직접 글자(text와 자식 뒤 글자)뿐이고 자식 요소는 제 규칙의 출처다. 본말 안 hp:t는 따로
+    출처라 덧말 자리에는 안 들고, 문단 어디에도 놓이지 않아 구역 끝 구조 문단(unassigned_text)으로 한 번 살아난다.
+    장부는 ok이고 두 번 든 글자가 없다(전에는 속글이 두 번 나거나 자식 글자가 소리 없이 빠졌다)."""
+    parsed, (count,) = parse(B.section(B.para(B.run(_ruby_with("<hp:t>속글</hp:t>")))))
+    assert texts(parsed) == [("paragraph", "본말(덧)"), ("paragraph", "속글")]
+    assert parsed.blocks[1]["confidence"] == 0.3 and reasons(parsed) == ["unassigned_text"]
+    assert count.ok and count.rescued == 2 and count.source == count.in_blocks == 5 and count.doubled == 0
+
+
+def test_a_compose_or_textart_inside_ruby_text_is_its_own_source_and_is_rescued():
+    """본말 안 글자 겹침의 composeText·글맵시의 text 속성도 따로 센 출처다: 덧말 자리에는 안 들고 장부 ok인 채로
+    구역 끝 구조 문단으로 살아난다(전에는 장부가 둘 다 세지 않아 소리 없이 빠졌다)."""
+    parsed, (count,) = parse(B.section(B.para(B.run(_ruby_with(B.compose("겹침"))))))
+    assert texts(parsed) == [("paragraph", "본말(덧)"), ("paragraph", "겹침")]
+    assert reasons(parsed) == ["unassigned_text"] and count.ok and count.rescued == 2 and count.source == 5
+    parsed, (count,) = parse(B.section(B.para(B.run(_ruby_with(B.textart("글맵시"))))))
+    assert texts(parsed) == [("paragraph", "본말(덧)"), ("paragraph", "글맵시")]
+    assert reasons(parsed) == ["unassigned_text"] and count.ok and count.rescued == 3 and count.source == 6
+
+
+def test_a_hidden_comment_inside_ruby_text_stays_hidden_and_out_of_the_visible_ruby():
+    """본말 안 숨은 설명은 숨은 출처다: hidden_comment 처리 이력을 남기고 글자는 덧말 자리에 들지 않으며 블록에도 없다."""
+    hidden = ("<hp:hiddenComment><hp:subList>" + B.para(B.run(B.t("숨은 글"))) + "</hp:subList></hp:hiddenComment>")
+    parsed, (count,) = parse(B.section(B.para(B.run(_ruby_with(hidden)))))
+    assert texts(parsed) == [("paragraph", "본말(덧)")]
+    assert reasons(parsed) == ["hidden_comment"] and count.ok and count.hidden == 3 and count.rescued == 0
 
 
 def test_the_circled_table_is_exactly_the_unicode_circle_decompositions_of_the_five_ranges_and_zero():
