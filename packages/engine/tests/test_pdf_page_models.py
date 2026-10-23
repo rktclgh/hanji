@@ -240,7 +240,7 @@ def test_unreliable_first_page_takes_only_the_asset_budget_left_when_chunked(mon
     capped = assert_same(data, "b.pdf", ocr=False, layout=False)
     assert len(capped.assets) == 1 and "asset" in capped.blocks[-1]["figure"]
     assert [(r.region_id, r.fallback_reason) for r in capped.regions] == [
-        ("p1-unreliable-text-layer", "unreliable_text_layer_kept"), ("p1-figure-1", pdf_parser.NO_IMAGE_PHOTO)]
+        ("p1-unreliable-text-layer", "unreliable_text_layer_kept"), ("p1-figure-1", pdf_parser.NO_IMAGE)]
 
 
 def test_ocr_use_per_chunk_is_the_document_use_for_every_page(monkeypatch):

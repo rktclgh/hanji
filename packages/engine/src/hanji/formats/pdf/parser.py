@@ -36,12 +36,11 @@ from .triage import PageMode, classify, hidden_chars, page_mode, page_stats
 
 MIME = "application/pdf"
 RENDER_DPI = 144
-TABLE_IN_FIGURE = "ruled table inside a figure was dropped (figure wins)"
-LAYOUT_TABLE = "layout table box (kept for borderless-table detection, not a block)"
-NO_IMAGE_MODEL = ("layout-model figure image not stored "
-                  "(empty crop or document figure bytes over MAX_DOCUMENT_ASSET_BYTES)")
-NO_IMAGE_PHOTO = ("image-object figure image not stored "
-                  "(empty crop or document figure bytes over MAX_DOCUMENT_ASSET_BYTES)")
+TABLE_IN_FIGURE = "table_in_figure_dropped"  # 그림 안의 선 있는 표를 버렸다(그림이 이긴다)
+LAYOUT_TABLE = "layout_table_not_attempted"  # 선 없는 표를 시도하지 않은 쪽(scan·ocr 모드·회전 쪽)의 모델 표 상자(블록 아님)
+# 그림 이미지를 담지 못했다(잘라 낼 화소가 없거나 문서 그림 바이트가 MAX_DOCUMENT_ASSET_BYTES를 넘음). 모델이 찾은 그림인지는
+# 시도의 model_id가 말한다
+NO_IMAGE = "figure_image_not_stored"
 UNRELIABLE_KEPT = "unreliable_text_layer_kept"  # unreliable 쪽을 OCR 없이 깨진 글자층으로 블록을 만들었다
 UNRELIABLE_OCR = "unreliable_text_layer_ocr"  # unreliable 쪽을 깨진 글자층 대신 OCR로 읽었다(글자층 글자는 replaced)
 # OCR로 읽으려던 unreliable 쪽에서 받아들인 OCR 글자가 없어 깨진 글자층으로 돌아왔다(UNRELIABLE_KEPT 기록에 붙인다)
@@ -281,8 +280,8 @@ def _page(data: bytes, name: str, index: int, page: PageText, models: PageModels
         fields = _store(image, figure, page, budget)
         out.figures.append(FigureBlock(figure, source, fields))
         if fields is None:
-            reason = NO_IMAGE_MODEL if figure.model else NO_IMAGE_PHOTO  # 모델 이름은 모델이 찾은 그림에만
-            out.regions.append(_region(page, f"figure-{k}", _unit(figure.box, page), "figure", reason, figure.model))
+            # 모델 이름은 모델이 찾은 그림에만
+            out.regions.append(_region(page, f"figure-{k}", _unit(figure.box, page), "figure", NO_IMAGE, figure.model))
     rest = [line for i, line in enumerate(lines) if i not in plan.used_lines]
     out.paras = scan.paragraphs(scan.reading_order(rest), page)
     out.regions += [_region(page, f"table-in-figure-{k}", t.bbox, "table", TABLE_IN_FIGURE, layout_here)

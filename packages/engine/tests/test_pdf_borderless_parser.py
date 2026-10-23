@@ -221,7 +221,7 @@ def test_turned_and_scan_mode_pages_keep_the_layout_table_note(monkeypatch, draw
     parsed = PdfParser(ocr=False).parse(pdf(draw, rotation=rotation), "t.pdf")
     assert parsed.pages[0].text_layer == state
     assert [(r.region_id, r.fallback_reason) for r in parsed.regions] == [
-        ("p1-layout-table-1", pdf_parser.LAYOUT_TABLE)]
+        ("p1-layout-table-1", "layout_table_not_attempted")]
     assert "table" not in [b["kind"] for b in parsed.blocks]
 
 
