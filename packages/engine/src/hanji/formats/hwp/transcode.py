@@ -3,8 +3,9 @@
 HWPX 구역 처리부(hwpx/owpml.py)가 읽는 요소·속성만 만든다: 최상위 PARA_HEADER마다 hs:sec 아래 hp:p(paraPrIDRef·
 styleIDRef), PARA_CHAR_SHAPE 경계마다 hp:run(charPrIDRef, 글자 뒤 경계는 빈 런 하나), 글자는 hp:t(탭·줄바꿈·묶음
 빈칸·고정폭 빈칸·제목 차례 표시는 hp:t의 자식, 뒤 글자는 그 tail), PARA_LINE_SEG 항목마다 hp:lineseg. 확장 컨트롤은 문단의
-k번째 자식 CTRL_HEADER와 짝짓는다. 컨트롤: 글자 없는 자리 컨트롤(필드·단 정의·쪽 번호 등)은 빈 hp:ctrl, 덧말·글자 겹침은
-글자 수만(control_text_skipped), 표는 hp:tbl(TABLE 레코드의 행·열 수, 그 앞 리스트는 캡션, 뒤 리스트는 칸: LIST_HEADER
+k번째 자식 CTRL_HEADER와 짝짓는다. 컨트롤: 글자 없는 자리 컨트롤(필드·단 정의·쪽 번호 등)은 빈 hp:ctrl, 덧말은
+hp:dutmal/hp:mainText·hp:subText, 글자 겹침은 hp:compose@composeText(HWPX처럼 런 바로 아래), 표는 hp:tbl(TABLE 레코드의
+행·열 수, 그 앞 리스트는 캡션, 뒤 리스트는 칸: LIST_HEADER
 오프셋 8부터 열·행 주소·열·행 병합, 32 테두리 채움, 6의 bit 2 제목 칸), 그리기 개체(gso)는 첫 SHAPE_COMPONENT의 종류
 ID로 hp:pic(그림 레코드 오프셋 71의 BinData 순번, orgSz는 처음 폭·높이, curSz는 현재 폭·높이로 처음 것과 같은 쪽은 0 —
 HWPX와 같다)·도형(첫 리스트는 hp:drawText)·hp:container(자식 SHAPE_COMPONENT마다, ID는 한 번만 적힌다)·hp:ole·hp:chart·
@@ -19,9 +20,9 @@ hp:video·hp:textart@text, 그 앞 리스트는 캡션, 수식은 hp:equation/hp
 (근거 textart)와 함께 건너뛴다.
 
 옮겨 쓰기 장부: 글자 레코드(PARA_TEXT 전부, 덧말·글자 겹침 CTRL_HEADER, EQEDIT, 글맵시)마다 원본에서 따로 디코드한
-정규 문자열 R(r)과 트리에서 r로 표시된 요소(hp:t, hp:script의 글자, hp:textart@text)의 글자를 문서 순서로 이은 T(r)이
-정확히 같거나, r을 기록과 함께 건너뛰었어야 한다. 처리부가 읽지 않는 자리(hp:t 자신의 tail, hp:script 밖 요소의
-text·tail)의 글자는 떠돌이(stray)로 센다. 표시는 요소 속성이 아니라 옆
+정규 문자열 R(r)과 트리에서 r로 표시된 요소(hp:t, hp:script·hp:mainText·hp:subText의 글자, hp:textart@text,
+hp:compose@composeText)의 글자를 문서 순서로 이은 T(r)이 정확히 같거나, r을 기록과 함께 건너뛰었어야 한다. 처리부가 읽지
+않는 자리(hp:t 자신의 tail, 글자 요소 밖 요소의 text·tail)의 글자는 떠돌이(stray)로 센다. 표시는 요소 속성이 아니라 옆
 사전(id(요소) → 레코드 순번)이다(처리부가 보는 트리를 바꾸지 않는다). 요소 수는 문서 전체 MAX_NODES, 트리 깊이는
 MAX_XML_DEPTH 안이다(넘으면 ParseError). 보통 글자(≥ 0x20)는 글자마다 객체를 만들지 않고 구간째 디코드한다."""
 
@@ -64,11 +65,11 @@ SHAPES = {"$rec": "rect", "$ell": "ellipse", "$arc": "arc", "$pol": "polygon", "
           "$col": "connectLine"}  # SHAPE_COMPONENT 종류 ID → 그리기 요소(글상자 리스트가 있을 수 있다)
 # 글자 없는 자리 컨트롤(빈 hp:ctrl). 필드(%로 시작)도 같다. 리스트·문단이 달리면 모르는 컨트롤 경로다
 PLACES = frozenset(("secd", "cold", "atno", "nwno", "pghd", "pgct", "pgnp", "idxm", "bokm", "form", "tcps", "tdut"))
-TEXT_CONTROLS = frozenset(("tcps", "tdut"))  # 글자가 CTRL_HEADER 몸에 있다(HWPX도 쓰지 않는다): 수만 남긴다
+TEXT_CONTROLS = frozenset(("tcps", "tdut"))  # 글자가 CTRL_HEADER 몸에 있다: hp:compose·hp:dutmal로 옮긴다
+MAIN_TEXT, SUB_TEXT, COMPOSE = f"{HP}mainText", f"{HP}subText", f"{HP}compose"
 INVALID_UTF16 = "invalid_utf16"
 UNKNOWN_CONTROL_CHAR = "unknown_control_char"
 UNKNOWN_CONTROL = "unknown_control"
-CONTROL_TEXT = "control_text_skipped"
 RECORD_INCONSISTENT = "record_inconsistent"
 UNKNOWN_RECORD = "unknown_record"
 # 보통 글자(≥ 0x20) WCHAR의 이어진 구간(LE 바이트 두 개씩, 소유 반복이라 되짚기 기억이 없다)
@@ -76,6 +77,7 @@ SPAN = re.compile(rb"(?:[\x20-\xff][\x00-\xff]|[\x00-\x1f][\x01-\xff])*+")
 LONE = re.compile(r"[\ud800-\udfff]")  # surrogatepass 디코드 뒤 남은 짝 없는 대리 문자
 NATIVE16 = "utf-16-le" if sys.byteorder == "little" else "utf-16-be"
 IMPLAUSIBLE = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\ufffd]")  # 글맵시 글자로 읽은 것이 틀렸다는 표지(U+FFFD·제어 문자, 탭·줄바꿈은 뺀다)
+CONTROL_CHARS = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f]")  # 덧말·글자 겹침 글자에서 지울 제어 문자(탭·줄바꿈 \t \n \r는 둔다)
 
 
 def wchars(body: bytes) -> array:
@@ -125,8 +127,12 @@ def record_text(record: Record, location: str) -> str | None:
     return None if IMPLAUSIBLE.search(text) else text
 
 
-def control_text(body: bytes, ident: str, location: str) -> str:
-    """덧말(tdut: 본문 + 덧말 글자)·글자 겹침(tcps: 겹칠 글자)의 글자. 길이(WORD) 뒤 WCHAR들(사양 표 150·151)."""
+def control_text(body: bytes, ident: str, location: str) -> list[str]:
+    """덧말(tdut: 본말, 덧말 글자)·글자 겹침(tcps: 겹칠 글자)의 글자들. 길이(WORD) 뒤 WCHAR들(사양 표 150·151, 대량 코퍼스
+    실문서 101개 모두 몸에 맞는다). 글자 겹침은 저장된 그대로다: HWP는 겹친 결과(원 모양이면 ①)를 담고 HWPX 처리부가
+    바탕 글자를 같은 원문자로 바꿔 짝 21개가 같다. 제어 문자(탭·줄바꿈 말고 < 0x20)는 지운다(PARA_TEXT와 같다. 옮겨 쓰기와
+    R이 이 함수 하나를 쓰므로 둘은 늘 같다). 몸이 짧으면 ParseError(손상:
+    다른 레코드의 모자란 필드와 같다)."""
     out = []
     at = 4
     for _ in range(2 if ident == "tdut" else 1):
@@ -135,9 +141,9 @@ def control_text(body: bytes, ident: str, location: str) -> str:
         (n,) = struct.unpack_from("<H", body, at)
         if len(body) < at + 2 + 2 * n:
             raise ParseError(f"CTRL_HEADER {ident} record too short", location)
-        out.append(utf16(wchars(body[at + 2:at + 2 + 2 * n]))[0])
+        out.append(CONTROL_CHARS.sub("", utf16(wchars(body[at + 2:at + 2 + 2 * n]))[0]))
         at += 2 + 2 * n
-    return "".join(out)
+    return out
 
 
 @dataclass(slots=True)
@@ -176,7 +182,7 @@ class _Writer:
         self.base = base
         self.location = location
         self.nodes = nodes
-        self.marks: dict[int, int] = {}  # id(요소) → 글자 레코드 순번(hp:t, hp:script, hp:textart. 트리가 붙잡고 있다)
+        self.marks: dict[int, int] = {}  # id(요소) → 글자 레코드 순번(hp:t 등 글자 요소. 트리가 붙잡고 있다)
         self.skipped: set[int] = set()  # 기록과 함께 건너뛴 글자 레코드
         self.regions: list[Region] = []
         self.unknown: set[int] = set()  # unknown_control을 남긴 문단(id)
@@ -365,7 +371,7 @@ class _Writer:
         return pos
 
     def control(self, run: ET.Element, record: Record, p: ET.Element, anchor: int, depth: int) -> None:
-        """CTRL_HEADER 하나(depth는 런 아래 요소의 깊이). 자리 컨트롤은 빈 hp:ctrl, 덧말·글자 겹침은 글자 수만, 아는
+        """CTRL_HEADER 하나(depth는 런 아래 요소의 깊이). 자리 컨트롤은 빈 hp:ctrl, 덧말·글자 겹침은 그 글자 요소, 아는
         개체는 그 요소, 몸 레코드가 없거나 모르는 ID는 hp:unknownObject 아래로 그 아래 문단들(레코드 차례)을 옮긴다.
         아는 개체에서 어느 리스트에도 들지 않은 문단은 그 뒤 hp:unknownObject로 옮긴다."""
         ident = control_id(record.body)
@@ -373,12 +379,10 @@ class _Writer:
         lists = any(r.tag == LIST_HEADER for r in self.descendants(record))
         simple = ident in PLACES or ident.startswith("%")
         if simple and not paras and not lists:
-            self.node(run, CTRL, depth)
             if ident in TEXT_CONTROLS:
-                chars = ink(control_text(record.body, ident, f"{self.location}#{record.index}"))
-                self.skipped.add(record.index)
-                if chars:
-                    self.region("control-text", CONTROL_TEXT, anchor, "chars", chars)
+                self.text_control(run, record, ident, depth)
+            else:
+                self.node(run, CTRL, depth)
             return
         builders = {"tbl ": self.table, "gso ": self.gso, "eqed": self.equation, "secd": self.masterpages,
                     **dict.fromkeys(LISTED, self.listed)}
@@ -403,6 +407,19 @@ class _Writer:
         rest = [header for header in paras if header.index not in self.used]
         if rest:
             self.unknown_object(run, rest, p, anchor, depth)
+
+    def text_control(self, run: ET.Element, record: Record, ident: str, depth: int) -> None:
+        """덧말 → hp:dutmal/hp:mainText·hp:subText(글자), 글자 겹침 → hp:compose@composeText. 글자 요소를 그 레코드로
+        표시한다(T(r) = 본말 + 덧말, R(r)과 같은 차례)."""
+        texts = control_text(record.body, ident, f"{self.location}#{record.index}")
+        if ident == "tcps":
+            self.marks[id(self.node(run, COMPOSE, depth, composeText=texts[0]))] = record.index
+            return
+        dutmal = self.node(run, f"{HP}dutmal", depth)
+        for tag, text in zip((MAIN_TEXT, SUB_TEXT), texts):
+            part = self.node(dutmal, tag, depth + 1)
+            part.text = text
+            self.marks[id(part)] = record.index
 
     def listed(self, run: ET.Element, record: Record, anchor: int, depth: int) -> bool:
         """머리말·꼬리말·각주·미주·숨은 설명: hp:ctrl/요소/hp:subList(첫 리스트). 리스트가 없으면 거짓."""
@@ -627,7 +644,7 @@ def canonical(record: Record, location: str) -> str | None:
     WCHAR 하나 → U+FFFD 하나). location은 스트림 위치(덧말·글자 겹침 몸이 짧으면 ParseError에 #순번을 붙인다). 읽지
     못한 글맵시는 None(건너뛴 기록이 없으면 장부가 고아로 센다)."""
     if record.tag == CTRL_HEADER:
-        return control_text(record.body, control_id(record.body), f"{location}#{record.index}")
+        return "".join(control_text(record.body, control_id(record.body), f"{location}#{record.index}"))
     if record.tag in (EQEDIT, TEXTART):
         return record_text(record, location)
     raw = record.body
@@ -652,20 +669,22 @@ def canonical(record: Record, location: str) -> str | None:
     return "".join(out)
 
 
+ATTR_TEXT = {TEXTART_TAG: "text", COMPOSE: "composeText"}  # 글자를 속성에 담는 글자 요소
 MARKS = {f"{HP}tab": "\t", f"{HP}lineBreak": "\n", f"{HP}nbSpace": "\x1e", f"{HP}fwSpace": "\x1f",
          f"{HP}titleMark": ""}
 
 
 def tree_texts(root: ET.Element, marks: dict[int, int]) -> dict[int, str]:
     """T(r): r로 표시된 요소들을 문서 순서로 훑어 처리부가 읽는 자리만 이은 것. hp:t는 text, 자식마다 표지 글자 또는 그
-    안 글자, 자식 tail. hp:script는 text, hp:textart는 text 속성."""
+    안 글자, 자식 tail. hp:script·hp:mainText·hp:subText는 text, hp:textart는 text 속성, hp:compose는 composeText 속성."""
     out: dict[int, list[str]] = {}
     for element in root.iter():
         k = marks.get(id(element))
         if k is None:
             continue
         if element.tag != T:
-            out.setdefault(k, []).append(element.get("text", "") if element.tag == TEXTART_TAG else element.text or "")
+            name = ATTR_TEXT.get(element.tag)
+            out.setdefault(k, []).append(element.get(name, "") if name else element.text or "")
             continue
         parts = [element.text or ""]
         for child in element:
@@ -676,8 +695,8 @@ def tree_texts(root: ET.Element, marks: dict[int, int]) -> dict[int, str]:
 
 
 def stray(root: ET.Element) -> int:
-    """처리부가 읽지 않는 자리(hp:t 자신의 tail, hp:t 자식의 text, hp:script의 tail, 그 밖 요소의 text·tail)의 공백
-    아닌 글자 수."""
+    """처리부가 읽지 않는 자리(hp:t 자신의 tail, hp:t 자식의 text, hp:script·hp:mainText·hp:subText의 tail, 그 밖
+    요소의 text·tail)의 공백 아닌 글자 수."""
     count = 0
     stack: list[tuple[ET.Element, bool]] = [(root, False)]
     while stack:
@@ -686,7 +705,7 @@ def stray(root: ET.Element) -> int:
             count += ink(element.tail or "")
         elif in_t:
             count += ink(element.text or "")
-        elif element.tag == SCRIPT:
+        elif element.tag in (SCRIPT, MAIN_TEXT, SUB_TEXT):
             count += ink(element.tail or "")
         else:
             count += ink(element.text or "") + ink(element.tail or "")
