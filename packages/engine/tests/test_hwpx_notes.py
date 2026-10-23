@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from hanji.errors import ParseError
+from hanji.formats.hwpx import owpml
 from hanji.formats.hwpx.parser import HwpxParser
 from hanji_contracts import DocumentTree
 
@@ -133,6 +134,31 @@ def test_captions_on_equations_shapes_groups_and_objects_sit_like_table_captions
     assert count.ok and count.rescued == 0
     assert [r.fallback_reason for r in parsed.regions] == [
         "equation_script", "shape_text", "shape_text", "embedded_object", "shape_text", "equation_script", "shape_text"]
+
+
+def test_equation_scripts_are_ledger_sources_counted_apart_from_printed_text(monkeypatch):
+    """수식 스크립트는 장부 출처지만 인쇄 글자와 따로 센다: 본문 숫자는 스크립트를 빼고 그대로다. 빠진 스크립트는 살리고
+    (unassigned_text), 두 번 든 스크립트는 s{구역}-script-coverage의 coverage_mismatch다(본문 숫자는 맞다)."""
+    s = B.section(B.para(B.run(B.t("식 앞"), B.equation("a over b"))),
+                  B.para(B.run(B.tbl(1, 2, [B.tc(0, 0, B.para(B.run(B.equation("x^2")))), B.tc(0, 1, p("칸"))]))))
+    parsed, (count,) = HwpxParser()._parse(B.package(s), "a.hwpx")
+    assert [(b["kind"], b["text"]) for b in parsed.blocks] == [
+        ("paragraph", "식 앞"), ("paragraph", "a over b"), ("table", "x^2\t칸")]
+    assert count.ok and (count.source, count.in_blocks) == (3, 3)
+    assert [r.fallback_reason for r in parsed.regions] == ["equation_script", "equation_script"]
+    real = owpml._Section.script
+    monkeypatch.setattr(owpml._Section, "script", lambda self, equation: real(self, equation) * 2)
+    parsed, (count,) = HwpxParser()._parse(B.package(s), "a.hwpx")
+    assert parsed.blocks[1]["text"] == "a over ba over b" and count.ok
+    (region,) = [r for r in parsed.regions if r.fallback_reason == "coverage_mismatch"]
+    assert region.region_id == "s0-script-coverage"
+    assert {c.name: (c.value, c.passed) for c in region.gate.checks} == {
+        "in_blocks": (18, False), "doubled": (2, False), "partial": (2, False), "hidden": (0, True)}
+    monkeypatch.setattr(owpml._Section, "script", lambda self, equation: [])
+    parsed, (count,) = HwpxParser()._parse(B.package(s), "a.hwpx")
+    assert [(b["kind"], b["text"], b["confidence"]) for b in parsed.blocks] == [
+        ("paragraph", "식 앞", 1.0), ("table", "\t칸", 1.0), ("paragraph", "a over b", 0.3), ("paragraph", "x^2", 0.3)]
+    assert count.ok and count.rescued == 9 and [r.fallback_reason for r in parsed.regions] == ["unassigned_text"]
 
 
 def test_a_footnote_inside_an_endnote_is_a_note_paragraph_not_rescued_text():

@@ -1,7 +1,7 @@
 """글자 장부(스펙 §10). 출처는 구역 XML의 모든 hp:t, hp:textart@text, 덧말 hp:mainText·hp:subText,
-hp:compose@composeText(원 모양이면 원문자)다. 블록 글자는 묶음 (출처, 글자)들을 이어 만들고, 장부는 같은 묶음 목록에서 출처마다 넣은 횟수와
-넣은 공백 아닌 글자 수를 더한다. 묶음 하나는 출처 하나를 한 번 낸 것이다(<t>A<tab/>B</t>는 묶음 하나). 출처 없는
-묶음(None)은 끼운 구분자다."""
+hp:compose@composeText(원 모양이면 원문자), 수식 hp:script(처리부가 인쇄 글자와 따로 센다)다. 블록 글자는 묶음 (출처,
+글자)들을 이어 만들고, 장부는 같은 묶음 목록에서 출처마다 넣은 횟수와 넣은 공백 아닌 글자 수를 더한다. 묶음 하나는 출처
+하나를 한 번 낸 것이다(<t>A<tab/>B</t>는 묶음 하나). 출처 없는 묶음(None)은 끼운 구분자다."""
 
 import xml.etree.ElementTree as ET
 
@@ -65,5 +65,11 @@ def compose_chars(element: ET.Element) -> int:
     return ink(circled(element.get("composeText", ""), element.get("circleType")))
 
 
+def script_chars(element: ET.Element) -> int:
+    """수식 스크립트 출처의 n(x): hp:script의 text(인쇄 글자와 따로 센다)."""
+    return ink(element.text or "")
+
+
 # hp:t 밖 출처의 n(x). 처리부의 블록 글자(_source_text)와 따로 센다
-SOURCE_CHARS = {TEXTART: textart_chars, MAIN_TEXT: ruby_chars, SUB_TEXT: ruby_chars, COMPOSE: compose_chars}
+SOURCE_CHARS = {TEXTART: textart_chars, MAIN_TEXT: ruby_chars, SUB_TEXT: ruby_chars, COMPOSE: compose_chars,
+                f"{HP}script": script_chars}

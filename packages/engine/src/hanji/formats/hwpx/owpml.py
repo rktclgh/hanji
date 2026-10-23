@@ -6,8 +6,9 @@
 번호·글머리 → 목록 항목, 그 밖 문단)을 낸다. 위치는 FlowLocator(제목 경로, 최상위 문단 순번). 글자 장부(ledger.py)가
 모든 hp:t·글맵시·덧말(본말·덧말)·글자 겹침 글자를 세고, 한 번도 넣지 않은 글자는 구역 끝 구조 문단(신뢰도 0.3)으로
 살린다(처리 이력 unassigned_text). 덧말은 그 자리에 본말(덧말), 글자 겹침은 겹친 글자(원 모양이면 유니코드 원문자)로
-문단 글자에 든다. 장부가 맞지 않으면 처리 이력 coverage_mismatch(파싱은 실패하지 않는다). 개요 수준을 쓰지 않는 문서는
-PDF와 같은 글꼴 크기 규칙으로 제목을 고른다(_finish).
+문단 글자에 든다. 수식 스크립트(hp:script)도 출처지만 인쇄 글자가 아니라 따로 센다(같은 장부의 다른 숫자). 장부가 맞지
+않으면 처리 이력 coverage_mismatch(파싱은 실패하지 않는다, 스크립트 숫자는 s{구역}-script-coverage). 개요 수준을 쓰지 않는
+문서는 PDF와 같은 글꼴 크기 규칙으로 제목을 고른다(_finish).
 
 문단에 박힌 개체는 문단 글자 블록 뒤에 나타난 순서대로 블록이 된다(HWPX 스펙 §5.2): 표(1×1은 상자라 풀고, 칸 안 개체는
 칸 글자로, 칸 안 그림은 표 뒤 그림 블록), 그림과 캡션(PNG 자산), 머리말·꼬리말, 글상자·도형 글자, 수식 스크립트,
@@ -103,7 +104,10 @@ def _t_text(t: ET.Element) -> tuple[str, bool]:
 
 def _source_text(element: ET.Element) -> str:
     """장부 출처 하나의 블록 글자(블록·살리기가 함께 쓴다): hp:t는 _t_text, 글맵시는 속성, 글자 겹침은 원 모양이면
-    원문자(circled), 덧말 본말·덧말은 안 글자. 장부 n은 ledger.SOURCE_CHARS가 따로 센다."""
+    원문자(circled), 수식 스크립트는 text(처리부가 늘 읽던 자리), 덧말 본말·덧말은 안 글자. 장부 n은 ledger.SOURCE_CHARS가
+    따로 센다."""
+    if element.tag == SCRIPT:
+        return element.text or ""
     if element.tag == T:
         return _t_text(element)[0]
     if element.tag == TEXTART:
@@ -155,10 +159,12 @@ class _Section:
         self.unknown: set[int] = set()  # 모르는 인라인 요소 기록을 남긴 문단(id)
         self.notes: list[tuple[ET.Element, int]] = []  # (각주·미주, 닻)
         self.inner = False  # 머리말·꼬리말·각주·미주·글상자 안(1×1 상자 문단도 제목 판정 없이 plain)
+        self.scripts: set[int] = set()  # 수식 스크립트 출처(인쇄 글자와 따로 센다)
         self._sources()
 
     def _sources(self) -> None:
-        """장부 출처를 문서 순서로 센다(스택 순회, 재귀 없음). 숨은 설명마다 처리 이력을 남긴다."""
+        """장부 출처를 문서 순서로 센다(스택 순회, 재귀 없음). 숨은 설명마다 처리 이력을 남긴다. 수식 스크립트는 그 출처
+        순번을 scripts에 둔다."""
         anchor = self.base - 1
         for top in self.root:
             if top.tag == P:
@@ -171,6 +177,8 @@ class _Section:
                 if element.tag == T:
                     self.ledger.add(element, source_chars(element), max(anchor, self.base), para, hidden)
                     continue
+                if element.tag == SCRIPT:
+                    self.scripts.add(len(self.ledger.sources))
                 count = SOURCE_CHARS.get(element.tag)
                 if count is not None:
                     self.ledger.add(element, count(element), max(anchor, self.base), para, hidden)
@@ -274,7 +282,7 @@ class _Section:
         elif tag in SHAPES:
             self.shape(element, anchor)
         elif tag == EQUATION:
-            if self.emit("paragraph", [(None, element.findtext(SCRIPT) or "")], anchor):
+            if self.emit("paragraph", self.script(element), anchor):
                 self.region("equation", "paragraph", EQUATION_SCRIPT, anchor)
         elif tag == TEXTART:
             if self.emit("paragraph", [(self.ledger.source_of(element), element.get("text", ""))], anchor):
@@ -292,6 +300,11 @@ class _Section:
                     self.obj(child, anchor)
         if caption is not None and not before:
             self.caption(caption, anchor)
+
+    def script(self, equation: ET.Element) -> list[Bundle]:
+        """수식의 스크립트 묶음(첫 hp:script, 장부 출처). 없으면 빈 목록."""
+        script = equation.find(SCRIPT)
+        return [] if script is None else [(self.ledger.source_of(script), _source_text(script))]
 
     def has_text(self, element: ET.Element) -> bool:
         """그 아래 인쇄 글자 출처(hp:t·덧말·글자 겹침) 가운데 n > 0인 것이 있나(shape_text 기록)."""
@@ -502,10 +515,10 @@ class _Section:
                     self.region("shape", "paragraph", SHAPE_TEXT, anchor)
                 inner = self.cell(sub, anchor, after)
         elif tag == EQUATION:
-            script = element.findtext(SCRIPT) or ""
-            if script.strip():
+            script = self.script(element)
+            if _join(script).strip():
                 self.region("equation", "paragraph", EQUATION_SCRIPT, anchor)
-                inner = [(None, script)]
+                inner = script
         elif tag == TEXTART:
             if element.get("text", "").strip():
                 self.region("shape", "paragraph", SHAPE_TEXT, anchor)
@@ -572,11 +585,15 @@ class _Section:
         self.late = True
         self.end_notes()
         self.rescue()
-        counts = self.ledger.count()
+        counts = self.ledger.count([k for k in range(len(self.ledger.sources)) if k not in self.scripts])
         self.doc.counts.append(counts)
         if not counts.ok:
             self.doc.regions.append(Region("coverage", "paragraph", COVERAGE_MISMATCH, self.index, self.base,
                                            ledger_gate(counts), f"s{self.index}-coverage"))
+        scripts = self.ledger.count(self.scripts)  # 수식 스크립트: 빠지면 살리고 두 번 들면 이 숫자가 맞지 않는다
+        if not scripts.ok:
+            self.doc.regions.append(Region("script-coverage", "paragraph", COVERAGE_MISMATCH, self.index, self.base,
+                                           ledger_gate(scripts), f"s{self.index}-script-coverage"))
 
     def rescue(self) -> None:
         """한 번도 넣지 않은 출처를 닻 문단별로 모아 구조 문단으로(문서 순서). 같은 문단 출처는 잇고 문단은 \\n."""
