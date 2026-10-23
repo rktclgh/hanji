@@ -216,6 +216,19 @@ def test_overlap_and_ruby_controls_become_their_hwpx_elements_in_place_and_join_
     assert info.value.location == "a.hwp:BodyText/Section0#4"
 
 
+def test_control_characters_in_overlap_and_ruby_bodies_are_dropped_and_the_ledger_agrees():
+    """덧말·글자 겹침 몸의 제어 문자(< 0x20, 탭·줄바꿈 \\t \\n \\r 말고)는 PARA_TEXT처럼 문단 글자에 들이지 않는다.
+    옮겨 쓰기 T와 장부 R이 같은 함수를 쓰므로 어긋남 없이 장부가 맞는다."""
+    data = B.paragraph(B.extended(23, "tcps"), B.extended(23, "tdut"),
+                       controls=[B.control("tcps", 1, body=B.overlap("겹\x00\x01침")),
+                                 B.control("tdut", 1, body=B.ruby("본\x07말\t", "\x1f덧\n"))])
+    result = section(data)
+    run = result.root[0].find(f"{HP}run")
+    assert run.find(f"{HP}compose").get("composeText") == "겹침"
+    assert [part.text for part in run.find(f"{HP}dutmal")] == ["본말\t", "덧\n"]
+    assert result.audit.ok
+
+
 def test_text_controls_outside_paragraphs_are_audited_with_their_record_location():
     # 문단을 거치지 않는 덧말·글자 겹침(레벨 0, 다른 컨트롤 바로 아래)은 옮겨 쓰지 않고 장부만 읽는다
     with pytest.raises(ParseError, match="CTRL_HEADER tdut record too short") as info:

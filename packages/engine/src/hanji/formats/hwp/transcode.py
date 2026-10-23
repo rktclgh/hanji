@@ -77,6 +77,7 @@ SPAN = re.compile(rb"(?:[\x20-\xff][\x00-\xff]|[\x00-\x1f][\x01-\xff])*+")
 LONE = re.compile(r"[\ud800-\udfff]")  # surrogatepass 디코드 뒤 남은 짝 없는 대리 문자
 NATIVE16 = "utf-16-le" if sys.byteorder == "little" else "utf-16-be"
 IMPLAUSIBLE = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\ufffd]")  # 글맵시 글자로 읽은 것이 틀렸다는 표지(U+FFFD·제어 문자, 탭·줄바꿈은 뺀다)
+CONTROL_CHARS = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f]")  # 덧말·글자 겹침 글자에서 지울 제어 문자(탭·줄바꿈 \t \n \r는 둔다)
 
 
 def wchars(body: bytes) -> array:
@@ -129,7 +130,8 @@ def record_text(record: Record, location: str) -> str | None:
 def control_text(body: bytes, ident: str, location: str) -> list[str]:
     """덧말(tdut: 본말, 덧말 글자)·글자 겹침(tcps: 겹칠 글자)의 글자들. 길이(WORD) 뒤 WCHAR들(사양 표 150·151, 대량 코퍼스
     실문서 101개 모두 몸에 맞는다). 글자 겹침은 저장된 그대로다: HWP는 겹친 결과(원 모양이면 ①)를 담고 HWPX 처리부가
-    바탕 글자를 같은 원문자로 바꿔 짝 21개가 같다. 제어 문자는 EQEDIT처럼 거르지 않는다. 몸이 짧으면 ParseError(손상:
+    바탕 글자를 같은 원문자로 바꿔 짝 21개가 같다. 제어 문자(탭·줄바꿈 말고 < 0x20)는 지운다(PARA_TEXT와 같다. 옮겨 쓰기와
+    R이 이 함수 하나를 쓰므로 둘은 늘 같다). 몸이 짧으면 ParseError(손상:
     다른 레코드의 모자란 필드와 같다)."""
     out = []
     at = 4
@@ -139,7 +141,7 @@ def control_text(body: bytes, ident: str, location: str) -> list[str]:
         (n,) = struct.unpack_from("<H", body, at)
         if len(body) < at + 2 + 2 * n:
             raise ParseError(f"CTRL_HEADER {ident} record too short", location)
-        out.append(utf16(wchars(body[at + 2:at + 2 + 2 * n]))[0])
+        out.append(CONTROL_CHARS.sub("", utf16(wchars(body[at + 2:at + 2 + 2 * n]))[0]))
         at += 2 + 2 * n
     return out
 
