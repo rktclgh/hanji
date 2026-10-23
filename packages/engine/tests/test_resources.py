@@ -2,6 +2,7 @@
 비용·입장 산수. onnxruntime이 필요한 테스트는 실제 모델 세션을 연다."""
 
 import os
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -396,6 +397,13 @@ def test_hwp_has_its_own_measured_byte_factor():
     kinds = [resources.byte_kind(p) for p in ("a.hwp", "b.HWP", "c.hwt", "d.hwpx")]
     assert kinds == ["hwp", "hwp", "other", "hwpx"]
     assert resources.estimate(cost, 0, 1000, "hwp") == resources.BYTES_FACTOR["hwp"] * 1000
+
+
+def test_the_engine_readme_states_the_measured_byte_factors():
+    """README의 형식별 메모리 문장이 resources.BYTES_FACTOR와 같은 값을 적는다(배수를 다시 잴 때 함께 고친다)."""
+    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
+    for kind in ("hwpx", "hwp", "docx", "pptx"):
+        assert f"{kind.upper()} 한 건의 추가 메모리를 파일 크기 × {resources.BYTES_FACTOR[kind]}(" in readme
 
 
 def test_pptx_has_its_own_measured_byte_factor():

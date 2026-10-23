@@ -167,6 +167,25 @@ def test_dpi_uses_the_original_width_when_the_current_width_is_zero():
     assert parsed.blocks[0]["figure"]["dpi"] == 12  # 6화소 ÷ 0.5인치
 
 
+def test_rgb_conversion_skips_copies_and_gives_the_same_pixels_as_before():
+    """RGB는 그대로 돌려주고(사본 없음), 알파 그림은 예전 방식(RGBA 사본 + 알파 채널 마스크)과 같은 화소로 합친다."""
+    rgb = Image.new("RGB", (3, 2), (10, 20, 30))
+    assert images._rgb(rgb) is rgb
+    rgba = Image.new("RGBA", (3, 1))
+    rgba.putdata([(200, 100, 0, 0), (200, 100, 0, 128), (1, 2, 3, 255)])
+    pal = Image.new("P", (2, 1))
+    pal.putpalette([0, 0, 0, 90, 60, 30])
+    pal.putdata([0, 1])
+    pal.info["transparency"] = 0
+    for image in (rgba, rgba.convert("LA"), rgba.convert("PA"), pal):
+        old = image.convert("RGBA")
+        back = Image.new("RGB", old.size, (255, 255, 255))
+        back.paste(old, mask=old.getchannel("A"))
+        assert images._rgb(image).tobytes() == back.tobytes()
+    assert images._rgb(rgba).tobytes() == bytes([255, 255, 255, 227, 177, 127, 1, 2, 3])
+    assert images._rgb(Image.new("CMYK", (1, 1), (0, 0, 0, 0))).mode == "RGB"
+
+
 def test_embedded_objects_are_figures_without_images_and_containers_keep_order():
     data = B.package(B.section(B.para(B.run(B.container(B.ole(), B.pic("image1"))))),
                      items=[("image1", "BinData/image1.png", "image/png", True)],
