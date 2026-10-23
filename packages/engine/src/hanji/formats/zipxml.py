@@ -110,28 +110,39 @@ def _start(data: bytes, offset: int, name: str) -> int | None:
     return offset + 30 + n + m if found == name else None
 
 
-def _relocate(data: bytes, infos: list[zipfile.ZipInfo]) -> dict[str, zipfile.ZipInfo | None]:
+def _relocate(data: bytes, infos: list[zipfile.ZipInfo], name: str) -> dict[str, zipfile.ZipInfo | None]:
     """zipfile이 옮긴 위치에 로컬 머리가 없고 적힌 위치(옮기기 전)에 같은 이름의 머리가 있는 멤버 → 그 위치를 가리키는 새
-    ZipInfo(공개 속성만 옮긴다: zipfile 내부 값을 고치지 않는다). 데이터가 다음 멤버 머리나 중앙 디렉터리를 넘으면 None
-    (겹친 멤버라 읽지 않는다, zipfile의 겹침 검사와 같은 뜻)."""
+    ZipInfo(공개 속성만 옮긴다: zipfile 내부 값을 고치지 않는다). 그런 멤버가 있으면 머리가 있는 모든 멤버의 구간(머리 +
+    compress_size)을 시작 순으로 놓고 다음 머리·중앙 디렉터리를 넘는지 본다(zipfile의 겹침 검사는 옮긴 위치 기준이라
+    믿지 않는다). 다시 찾은 멤버가 넘으면 None(손상 멤버라 읽지 않는다), 옮기지 않은 멤버가 넘으면 같은 바이트를 두
+    멤버로 읽을 수 있어 ParseError."""
     found = _directory(data)
     if found is None or found[0] == 0:
         return {}
     shift, directory = found
-    offsets = {info.filename: info.header_offset for info in infos}
+    again: dict[str, int] = {}
     for info in infos:
         if _start(data, info.header_offset, info.filename) is None and \
                 _start(data, info.header_offset - shift, info.filename) is not None:
-            offsets[info.filename] = info.header_offset - shift
-    starts = sorted({*offsets.values(), directory})
-    moved: dict[str, zipfile.ZipInfo | None] = {}
+            again[info.filename] = info.header_offset - shift
+    if not again:  # 앞에 바이트가 붙은 zip: zipfile 그대로 읽는다
+        return {}
+    spans: list[tuple[int, int, zipfile.ZipInfo]] = []  # (머리 위치, 데이터 시작, 멤버)
     for info in infos:
-        offset = offsets[info.filename]
-        if offset == info.header_offset:
-            continue
+        offset = again.get(info.filename, info.header_offset)
         begin = _start(data, offset, info.filename)
-        bound = next((s for s in starts if s > offset), directory)
-        if begin is None or begin + info.compress_size > bound:
+        if begin is not None:  # 머리가 없는 멤버는 zipfile이 열지 못한다
+            spans.append((offset, begin, info))
+    spans.sort(key=lambda span: span[0])
+    bounds = [span[0] for span in spans[1:]] + [directory]
+    moved: dict[str, zipfile.ZipInfo | None] = {}
+    for (offset, begin, info), bound in zip(spans, bounds, strict=True):
+        fits = begin + info.compress_size <= bound
+        if info.filename not in again:
+            if not fits:
+                raise ParseError("overlapped zip members", f"{name}:{info.filename}")
+            continue
+        if not fits:
             moved[info.filename] = None
             continue
         fresh = zipfile.ZipInfo(info.filename)
@@ -171,7 +182,7 @@ class Archive:
                 # BZIP2·LZMA는 읽기 상한 없이 풀리므로 거부한다(한컴·Office는 무압축·deflate만 쓴다)
                 raise ParseError("unsupported zip compression method", f"{name}:{info.filename}")
             self._infos[info.filename] = info
-        self._moved = _relocate(data, infos)  # 적힌 위치로 다시 찾은 멤버(None: 겹쳐서 읽지 않는다)
+        self._moved = _relocate(data, infos, name)  # 적힌 위치로 다시 찾은 멤버(None: 겹쳐서 읽지 않는다)
 
     def has(self, member: str) -> bool:
         return member in self._infos

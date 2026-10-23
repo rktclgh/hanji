@@ -1,7 +1,9 @@
 """공용 zip·XML 읽기·장부·문서 마무리 모듈(OOXML 스펙 §3). HWPX 동작은 기존 HWPX 테스트·골든이 그대로 본다."""
 
 import dataclasses
+import struct
 import zipfile
+import zlib
 from io import BytesIO
 
 import pytest
@@ -64,6 +66,38 @@ def test_members_before_a_damaged_member_are_found_at_their_written_offsets():
     assert info.value.location == "f.zip:m/img.bin"
     prefixed = zipxml.Archive(b"junk" + data, "f.zip", "not a zip", lambda: LIMITS)  # 앞에 붙은 바이트는 그대로
     assert prefixed.binary("m/img.bin") == bytes(range(90)) and prefixed.xml("a.xml", "a").text == "x" * 200
+    assert prefixed._moved == {}  # 내부 값: 옮긴 위치에 모두 머리가 있어 다시 찾은 멤버가 없다
+
+
+def _local(name: bytes, data: bytes) -> bytes:
+    """무압축 로컬 머리 + 데이터."""
+    return struct.pack("<4sHHHHHIIIHH", b"PK\x03\x04", 20, 0, 0, 0, 0x21, zlib.crc32(data), len(data), len(data),
+                       len(name), 0) + name + data
+
+
+def _central(name: bytes, data: bytes, offset: int) -> bytes:
+    """무압축 중앙 디렉터리 항목(적힌 위치 offset)."""
+    return struct.pack("<4sHHHHHHIIIHHHHHII", b"PK\x01\x02", 20, 20, 0, 0, 0, 0x21, zlib.crc32(data), len(data),
+                       len(data), len(name), 0, 0, 0, 0, 0, offset) + name
+
+
+def test_a_member_found_again_inside_an_earlier_member_refuses_the_file():
+    """조작 파일: 중앙 디렉터리 위치가 실제보다 작아(zipfile은 앞에 붙은 바이트로 본다) 앞 멤버 e는 옮긴 위치에서, 뒤
+    멤버 m은 적힌 위치에서 찾는데 e의 데이터가 m을 덮는다. zipfile은 m의 옮긴 위치까지 e를 허용하므로 같은 바이트를
+    두 번 읽게 된다. 옮기지 않은 앞 멤버와 다시 찾은 멤버가 겹치면 문서를 거부한다."""
+    inner = _local(b"m.xml", b"<m>z</m>")
+    shift = len(inner) + 40
+    body = b"q" * 10 + inner
+    entry = _local(b"e.bin", body)
+    written = shift + 30 + 5 + 10  # m의 적힌 위치(e의 데이터 안)
+    directory = _central(b"m.xml", b"<m>z</m>", written) + _central(b"e.bin", body, 0)  # 물리 순서와 다르다
+    start = shift + len(entry)
+    data = b"\0" * shift + entry + directory + struct.pack("<4sHHHHIIH", b"PK\x05\x06", 0, 0, 2, 2, len(directory),
+                                                           start - shift, 0)
+    assert zipfile.ZipFile(BytesIO(data)).read("e.bin") == body  # zipfile만으로는 e가 읽힌다
+    with pytest.raises(ParseError, match="overlapped zip members") as info:
+        zipxml.Archive(data, "f.zip", "not a zip", lambda: LIMITS)
+    assert info.value.location == "f.zip:e.bin"
 
 
 def test_hwpx_modules_reexport_the_shared_objects():
