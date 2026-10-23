@@ -89,6 +89,14 @@ def test_a_picture_with_only_an_external_svg_image_is_linked_not_missing():
     assert reasons(parsed) == [("figure_image_linked", "s0-p0-figure-0")] and counts[0].ok
 
 
+def test_a_picture_with_only_a_linked_svg_image_is_linked_not_missing():
+    """asvg:svgBlip이 r:embed 대신 r:link로 밖의 SVG를 가리키면 a:blip@r:link와 같은 연결 그림이다."""
+    rels = (("rIdX", f"{B.R}/image", "http://example.invalid/a.svg", "External"),)
+    parsed, counts = parse(B.p(B.drawing(B.pic(svg_link="rIdX"))), rels=rels)
+    assert [(b["kind"], "figure" in b) for b in parsed.blocks] == [("figure", False)]
+    assert reasons(parsed) == [("figure_image_linked", "s0-p0-figure-0")] and counts[0].ok
+
+
 def test_size_limits_and_the_asset_budget_leave_figures_without_images(monkeypatch):
     monkeypatch.setattr(ox, "MAX_BINARY_BYTES", 100)
     parsed, _ = parse(B.p(B.drawing(B.pic("rIdJ"))), B.p(B.drawing(B.pic("rIdP"))))

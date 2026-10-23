@@ -245,10 +245,12 @@ def docx(document_xml: str, styles_xml: str | None = None, numbering_xml: str | 
     return zip_bytes([*members, *extra], deflated)
 
 
-def pic(embed: str | None = None, link: str | None = None, cx: int | None = None, svg: str | None = None) -> str:
-    """pic:pic(a:blip@r:embed·r:link). cx가 있으면 그림 자신의 표시 너비(a:xfrm), svg는 asvg:svgBlip 관계 id."""
+def pic(embed: str | None = None, link: str | None = None, cx: int | None = None, svg: str | None = None,
+        svg_link: str | None = None) -> str:
+    """pic:pic(a:blip@r:embed·r:link). cx가 있으면 그림 자신의 표시 너비(a:xfrm), svg·svg_link는 asvg:svgBlip의
+    r:embed·r:link 관계 id."""
     ext = (f'<a:extLst><a:ext uri="{{96DAC541-7B7A-43D3-8B79-37D633B846F1}}"><asvg:svgBlip{xmlns("asvg")}'
-           f'{attrs(r__embed=svg)}/></a:ext></a:extLst>') if svg else ""
+           f'{attrs(r__embed=svg, r__link=svg_link)}/></a:ext></a:extLst>') if svg or svg_link else ""
     xfrm = f'<a:xfrm><a:off x="0" y="0"/><a:ext cx="{cx}" cy="{cx}"/></a:xfrm>' if cx else ""
     return (f'<pic:pic{xmlns("pic")}><pic:nvPicPr><pic:cNvPr id="1" name="p"/><pic:cNvPicPr/></pic:nvPicPr>'
             f"<pic:blipFill><a:blip{attrs(r__embed=embed, r__link=link)}>{ext}</a:blip></pic:blipFill>"
@@ -428,10 +430,12 @@ OLE_URI = "http://schemas.openxmlformats.org/presentationml/2006/ole"
 
 
 def ppic(embed: str | None = None, link: str | None = None, cx: int = EMU, svg: str | None = None,
-         hidden: bool = False, video: bool = False) -> str:
-    """p:pic(p:blipFill/a:blip@r:embed·r:link, 표시 너비 cx). svg는 asvg:svgBlip 관계 id, video면 a:videoFile."""
+         hidden: bool = False, video: bool = False, svg_link: str | None = None) -> str:
+    """p:pic(p:blipFill/a:blip@r:embed·r:link, 표시 너비 cx). svg·svg_link는 asvg:svgBlip의 r:embed·r:link 관계 id,
+    video면 a:videoFile."""
+    ref = f'r:embed="{svg}"' if svg else f'r:link="{svg_link}"'
     ext = (f'<a:extLst><a:ext uri="{{96DAC541-7B7A-43D3-8B79-37D633B846F1}}"><asvg:svgBlip{xmlns("asvg")} '
-           f'r:embed="{svg}"/></a:ext></a:extLst>') if svg else ""
+           f'{ref}/></a:ext></a:extLst>') if svg or svg_link else ""
     movie = '<a:videoFile r:link="rIdV"/>' if video else ""
     return (f"<p:pic>{nv('Pic', '그림', hidden, extra=movie)}<p:blipFill><a:blip{attrs(r__embed=embed, r__link=link)}>"
             f'{ext}</a:blip><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr><a:xfrm><a:off x="0" y="0"/>'

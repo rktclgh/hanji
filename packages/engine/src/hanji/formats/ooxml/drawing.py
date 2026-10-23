@@ -74,11 +74,12 @@ def blip(pic: ET.Element) -> tuple[str | None, str | None, str | None]:
 
 def refs(found: ET.Element | None) -> tuple[str | None, str | None, str | None]:
     """a:blip의 (r:embed, r:link, SVG 확장 asvg:svgBlip@r:embed). r:embed가 있으면 그것이 PNG 대체 그림이라 SVG는 보지
-    않는다."""
+    않는다. SVG 확장이 r:link로 밖을 가리키면 a:blip@r:link와 같은 연결 그림으로 돌려준다."""
     if found is None:
         return None, None, None
     svg = found.find(f"{A}extLst/{A}ext/{SVG_BLIP}")
-    return found.get(R_EMBED), found.get(R_LINK), svg.get(R_EMBED) if svg is not None else None
+    link = found.get(R_LINK) or (svg.get(R_LINK) if svg is not None else None)
+    return found.get(R_EMBED), link, svg.get(R_EMBED) if svg is not None else None
 
 
 class Images:

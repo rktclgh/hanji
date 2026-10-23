@@ -72,6 +72,14 @@ def test_a_picture_with_only_an_external_svg_image_is_linked_not_missing():
     assert reasons(parsed) == [("figure_image_linked", "slide1-sh0-figure-0", None)] and counts[0].ok
 
 
+def test_a_picture_with_only_a_linked_svg_image_is_linked_not_missing():
+    """asvg:svgBlip이 r:embed 대신 r:link로 밖의 SVG를 가리키면 a:blip@r:link와 같은 연결 그림이다."""
+    rels = (("rIdX", B.PREL["image"], "http://example.invalid/a.svg", "External"),)
+    parsed, counts = parse(B.slide(B.ppic(svg_link="rIdX")), rels=rels)
+    assert shown(parsed) == [("figure", "", None, 1, 0)]
+    assert reasons(parsed) == [("figure_image_linked", "slide1-sh0-figure-0", None)] and counts[0].ok
+
+
 def test_charts_give_a_figure_and_rich_text_per_host_and_count_values():
     chart = B.chart_part("지어낸 발표 차트", "단위: 건", cache=("상반기", "12"))
     rels = (("rIdC", B.PREL["chart"], "../charts/chart1.xml"), ("rIdN", B.PREL["chart"], "../charts/none.xml"))
