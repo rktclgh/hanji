@@ -69,18 +69,27 @@ def test_members_before_a_damaged_member_are_found_at_their_written_offsets():
     assert prefixed._moved == {}  # 내부 값: 옮긴 위치에 모두 머리가 있어 다시 찾은 멤버가 없다
 
 
-def _local(name: bytes, data: bytes, size: int | None = None) -> bytes:
+def _local(name: bytes, data: bytes, size: int | None = None, extra: bytes = b"") -> bytes:
     """무압축 로컬 머리 + 데이터(size: 머리에 적을 크기, 없으면 실제 길이)."""
     size = len(data) if size is None else size
     return struct.pack("<4sHHHHHIIIHH", b"PK\x03\x04", 20, 0, 0, 0, 0x21, zlib.crc32(data), size, size,
-                       len(name), 0) + name + data
+                       len(name), len(extra)) + name + extra + data
 
 
-def _central(name: bytes, data: bytes, offset: int, size: int | None = None) -> bytes:
+def _central(name: bytes, data: bytes, offset: int, size: int | None = None, extra: bytes = b"") -> bytes:
     """무압축 중앙 디렉터리 항목(적힌 위치 offset)."""
     size = len(data) if size is None else size
     return struct.pack("<4sHHHHHHIIIHHHHHII", b"PK\x01\x02", 20, 20, 0, 0, 0, 0x21, zlib.crc32(data), size,
-                       size, len(name), 0, 0, 0, 0, 0, offset) + name
+                       size, len(name), len(extra), 0, 0, 0, 0, offset) + name + extra
+
+
+def _unicode_path(raw: bytes, name: bytes) -> bytes:
+    """멤버 하나짜리 zip: 머리 이름은 raw, Info-ZIP 유니코드 경로(0x7075, 판 1, raw의 CRC32) 이름은 name."""
+    field = struct.pack("<BL", 1, zlib.crc32(raw)) + name
+    extra = struct.pack("<HH", 0x7075, len(field)) + field
+    entry = _local(raw, b"<w>1</w>", extra=extra)
+    directory = _central(raw, b"<w>1</w>", 0, extra=extra)
+    return entry + directory + _end(directory, 1, len(entry))
 
 
 def _end(directory: bytes, count: int, offset: int) -> bytes:
@@ -111,8 +120,9 @@ def test_a_member_found_again_inside_an_earlier_member_refuses_the_file():
 
 
 def test_member_names_are_checked_as_written_in_the_headers():
-    """zipfile은 이름을 첫 NUL에서 자르고(윈도에서는 \\를 /로 바꾼다) 로컬 머리는 원래 이름과 견준다. NUL·역슬래시
-    이름은 거부하고, 겹침 검사도 원래 이름으로 머리를 찾는다(잘린 이름으로 찾으면 그 멤버가 검사에서 빠진다)."""
+    """zipfile은 이름(유니코드 경로 0x7075가 있으면 그 이름)을 첫 NUL에서 자르고(윈도에서는 \\를 /로 바꾼다) 로컬 머리는
+    원래 이름과 견준다. 원래 이름·0x7075 이름 어디든 NUL·역슬래시가 있으면 거부하고, 겹침 검사도 원래 이름으로 머리를
+    찾는다(잘린 이름으로 찾으면 그 멤버가 검사에서 빠진다)."""
     nul = _covering(b"e.bin\0x")
     with pytest.raises(ParseError, match="NUL in zip member name") as info:
         zipxml.Archive(nul, "f.zip", "not a zip", lambda: LIMITS)
@@ -121,6 +131,12 @@ def test_member_names_are_checked_as_written_in_the_headers():
         zipxml._relocate(nul, zipfile.ZipFile(BytesIO(nul)).infolist(), "f.zip")
     with pytest.raises(ParseError, match="backslash in zip member name"):
         zipxml.Archive(_covering(b"e\\bin"), "f.zip", "not a zip", lambda: LIMITS)
+    assert zipfile.ZipFile(BytesIO(_unicode_path(b"x.xml", b"a.xml\0b"))).namelist() == ["a.xml"]  # zipfile이 자른다
+    with pytest.raises(ParseError, match="backslash in zip member name"):
+        zipxml.Archive(_unicode_path(b"x.xml", b"word\\document.xml"), "f.zip", "not a zip", lambda: LIMITS)
+    with pytest.raises(ParseError, match="NUL in zip member name") as info:
+        zipxml.Archive(_unicode_path(b"x.xml", b"a.xml\0b"), "f.zip", "not a zip", lambda: LIMITS)
+    assert info.value.location == "f.zip:a.xml"
 
 
 def test_overlap_between_two_members_left_in_place_stays_a_member_error():

@@ -157,6 +157,18 @@ def _relocate(data: bytes, infos: list[zipfile.ZipInfo], name: str) -> dict[str,
     return moved
 
 
+def _unicode_paths(extra: bytes) -> list[bytes]:
+    """중앙 디렉터리 extra의 Info-ZIP 유니코드 경로(0x7075) 이름 바이트들. zipfile은 판·CRC가 맞으면 이것을 filename으로
+    쓰고 첫 NUL에서 자른다(윈도에서는 \\도 /로 바꾼다): 잘리기 전 이름을 보려고 직접 읽는다. 판·CRC는 보지 않는다."""
+    names = []
+    while len(extra) >= 4:
+        kind, size = struct.unpack_from("<HH", extra)
+        if kind == 0x7075 and size >= 5:
+            names.append(extra[9:4 + size])
+        extra = extra[4 + size:]
+    return names
+
+
 class Archive:
     """열린 zip 꾸러미. 생성자가 zip과 멤버 목록(수·이름 중복·역슬래시·NUL·암호화·압축 방식)을 확인한다. 상한은 limits가
     호출 때마다 돌려준다(형식이 자기 모듈 상수로 만든다). xml_read·binary_read는 실제로 읽은 바이트 합이다."""
@@ -178,9 +190,12 @@ class Archive:
         for info in infos:
             if info.filename in self._infos:
                 raise ParseError("duplicate zip member name", f"{name}:{info.filename}")
-            if "\\" in info.orig_filename:  # 윈도와 다른 OS가 \를 다르게 읽으므로 모두 거부한다(윈도 zipfile은 /로 바꾼다)
+            # 머리 이름·0x7075 이름 모두 본다: zipfile은 filename을 첫 NUL에서 자르고 윈도에서는 \를 /로 바꾼다
+            paths = [path.decode("utf-8", "replace") for path in _unicode_paths(info.extra)]
+            names = [info.filename, info.orig_filename, *paths]
+            if any("\\" in n for n in names):  # 윈도와 다른 OS가 \를 다르게 읽으므로 모두 거부한다
                 raise ParseError("backslash in zip member name", f"{name}:{info.filename}")
-            if "\0" in info.orig_filename:  # zipfile은 이름을 첫 NUL에서 자르고 로컬 머리는 원래 이름과 견준다
+            if any("\0" in n for n in names):  # 로컬 머리는 원래 이름과 견주므로 잘린 이름과 어긋난다
                 raise ParseError("NUL in zip member name", f"{name}:{info.filename}")
             if info.flag_bits & 1:
                 raise ParseError("encrypted zip member", f"{name}:{info.filename}")
