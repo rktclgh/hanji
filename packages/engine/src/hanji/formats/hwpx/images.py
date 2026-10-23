@@ -45,7 +45,7 @@ def to_png(raw: bytes) -> Png | str:
 
 def _rgb(image: Image.Image) -> Image.Image:
     """알파(RGBA·LA·PA·투명 P)는 흰 바탕에 합치고, RGB는 그대로, 나머지(CMYK·L·P 등)는 RGB로. 디코드한 그림 크기의
-    사본을 줄인다: RGB는 복사하지 않고, RGBA는 알파 채널을 따로 떼지 않고 그 그림을 마스크로 붙인다(같은 바이트)."""
+    사본을 줄인다(같은 바이트): RGB는 사본이 없어 크게 줄고, 4000px 넘는 RGBA는 축소 버퍼가 최고점이라 차이가 작다."""
     if image.mode == "RGB":
         return image
     if image.mode in ("RGBA", "LA", "PA") or (image.mode == "P" and "transparency" in image.info):

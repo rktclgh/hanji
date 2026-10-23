@@ -278,11 +278,12 @@ COSTS: dict[Config, Cost] = {
     "both": Cost(base=1889 * MiB, per_page=11 * MiB),
 }
 # 입력 바이트마다. 큰 MD는 입력의 약 20배를 쓴다. 압축을 풀거나 레코드를 옮겨 쓰는 형식(HWPX·HWP·DOCX·PPTX)은 XML·요소
-# 트리와 그림 디코드가 함께 있어 더 크다: lab과 대량 코퍼스(corpus-big)의 857건(HWPX 211·HWP 220·DOCX 214·PPTX 212,
-# 2026-10-23 macOS arm64, 문서마다 새 프로세스, 새 SqliteStore에 force 수집 전후 최대 메모리 차이 ÷ 파일 크기)을 스물두 번
-# 잰 최대(HWPX 257.8배, HWP 205.9배, DOCX 420.3배, PPTX 119.0배) × 1.5를 올림. 가장 큰 배수는 늘 30~300KB 작은 문서다(고정
+# 트리와 그림 디코드가 함께 있어 더 크다: lab + 대량 코퍼스(2026-10-23 macOS arm64, 문서마다 새 프로세스, 새 SqliteStore에
+# force 수집 전후 최대 메모리 차이 ÷ 파일 크기)로 다시 쟀다. 값 = ⌈지금까지 모든 실행의 최대 × 1.5⌉. 이번 최대: HWPX
+# 257.8배 → 387, DOCX 420.3배 → 631, PPTX 119.0배 → 179. HWP는 322 그대로다: 지금까지 모든 실행의 최대 214.4배(HP-B,
+# 2026-10-18) × 1.5이고, 대량 코퍼스 HWP 200건을 다시 잰 최대 205.1배도 이 안에 든다. 가장 큰 배수는 늘 작은 문서다(고정
 # 몫이 커서). 잰 세트를 덮는 값이지 새 문서의 상한이 아니다
-BYTES_FACTOR = {"pdf": 2, "hwpx": 387, "hwp": 309, "docx": 631, "pptx": 179, "other": 20}
+BYTES_FACTOR = {"pdf": 2, "hwpx": 387, "hwp": 322, "docx": 631, "pptx": 179, "other": 20}
 
 
 def config_of(ocr: bool, layout: bool) -> Config:
