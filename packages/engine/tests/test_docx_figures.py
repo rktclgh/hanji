@@ -66,6 +66,21 @@ def test_pictures_without_images_keep_their_place_and_reason():
         ("figure_image_missing", "s0-p4-figure-0"), ("figure_image_missing", "s0-p5-figure-0")]
 
 
+def test_a_picture_with_only_an_svg_image_is_unsupported_not_missing():
+    """r:embed 대체 그림 없이 asvg:svgBlip만 있고 그 관계가 있는 .svg 멤버를 가리키면 지원하지 않는 형식이다. SVG 관계가
+    없거나 멤버가 없거나 .svg가 아니면 지금처럼 없는 그림이다."""
+    rels = (("rIdV", f"{B.R}/image", "media/VECTOR2.SVG"), ("rIdG", f"{B.R}/image", "media/gone.svg"))
+    parsed, counts = parse(B.p(B.drawing(B.pic(svg="rIdS"))), B.p(B.drawing(B.pic(svg="rIdV"))),
+                           B.p(B.drawing(B.pic(svg="rIdG"))), B.p(B.drawing(B.pic(svg="rIdQ"))),
+                           B.p(B.drawing(B.pic(svg="rIdP"))), rels=rels,
+                           extra=(("word/media/VECTOR2.SVG", b"<svg/>"),))
+    assert [(b["kind"], "figure" in b) for b in parsed.blocks] == [("figure", False)] * 5
+    assert reasons(parsed) == [
+        ("figure_image_unsupported", "s0-p0-figure-0"), ("figure_image_unsupported", "s0-p1-figure-0"),
+        ("figure_image_missing", "s0-p2-figure-0"), ("figure_image_missing", "s0-p3-figure-0"),
+        ("figure_image_missing", "s0-p4-figure-0")] and counts[0].ok
+
+
 def test_size_limits_and_the_asset_budget_leave_figures_without_images(monkeypatch):
     monkeypatch.setattr(ox, "MAX_BINARY_BYTES", 100)
     parsed, _ = parse(B.p(B.drawing(B.pic("rIdJ"))), B.p(B.drawing(B.pic("rIdP"))))

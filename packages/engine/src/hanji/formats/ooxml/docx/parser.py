@@ -338,8 +338,8 @@ class _Section:
             if cx is None:  # 묶음 안 그림: 그림 자신의 표시 너비
                 ext = element.find(f"{PIC}spPr/{A}xfrm/{A}ext")
                 cx = emu(ext.get("cx")) if ext is not None else None
-            embed, link = blip(element)
-            self.image(self.doc.images.figure(self.host, embed, link, cx), anchor)
+            embed, link, svg = blip(element)
+            self.image(self.doc.images.figure(self.host, embed, link, cx, svg), anchor)
         elif tag == f"{WPS}wsp":
             content = element.find(f"{WPS}txbx/{TXBX}")
             if content is not None:

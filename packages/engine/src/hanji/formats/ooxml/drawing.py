@@ -25,6 +25,7 @@ FRAMES = frozenset({f"{WP}inline", f"{WP}anchor"})  # w:drawing 아래 그림 �
 C = "{http://schemas.openxmlformats.org/drawingml/2006/chart}"
 DGM = "{http://schemas.openxmlformats.org/drawingml/2006/diagram}"
 DSP = "{http://schemas.microsoft.com/office/drawing/2008/diagram}"
+SVG_BLIP = "{http://schemas.microsoft.com/office/drawing/2016/SVG/main}svgBlip"  # a:blip/a:extLst/a:ext 아래 SVG 그림
 R_EMBED, R_LINK, R_ID, R_DM = f"{{{R}}}embed", f"{{{R}}}link", f"{{{R}}}id", f"{{{R}}}dm"
 A_T, A_P, A_BR = f"{A}t", f"{A}p", f"{A}br"
 CHART, SMARTART = f"{C}chart", f"{DGM}relIds"  # a:graphicData 아래 차트·SmartArt 참조(관계는 호스트 파트의 것)
@@ -66,10 +67,18 @@ def hidden_shape(shape: ET.Element) -> bool:
     return False
 
 
-def blip(pic: ET.Element) -> tuple[str | None, str | None]:
-    """pic:pic의 (r:embed, r:link). SVG 확장(asvg:svgBlip)은 보지 않는다: r:embed가 PNG 대체 그림이다."""
-    found = pic.find(f"{PIC}blipFill/{A}blip")
-    return (found.get(R_EMBED), found.get(R_LINK)) if found is not None else (None, None)
+def blip(pic: ET.Element) -> tuple[str | None, str | None, str | None]:
+    """pic:pic의 그림 관계 id들(refs)."""
+    return refs(pic.find(f"{PIC}blipFill/{A}blip"))
+
+
+def refs(found: ET.Element | None) -> tuple[str | None, str | None, str | None]:
+    """a:blip의 (r:embed, r:link, SVG 확장 asvg:svgBlip@r:embed). r:embed가 있으면 그것이 PNG 대체 그림이라 SVG는 보지
+    않는다."""
+    if found is None:
+        return None, None, None
+    svg = found.find(f"{A}extLst/{A}ext/{SVG_BLIP}")
+    return found.get(R_EMBED), found.get(R_LINK), svg.get(R_EMBED) if svg is not None else None
 
 
 class Images:
@@ -80,13 +89,21 @@ class Images:
         self.budget = AssetBudget()
         self.pictures: dict[str, images.Png | str] = {}
 
-    def figure(self, part: str, embed: str | None, link: str | None, cx: int | None) -> dict[str, Any] | str:
-        """그림 블록의 figure 값 또는 이미지 없음 사유. embed·link는 part의 관계 id다. 외부 관계와 r:link만 있는
-        그림은 figure_image_linked(따라가지 않는다), 관계·멤버가 없으면 figure_image_missing."""
+    def figure(self, part: str, embed: str | None, link: str | None, cx: int | None,
+               svg: str | None = None) -> dict[str, Any] | str:
+        """그림 블록의 figure 값 또는 이미지 없음 사유. embed·link·svg는 part의 관계 id다. 외부 관계와 r:link만 있는
+        그림은 figure_image_linked(따라가지 않는다), r:embed·r:link 없이 SVG 확장만 있고 그 관계가 있는 .svg 멤버를
+        가리키면 figure_image_unsupported(SVG는 지원하지 않는 형식), 관계·멤버가 없으면 figure_image_missing."""
         rels = self.package.rels(part)
         rel = rels.get(embed) if embed else None
         if rel is None:
-            return FIGURE_LINKED if link and not embed else FIGURE_MISSING
+            if link and not embed:
+                return FIGURE_LINKED
+            vector = rels.get(svg) if svg and not embed else None
+            if vector is not None and vector.target is not None and vector.target.lower().endswith(".svg") \
+                    and self.package.has(vector.target):
+                return images.UNSUPPORTED
+            return FIGURE_MISSING
         if rel.target is None:
             return FIGURE_LINKED
         if not self.package.has(rel.target):
