@@ -225,6 +225,18 @@ def test_a_png_refused_by_the_asset_budget_is_not_kept_and_later_references_have
     assert [href for href, v in doc.pictures.items() if isinstance(v, images.Png)] == ["BinData/image1.png"]
 
 
+def test_picture_captions_keep_their_rule_left_follows_and_only_an_image_links():
+    """그림 캡션 규칙은 그대로다: TOP만 앞이고 LEFT도 뒤, 이미지가 있을 때만 caption_ref로 잇는다(수식·도형 캡션의
+    TOP·LEFT 앞 규칙과 다르다)."""
+    left = B.caption(B.para(B.run(B.t("왼쪽 캡션"))), side="LEFT")
+    parsed, (count,) = one_picture(B.GRAY_PNG, caption=left)
+    assert [b["kind"] for b in parsed.blocks] == ["figure", "caption"]
+    assert parsed.blocks[0]["figure"]["caption_ref"] == 1
+    missing, _ = one_picture(b"not an image", caption=left)
+    assert [b["kind"] for b in missing.blocks] == ["figure", "caption"] and "figure" not in missing.blocks[0]
+    assert count.ok
+
+
 def test_a_picture_inside_a_caption_is_not_silently_lost():
     inner = B.pic("image1")
     data = B.package(B.section(B.para(B.run(B.pic("image1", B.caption(B.para(B.run(B.t("그림 4. 지어낸 캡션"), inner))))))),

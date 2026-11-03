@@ -4,13 +4,16 @@
 
 구역마다 트리를 받아 블록 명세로 바꾼 뒤 버린다. 최상위 문단(hs:sec 바로 아래 hp:p)마다 문단 글자 블록(개요 수준 → 제목,
 번호·글머리 → 목록 항목, 그 밖 문단)을 낸다. 위치는 FlowLocator(제목 경로, 최상위 문단 순번). 글자 장부(ledger.py)가
-모든 hp:t·글맵시 글자를 세고, 한 번도 넣지 않은 글자는 구역 끝 구조 문단(신뢰도 0.3)으로 살린다(처리 이력
-unassigned_text). 장부가 맞지 않으면 처리 이력 coverage_mismatch(파싱은 실패하지 않는다). 개요 수준을 쓰지 않는 문서는
-PDF와 같은 글꼴 크기 규칙으로 제목을 고른다(_finish).
+모든 hp:t·글맵시·덧말(본말·덧말)·글자 겹침 글자를 세고, 한 번도 넣지 않은 글자는 구역 끝 구조 문단(신뢰도 0.3)으로
+살린다(처리 이력 unassigned_text). 덧말은 그 자리에 본말(덧말), 글자 겹침은 겹친 글자(원 모양이면 유니코드 원문자)로
+문단 글자에 든다. 수식 스크립트(hp:script)도 출처지만 인쇄 글자가 아니라 따로 센다(같은 장부의 다른 숫자). 장부가 맞지
+않으면 처리 이력 coverage_mismatch(파싱은 실패하지 않는다, 스크립트 숫자는 s{구역}-script-coverage). 개요 수준을 쓰지 않는
+문서는 PDF와 같은 글꼴 크기 규칙으로 제목을 고른다(_finish).
 
 문단에 박힌 개체는 문단 글자 블록 뒤에 나타난 순서대로 블록이 된다(HWPX 스펙 §5.2): 표(1×1은 상자라 풀고, 칸 안 개체는
 칸 글자로, 칸 안 그림은 표 뒤 그림 블록), 그림과 캡션(PNG 자산), 머리말·꼬리말, 글상자·도형 글자, 수식 스크립트,
-글맵시, OLE 등은 이미지 없는 그림. 각주·미주는 구역 끝(닻 문단 위치). 개체 조립은 개체 중첩만큼만 재귀한다(XML 깊이
+글맵시, OLE 등은 이미지 없는 그림. 수식·도형·묶음·글맵시·OLE 등의 캡션은 표 캡션처럼 TOP·LEFT면 개체 블록 앞, 아니면
+뒤의 캡션 블록(연결 없음, 칸 안이면 칸 글자). 각주·미주는 구역 끝(닻 문단 위치). 개체 조립은 개체 중첩만큼만 재귀한다(XML 깊이
 상한 256이 묶는다). 이름 앞 _는 형식 패키지(hwpx·hwp) 안에서만 쓴다는 뜻이다."""
 
 import xml.etree.ElementTree as ET
@@ -29,7 +32,7 @@ from ..pdf.parser import COVERAGE_MISMATCH, UNASSIGNED_TEXT
 from . import images, tables
 from .container import HC, HP, Item, OverBudget, TooLarge
 from .header import CharShape, Styles
-from .ledger import INLINE, T, Bundle, Counts, Ledger, ink, source_chars
+from .ledger import INLINE, SOURCE_CHARS, T, Bundle, Counts, Ledger, circled, ink, source_chars
 from .tables import RawCell, number
 
 P, RUN, SUBLIST = f"{HP}p", f"{HP}run", f"{HP}subList"
@@ -38,9 +41,13 @@ TEXTART, HIDDEN = f"{HP}textart", f"{HP}hiddenComment"
 TBL, TR, TC, CELL_ADDR, CELL_SPAN = f"{HP}tbl", f"{HP}tr", f"{HP}tc", f"{HP}cellAddr", f"{HP}cellSpan"
 PIC, IMG, CUR_SZ, CAPTION, CONTAINER = f"{HP}pic", f"{HC}img", f"{HP}curSz", f"{HP}caption", f"{HP}container"
 ORG_SZ = f"{HP}orgSz"
+DUTMAL, MAIN_TEXT, SUB_TEXT, COMPOSE = f"{HP}dutmal", f"{HP}mainText", f"{HP}subText", f"{HP}compose"
+PRINTED = frozenset((f"{HP}t", MAIN_TEXT, SUB_TEXT, COMPOSE))  # 글상자 글자(shape_text)로 보는 출처
 CTRL, DRAW_TEXT, EQUATION, SCRIPT = f"{HP}ctrl", f"{HP}drawText", f"{HP}equation", f"{HP}script"
 SHAPES = frozenset(f"{HP}{n}" for n in ("rect", "ellipse", "arc", "polygon", "curve", "connectLine", "line"))
 EMBEDDED = frozenset(f"{HP}{n}" for n in ("ole", "chart", "video"))  # 그림 성격 개체(이미지 없는 그림)
+# 캡션을 표 캡션처럼 앞뒤에 내는 개체(그림은 이미지와 잇는 picture, 표는 table이 따로 한다)
+CAPTIONED = SHAPES | EMBEDDED | {EQUATION, CONTAINER, TEXTART}
 MARGINS = {f"{HP}header": "page_header", f"{HP}footer": "page_footer"}
 NOTES = (f"{HP}footNote", f"{HP}endNote")  # 구역 끝에 이 차례로
 FIGURE_LINKED = "figure_image_linked"  # isEmbeded="0"(외부 연결 그림: 경로를 따라가지 않는다)
@@ -95,6 +102,21 @@ def _t_text(t: ET.Element) -> tuple[str, bool]:
     return "".join(parts), unknown
 
 
+def _source_text(element: ET.Element) -> str:
+    """장부 출처 하나의 블록 글자(블록·살리기가 함께 쓴다): hp:t는 _t_text, 글맵시는 속성, 글자 겹침은 원 모양이면
+    원문자(circled), 수식 스크립트는 text(처리부가 늘 읽던 자리), 덧말 본말·덧말은 직접 글자(자식 요소 안 글자는 그 자식의 출처). 장부 n은 ledger.SOURCE_CHARS가
+    따로 센다."""
+    if element.tag == SCRIPT:
+        return element.text or ""
+    if element.tag == T:
+        return _t_text(element)[0]
+    if element.tag == TEXTART:
+        return element.get("text", "")
+    if element.tag == COMPOSE:
+        return circled(element.get("composeText", ""), element.get("circleType"))
+    return "".join([element.text or "", *(child.tail or "" for child in element)])  # 덧말: 직접 글자만
+
+
 def _lines(p: ET.Element) -> int:
     """저장된 표시 줄 수(linesegarray의 lineseg 수), 없으면 줄바꿈 수 + 1."""
     segs = p.find(LINESEGS)
@@ -137,10 +159,12 @@ class _Section:
         self.unknown: set[int] = set()  # 모르는 인라인 요소 기록을 남긴 문단(id)
         self.notes: list[tuple[ET.Element, int]] = []  # (각주·미주, 닻)
         self.inner = False  # 머리말·꼬리말·각주·미주·글상자 안(1×1 상자 문단도 제목 판정 없이 plain)
+        self.scripts: set[int] = set()  # 수식 스크립트 출처(인쇄 글자와 따로 센다)
         self._sources()
 
     def _sources(self) -> None:
-        """장부 출처를 문서 순서로 센다(스택 순회, 재귀 없음). 숨은 설명마다 처리 이력을 남긴다."""
+        """장부 출처를 문서 순서로 센다(스택 순회, 재귀 없음). 숨은 설명마다 처리 이력을 남긴다. 수식 스크립트는 그 출처
+        순번을 scripts에 둔다."""
         anchor = self.base - 1
         for top in self.root:
             if top.tag == P:
@@ -153,8 +177,11 @@ class _Section:
                 if element.tag == T:
                     self.ledger.add(element, source_chars(element), max(anchor, self.base), para, hidden)
                     continue
-                if element.tag == TEXTART:
-                    self.ledger.add(element, ink(element.get("text", "")), max(anchor, self.base), para, hidden)
+                if element.tag == SCRIPT:
+                    self.scripts.add(len(self.ledger.sources))
+                count = SOURCE_CHARS.get(element.tag)
+                if count is not None:
+                    self.ledger.add(element, count(element), max(anchor, self.base), para, hidden)
                 if element.tag == HIDDEN and not hidden:
                     chars = sum(source_chars(t) for t in element.iter(T))
                     self.region("hidden-comment", "paragraph", HIDDEN_COMMENT, max(anchor, self.base),
@@ -166,11 +193,27 @@ class _Section:
         self.doc.regions.append(Region(tag, kind, reason, self.index, anchor, gate))
 
     def bundles(self, p: ET.Element, anchor: int) -> list[Bundle]:
-        """문단 hp:run들의 hp:t 글자를 순서대로(개체 안 글자는 들지 않는다). 출처마다 묶음 하나."""
+        """문단 hp:run들의 hp:t·덧말·글자 겹침 글자를 순서대로(개체 안 글자는 들지 않는다). 출처마다 묶음 하나."""
         out: list[Bundle] = []
         for run in p.iterfind(RUN):
-            for t in run.iterfind(T):
-                out.append(self.source_bundle(t, anchor, p))
+            for child in run:
+                if child.tag == T:
+                    out.append(self.source_bundle(child, anchor, p))
+                elif child.tag in (DUTMAL, COMPOSE):
+                    out += self.ruby(child)
+        return out
+
+    def ruby(self, element: ET.Element) -> list[Bundle]:
+        """덧말은 본말 뒤 괄호 안 덧말(덧말이 공백뿐이면 본말만), 글자 겹침은 겹친 글자(원 모양이면 원문자). 글자 요소가
+        출처다(괄호는 끼운 구분자)."""
+        if element.tag == COMPOSE:
+            return [(self.ledger.source_of(element), _source_text(element))]
+        out: list[Bundle] = []
+        main, sub = element.find(MAIN_TEXT), element.find(SUB_TEXT)
+        if main is not None:
+            out.append((self.ledger.source_of(main), _source_text(main)))
+        if sub is not None and _source_text(sub).strip():
+            out += [(None, "("), (self.ledger.source_of(sub), _source_text(sub)), (None, ")")]
         return out
 
     def source_bundle(self, t: ET.Element, anchor: int, p: ET.Element) -> Bundle:
@@ -225,6 +268,10 @@ class _Section:
 
     def obj(self, element: ET.Element, anchor: int) -> None:
         tag = element.tag
+        caption = element.find(CAPTION) if tag in CAPTIONED else None
+        before = caption is not None and caption.get("side") in ("TOP", "LEFT")
+        if caption is not None and before:
+            self.caption(caption, anchor)
         if tag == TBL:
             self.table(element, anchor)
         elif tag == PIC:
@@ -235,7 +282,7 @@ class _Section:
         elif tag in SHAPES:
             self.shape(element, anchor)
         elif tag == EQUATION:
-            if self.emit("paragraph", [(None, element.findtext(SCRIPT) or "")], anchor):
+            if self.emit("paragraph", self.script(element), anchor):
                 self.region("equation", "paragraph", EQUATION_SCRIPT, anchor)
         elif tag == TEXTART:
             if self.emit("paragraph", [(self.ledger.source_of(element), element.get("text", ""))], anchor):
@@ -251,9 +298,18 @@ class _Section:
             for child in element:
                 if child.tag in MARGINS or child.tag in NOTES:
                     self.obj(child, anchor)
+        if caption is not None and not before:
+            self.caption(caption, anchor)
+
+    def script(self, equation: ET.Element) -> list[Bundle]:
+        """수식의 스크립트 묶음(첫 hp:script, 장부 출처). 없으면 빈 목록."""
+        script = equation.find(SCRIPT)
+        return [] if script is None else [(self.ledger.source_of(script), _source_text(script))]
 
     def has_text(self, element: ET.Element) -> bool:
-        return any(self.ledger.sources[self.ledger.source_of(t)].n for t in element.iter(T))
+        """그 아래 인쇄 글자 출처(hp:t·덧말·글자 겹침) 가운데 n > 0인 것이 있나(shape_text 기록)."""
+        index = self.ledger.index
+        return any(self.ledger.sources[index[id(e)]].n for e in element.iter() if e.tag in PRINTED and id(e) in index)
 
     def shape(self, element: ET.Element, anchor: int) -> None:
         """도형의 글상자(drawText/subList) 문단마다 문단 블록. 글자가 있는 도형마다 shape_text."""
@@ -430,13 +486,23 @@ class _Section:
                 for child in run:
                     if child.tag == T:
                         out.append(self.source_bundle(child, anchor, p))
+                    elif child.tag in (DUTMAL, COMPOSE):
+                        out += self.ruby(child)
                     else:
                         self.inline(child, anchor, after, out)
         return out
 
     def inline(self, element: ET.Element, anchor: int, after: list[ET.Element], out: list[Bundle]) -> None:
+        """칸 안 개체 하나의 글자(앞뒤 \\n). 캡션 글자는 개체 글자 앞(TOP·LEFT)이나 뒤에 따로 묶는다(OLE 등은 after가
+        표 뒤 블록으로)."""
         tag = element.tag
         inner: list[Bundle] = []
+        caption = element.find(CAPTION) if tag in CAPTIONED and tag not in EMBEDDED else None
+        lines = caption.find(SUBLIST) if caption is not None else None
+        words = self.cell(lines, anchor, after) if lines is not None else []
+        before = caption is not None and caption.get("side") in ("TOP", "LEFT")
+        if before and _join(words).strip():
+            out += [(None, "\n"), *words, (None, "\n")]
         if tag == TBL:
             inner = self.flatten(element, anchor, after)
         elif tag == CONTAINER:
@@ -449,10 +515,10 @@ class _Section:
                     self.region("shape", "paragraph", SHAPE_TEXT, anchor)
                 inner = self.cell(sub, anchor, after)
         elif tag == EQUATION:
-            script = element.findtext(SCRIPT) or ""
-            if script.strip():
+            script = self.script(element)
+            if _join(script).strip():
                 self.region("equation", "paragraph", EQUATION_SCRIPT, anchor)
-                inner = [(None, script)]
+                inner = script
         elif tag == TEXTART:
             if element.get("text", "").strip():
                 self.region("shape", "paragraph", SHAPE_TEXT, anchor)
@@ -466,6 +532,8 @@ class _Section:
                 self.inline(child, anchor, after, out)
         if inner:
             out += [(None, "\n"), *inner, (None, "\n")]
+        if not before and _join(words).strip():
+            out += [(None, "\n"), *words, (None, "\n")]
 
     def flatten(self, tbl: ET.Element, anchor: int, after: list[ET.Element]) -> list[Bundle]:
         """칸 안 표의 글자: 1×1은 그 문단 글자(기록 없음), 그 밖은 Table.plain_text()와 같은 모양(칸 \\t, 행 \\n)과
@@ -498,11 +566,14 @@ class _Section:
         return out
 
     def sizes(self, p: ET.Element) -> Counter[tuple[float, bool]]:
-        """문단 런들의 (0.5pt 단위 크기, 굵기)별 공백 아닌 글자 수."""
+        """문단 런들의 (0.5pt 단위 크기, 굵기)별 공백 아닌 글자 수. 덧말의 본말·글자 겹침 글자도 그 런 크기로 센다(작게
+        찍히는 덧말 글자는 세지 않는다)."""
         out = Counter[tuple[float, bool]]()
         for run in p.iterfind(RUN):
             shape = self.doc.styles.chars.get(run.get("charPrIDRef", ""), NO_SHAPE)
             n = sum(ink(_t_text(t)[0]) for t in run.iterfind(T))
+            n += sum(ink(_source_text(c)) for c in run.iterfind(COMPOSE))
+            n += sum(ink(_source_text(m)) for d in run.iterfind(DUTMAL) for m in d.iterfind(MAIN_TEXT))
             if n:
                 out[(step(shape.size), shape.bold)] += n
         return out
@@ -517,11 +588,15 @@ class _Section:
         self.late = True
         self.end_notes()
         self.rescue()
-        counts = self.ledger.count()
+        counts = self.ledger.count([k for k in range(len(self.ledger.sources)) if k not in self.scripts])
         self.doc.counts.append(counts)
         if not counts.ok:
             self.doc.regions.append(Region("coverage", "paragraph", COVERAGE_MISMATCH, self.index, self.base,
                                            ledger_gate(counts), f"s{self.index}-coverage"))
+        scripts = self.ledger.count(self.scripts)  # 수식 스크립트: 빠지면 살리고 두 번 들면 이 숫자가 맞지 않는다
+        if not scripts.ok:
+            self.doc.regions.append(Region("script-coverage", "paragraph", COVERAGE_MISMATCH, self.index, self.base,
+                                           ledger_gate(scripts), f"s{self.index}-script-coverage"))
 
     def rescue(self) -> None:
         """한 번도 넣지 않은 출처를 닻 문단별로 모아 구조 문단으로(문서 순서). 같은 문단 출처는 잇고 문단은 \\n."""
@@ -535,10 +610,7 @@ class _Section:
                 source = self.ledger.sources[k]
                 if i and source.para != self.ledger.sources[keys[i - 1]].para:
                     bundles.append((None, "\n"))
-                if source.element.tag == TEXTART:
-                    bundles.append((k, source.element.get("text", "")))
-                else:
-                    bundles.append((k, _t_text(source.element)[0]))
+                bundles.append((k, _source_text(source.element)))
             if self.emit("paragraph", bundles, anchor, confidence=RESCUED_CONFIDENCE):
                 rescued += sum(ink(text) for _, text in bundles)
         if rescued:

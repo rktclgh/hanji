@@ -175,15 +175,58 @@ def test_control_count_id_and_nchars_mismatches_keep_all_text_and_are_recorded()
     assert result.audit.ok
 
 
-def test_text_in_overlap_and_ruby_controls_is_counted_and_skipped():
-    tcps = B.control("tcps", 1, body=b"\x02\x00" + "겹침".encode("utf-16-le") + bytes(4))
-    tdut = B.control("tdut", 1, body=b"\x02\x00" + "본말".encode("utf-16-le") + b"\x01\x00" + "덧".encode("utf-16-le"))
-    result = section(B.paragraph("앞", B.extended(23, "tcps"), B.extended(23, "tdut"), controls=[tcps, tdut]))
-    assert reasons(result) == [("control_text_skipped", "chars", 2), ("control_text_skipped", "chars", 3)]
-    assert result.audit.ok
+def test_overlap_and_ruby_controls_become_their_hwpx_elements_in_place_and_join_the_transcode_ledger(monkeypatch):
+    """글자 겹침은 hp:compose@composeText, 덧말은 hp:dutmal/hp:mainText·hp:subText(런 바로 아래, 확장 컨트롤 자리).
+    기록 없이 장부가 그 레코드를 본다(control_text_skipped는 없어졌다). 몸이 짧으면 ParseError 그대로."""
+    data = B.paragraph("앞", B.extended(23, "tcps"), "중간", B.extended(23, "tdut"),
+                       controls=[B.control("tcps", 1, body=B.overlap("겹침")),
+                                 B.control("tdut", 1, body=B.ruby("본말", "덧"))])
+    result = section(data)
+    assert shape(result.root[0]) == [("0", [("앞", []), ("compose", []), ("중간", []),
+                                            ("dutmal", ["mainText", "subText"])])]
+    run = result.root[0].find(f"{HP}run")
+    assert run.find(f"{HP}compose").get("composeText") == "겹침"
+    assert [part.text for part in run.find(f"{HP}dutmal")] == ["본말", "덧"]
+    assert result.regions == [] and result.audit.ok
+
+    def check(mutate) -> transcode.Audit:
+        def wrapped(records, root, marks, skipped, location):
+            mutate(root)
+            return REAL_AUDIT(records, root, marks, skipped, location)
+
+        monkeypatch.setattr(transcode, "audit", wrapped)
+        return section(data).audit
+
+    def change_ruby(root):
+        next(root.iter(f"{HP}subText")).text = "덫"
+
+    def drop_overlap(root):
+        run = next(root.iter(f"{HP}run"))
+        run.remove(run.find(f"{HP}compose"))
+
+    def main_tail(root):
+        next(root.iter(f"{HP}mainText")).tail = "떠돌이"
+
+    assert check(change_ruby) == transcode.Audit(1, 0, 0)
+    assert check(drop_overlap) == transcode.Audit(0, 1, 0)
+    assert check(main_tail) == transcode.Audit(0, 0, 3)
+    monkeypatch.undo()
     with pytest.raises(ParseError, match="CTRL_HEADER tdut record too short") as info:
         section(B.paragraph(B.extended(23, "tdut"), controls=[B.control("tdut", 1, body=b"\x05\x00")]))
     assert info.value.location == "a.hwp:BodyText/Section0#4"
+
+
+def test_control_characters_in_overlap_and_ruby_bodies_are_dropped_and_the_ledger_agrees():
+    """덧말·글자 겹침 몸의 제어 문자(< 0x20, 탭·줄바꿈 \\t \\n \\r 말고)는 PARA_TEXT처럼 문단 글자에 들이지 않는다.
+    옮겨 쓰기 T와 장부 R이 같은 함수를 쓰므로 어긋남 없이 장부가 맞는다."""
+    data = B.paragraph(B.extended(23, "tcps"), B.extended(23, "tdut"),
+                       controls=[B.control("tcps", 1, body=B.overlap("겹\x00\x01침")),
+                                 B.control("tdut", 1, body=B.ruby("본\x07말\t", "\x1f덧\n"))])
+    result = section(data)
+    run = result.root[0].find(f"{HP}run")
+    assert run.find(f"{HP}compose").get("composeText") == "겹침"
+    assert [part.text for part in run.find(f"{HP}dutmal")] == ["본말\t", "덧\n"]
+    assert result.audit.ok
 
 
 def test_text_controls_outside_paragraphs_are_audited_with_their_record_location():

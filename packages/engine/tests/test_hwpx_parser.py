@@ -1,6 +1,7 @@
 """HWPX 문단·제목·목록과 글자 장부(스펙 §5, §10). 합성 문서는 build_hwpx_fixtures.py의 쓰기 도구로 만든다."""
 
 import importlib.util
+import unicodedata
 import zipfile
 from io import BytesIO
 from pathlib import Path
@@ -8,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from hanji.errors import ParseError
-from hanji.formats.hwpx import owpml
+from hanji.formats.hwpx import ledger, owpml
 from hanji.formats.hwpx import parser as hwpx
 from hanji.formats.hwpx.parser import HwpxParser
 from hanji_contracts import FlowLocator
@@ -49,6 +50,16 @@ def test_paragraph_text_is_the_runs_t_text_with_inline_replacements():
     assert parsed.mime == "application/hwp+zip" and parsed.pages == () and parsed.assets == {}
     assert [c.ok for c in counts] == [True] and counts[0].source == counts[0].in_blocks == 6
     assert reasons(parsed) == []
+
+
+def test_a_hyphen_element_is_a_hyphen_like_hwp_and_the_ledger_counts_it(monkeypatch):
+    """hp:hypen(OWPML 철자)은 HWP 하이픈(WCHAR 24)처럼 -다. 장부 출처의 n에도 들어 빠지면 partial이다."""
+    s = B.section(B.para(B.run(B.t("하이", B.hypen(), "픈"))))
+    parsed, (count,) = parse(s)
+    assert texts(parsed) == [("paragraph", "하이-픈")] and count.ok and count.source == 4 and parsed.regions == ()
+    monkeypatch.setattr(owpml, "INLINE", {k: v for k, v in owpml.INLINE.items() if v != "-"})  # 처리부만 잃는다
+    parsed, (count,) = parse(s)
+    assert texts(parsed) == [("paragraph", "하이픈")] and count.partial == 1 and reasons(parsed) == ["coverage_mismatch"]
 
 
 def test_outline_levels_lists_and_section_paths_over_two_sections():
@@ -108,6 +119,96 @@ def test_text_inside_objects_survives_as_a_rescued_paragraph_at_the_section_end(
     (region,) = parsed.regions
     assert (region.fallback_reason, region.region_id, region.gate.checks[0].value) == (
         "unassigned_text", "s0-p0-unassigned-text-0", 10)
+
+
+def test_ruby_text_follows_its_main_text_in_parentheses_and_overlaps_keep_their_characters_in_place(monkeypatch):
+    """덧말은 그 자리에 본말(덧말)(덧말이 비면 본말만), 글자 겹침은 겹친 글자 문단·칸 글자에 든다. 본말·덧말·겹친
+    글자는 장부 출처라 빠지면 살리고(unassigned_text) 두 번 들면 coverage_mismatch다."""
+    s = B.section(B.para(B.run(B.t("앞 "), B.dutmal("본말", "덧말"), B.t(" 뒤 "), B.compose("가나"), B.dutmal("홀로", ""))),
+                  B.para(B.run(B.tbl(1, 2, [B.tc(0, 0, B.para(B.run(B.dutmal("칸", "덧")))),
+                                            B.tc(0, 1, B.para(B.run(B.compose("다"))))]))))
+    parsed, (count,) = parse(s)
+    assert texts(parsed) == [("paragraph", "앞 본말(덧말) 뒤 가나홀로"), ("table", "칸(덧)\t다")]
+    assert count.ok and count.source == 13 and parsed.regions == ()
+    monkeypatch.setattr(owpml._Section, "ruby", lambda self, element: [])
+    parsed, (count,) = parse(s)
+    assert texts(parsed)[0] == ("paragraph", "앞  뒤")
+    assert texts(parsed)[2:] == [("paragraph", "본말덧말가나홀로"), ("paragraph", "칸덧\n다")]
+    assert count.ok and count.rescued == 11 and reasons(parsed) == ["unassigned_text"]
+    real = owpml._Section.bundles
+    monkeypatch.undo()
+    monkeypatch.setattr(owpml._Section, "bundles", lambda self, p, anchor: real(self, p, anchor) + [
+        b for b in real(self, p, anchor) if b[0] is not None and self.ledger.sources[b[0]].element.tag != owpml.T])
+    parsed, (count,) = parse(s)
+    assert count.doubled == 4 and reasons(parsed) == ["coverage_mismatch"]  # 본말·덧말·겹친 글자·홀로
+
+
+def _ruby_with(child: str) -> str:
+    """스키마 밖: 덧말 본말 안에 child 요소가 든 덧말."""
+    return ('<hp:dutmal posType="TOP" szRatio="0" option="0" styleIDRef="0" align="CENTER">'
+            f"<hp:mainText>본말{child}</hp:mainText><hp:subText>덧</hp:subText></hp:dutmal>")
+
+
+def test_ruby_text_is_only_its_direct_text_and_a_schema_foreign_t_inside_is_rescued_once():
+    """덧말 본말·덧말의 글자는 직접 글자(text와 자식 뒤 글자)뿐이고 자식 요소는 제 규칙의 출처다. 본말 안 hp:t는 따로
+    출처라 덧말 자리에는 안 들고, 문단 어디에도 놓이지 않아 구역 끝 구조 문단(unassigned_text)으로 한 번 살아난다.
+    장부는 ok이고 두 번 든 글자가 없다(전에는 속글이 두 번 나거나 자식 글자가 소리 없이 빠졌다)."""
+    parsed, (count,) = parse(B.section(B.para(B.run(_ruby_with("<hp:t>속글</hp:t>")))))
+    assert texts(parsed) == [("paragraph", "본말(덧)"), ("paragraph", "속글")]
+    assert parsed.blocks[1]["confidence"] == 0.3 and reasons(parsed) == ["unassigned_text"]
+    assert count.ok and count.rescued == 2 and count.source == count.in_blocks == 5 and count.doubled == 0
+
+
+def test_a_compose_or_textart_inside_ruby_text_is_its_own_source_and_is_rescued():
+    """본말 안 글자 겹침의 composeText·글맵시의 text 속성도 따로 센 출처다: 덧말 자리에는 안 들고 장부 ok인 채로
+    구역 끝 구조 문단으로 살아난다(전에는 장부가 둘 다 세지 않아 소리 없이 빠졌다)."""
+    parsed, (count,) = parse(B.section(B.para(B.run(_ruby_with(B.compose("겹침"))))))
+    assert texts(parsed) == [("paragraph", "본말(덧)"), ("paragraph", "겹침")]
+    assert reasons(parsed) == ["unassigned_text"] and count.ok and count.rescued == 2 and count.source == 5
+    parsed, (count,) = parse(B.section(B.para(B.run(_ruby_with(B.textart("글맵시"))))))
+    assert texts(parsed) == [("paragraph", "본말(덧)"), ("paragraph", "글맵시")]
+    assert reasons(parsed) == ["unassigned_text"] and count.ok and count.rescued == 3 and count.source == 6
+
+
+def test_a_hidden_comment_inside_ruby_text_stays_hidden_and_out_of_the_visible_ruby():
+    """본말 안 숨은 설명은 숨은 출처다: hidden_comment 처리 이력을 남기고 글자는 덧말 자리에 들지 않으며 블록에도 없다."""
+    hidden = ("<hp:hiddenComment><hp:subList>" + B.para(B.run(B.t("숨은 글"))) + "</hp:subList></hp:hiddenComment>")
+    parsed, (count,) = parse(B.section(B.para(B.run(_ruby_with(hidden)))))
+    assert texts(parsed) == [("paragraph", "본말(덧)")]
+    assert reasons(parsed) == ["hidden_comment"] and count.ok and count.hidden == 3 and count.rescued == 0
+
+
+def test_the_circled_table_is_exactly_the_unicode_circle_decompositions_of_the_five_ranges_and_zero():
+    """원문자 표는 파서와 무관한 유니코드 데이터로 확인한다: 모든 항목의 분해가 '<circle> 그 글자'이고 BMP 글자다. 범위는
+    ⓪ 0, ①–⑳, ㉑–㉟, ㊱–㊿, ⓐ–ⓩ, Ⓐ–Ⓩ뿐이다(원문자 한글·한자 등은 넣지 않는다)."""
+    for text, glyph in ledger.CIRCLED.items():
+        assert unicodedata.decomposition(glyph) == "<circle> " + " ".join(f"{ord(ch):04X}" for ch in text), text
+        assert ord(glyph) <= 0xFFFF
+    keys = {str(n) for n in range(51)} | {chr(c) for c in range(0x61, 0x7B)} | {chr(c) for c in range(0x41, 0x5B)}
+    assert set(ledger.CIRCLED) == keys
+    assert ledger.circled("21", "SHAPE_CIRCLE") == "㉑" and ledger.circled("51", "SHAPE_CIRCLE") == "51"
+    assert ledger.circled("가", "SHAPE_CIRCLE") == "가" and ledger.circled("12", "SHAPE_RECTANGLE") == "12"
+    assert ledger.circled("1", "CHAR") == "1" and ledger.circled("1", None) == "1"
+
+
+def test_circled_overlaps_become_circled_characters_and_the_ledger_counts_them_on_its_own(monkeypatch):
+    """원 모양(SHAPE_CIRCLE) 글자 겹침은 글자 전체가 표에 있으면 원문자 하나, 아니면 그대로(사각형 등 다른 모양도
+    그대로). 장부 n은 처리부와 따로 센다: 처리부만 표를 잃으면 두 자("21")가 partial로 잡힌다."""
+    s = B.section(B.para(B.run(B.compose("1", circle="SHAPE_CIRCLE"), B.compose("21", circle="SHAPE_CIRCLE"),
+                               B.compose("가", circle="SHAPE_CIRCLE"), B.compose("21", circle="SHAPE_RECTANGLE"),
+                               B.compose("①"))))
+    parsed, (count,) = parse(s)
+    assert texts(parsed) == [("paragraph", "①㉑가21①")] and count.ok and count.source == 6
+    monkeypatch.setattr(owpml, "circled", lambda text, circle: text)  # 처리부만 표를 잃는다
+    parsed, (count,) = parse(s)
+    assert texts(parsed) == [("paragraph", "121가21①")] and count.partial == 1
+    assert reasons(parsed) == ["coverage_mismatch"]
+
+
+def test_a_text_box_holding_only_ruby_or_an_overlap_still_records_shape_text():
+    for inner in (B.dutmal("본말", "덧"), B.compose("가")):
+        parsed, (count,) = parse(B.section(B.para(B.run(B.rect(B.para(B.run(inner)))))))
+        assert reasons(parsed) == ["shape_text"] and count.ok
 
 
 def test_masterpage_text_is_skipped_with_a_record():
@@ -249,6 +350,16 @@ def test_without_outline_levels_large_short_paragraphs_are_headings_by_size():
         ("paragraph", None, 1.0)]
     assert parsed.blocks[1]["section_path"] == ("가장 큰 제목",)
     assert parsed.blocks[-1]["section_path"] == ("가장 큰 제목", "큰 제목", "조금 큰 제목", "굵은 본문급 제목")
+    assert counts[0].ok
+
+
+def test_ruby_and_composed_text_count_toward_the_heading_size_weights():
+    """덧말·글자 겹침만 든 문단도 그 런의 글자 크기로 센다(본말·겹친 글자만, 작게 찍히는 덧말 글자는 세지 않는다)."""
+    s = B.section(B.para(B.run(B.t(BODY * 2))),
+                  B.para(B.run(B.dutmal("덧말뿐인 큰 제목", "작은 덧말 글자를 길게 붙인다"), char=4), lines=1),
+                  B.para(B.run(B.compose("겹침큰제목"), char=1), lines=1))
+    parsed, counts = parse(s, head=SIZES)
+    assert [(b["kind"], b.get("level")) for b in parsed.blocks] == [("paragraph", None), ("heading", 1), ("heading", 2)]
     assert counts[0].ok
 
 

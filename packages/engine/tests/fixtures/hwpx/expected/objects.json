@@ -1,0 +1,381 @@
+{
+  "schema_version": "0.4",
+  "document_id": "fx-hwpx-objects",
+  "version": 1,
+  "layer_state": "det",
+  "source": {
+    "name": "objects.hwpx",
+    "mime": "application/hwp+zip",
+    "content_hash": "sha256:1b9f76a5d9bf00b1b293491a363411896e60ce46ec9ed849b47baf93252af9c4",
+    "page_count": null
+  },
+  "pages": [],
+  "blocks": [
+    {
+      "block_id": "b_e8b0f39b3e07f18dffa7d276",
+      "content_hash": "c_84b27cc99eaee9157e3546da33d09ea0",
+      "order": 0,
+      "kind": "paragraph",
+      "text": "개체 캡션 예제 문단이다.",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 0
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_97f5c143134e27baf035502b",
+      "content_hash": "c_961f0067753292fc2b509e917c27cc6f",
+      "order": 1,
+      "kind": "paragraph",
+      "text": "a over b",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 1
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_5f62a72c7fe5636b406a5e08",
+      "content_hash": "c_ee00569d9967526e4afbc07443270b45",
+      "order": 2,
+      "kind": "caption",
+      "text": "식 1. 지어낸 분수",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 1
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_3266996523e9b838a61c2d28",
+      "content_hash": "c_993e4db8e1f413de108bd01fd85a3460",
+      "order": 3,
+      "kind": "caption",
+      "text": "상자 1. 위 캡션",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 2
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_205753bdcfbbd69e9e1172e2",
+      "content_hash": "c_02ed5202592020a469bd99d7afb2bc77",
+      "order": 4,
+      "kind": "paragraph",
+      "text": "위 캡션을 단 글상자",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 2
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_09f62f37ec7c5bdf05b8b71e",
+      "content_hash": "c_071055887bd4fcbe0130bdb6906c80c5",
+      "order": 5,
+      "kind": "caption",
+      "text": "선 1. 왼쪽 캡션",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 3
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_0d4ad6fa17f60939c849e695",
+      "content_hash": "c_538235af950927f6b76e67a4f88a7b36",
+      "order": 6,
+      "kind": "paragraph",
+      "text": "묶음 속 글상자",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 4
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_29a5033c94b261f28e6aed05",
+      "content_hash": "c_743a7a55a845f8c23041178adc278d27",
+      "order": 7,
+      "kind": "caption",
+      "text": "묶음 1. 아래 캡션",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 4
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_9f662b35fa9fda4d9ad43a20",
+      "content_hash": "c_4b4a3456b4b3bcff05395b4db5c801ac",
+      "order": 8,
+      "kind": "figure",
+      "text": "",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 5
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_ee1f77f9c09bbaa3f9ac5c5d",
+      "content_hash": "c_ff9a1407a03031f5b84832f1a4e31692",
+      "order": 9,
+      "kind": "caption",
+      "text": "개체 1. 오른쪽 캡션",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 5
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_71cb3a3900d8fe65ae2589bb",
+      "content_hash": "c_53c40ad54516b00a71d7c7567164b86d",
+      "order": 10,
+      "kind": "caption",
+      "text": "글맵시 1. 위 캡션",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 6
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_27dc3f804b1dbad828a48eb5",
+      "content_hash": "c_283f53137b869c93543b63117cfae17e",
+      "order": 11,
+      "kind": "paragraph",
+      "text": "지어낸 글맵시",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 6
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_5e51221df948340d8ce19b7d",
+      "content_hash": "c_c47d4f3c3e84b5bd0de2907a45ca4e42",
+      "order": 12,
+      "kind": "table",
+      "text": "칸 수식\nx^2\n\n칸 식 캡션\t칸 상자 캡션\n\n칸 글상자",
+      "table": {
+        "n_rows": 1,
+        "n_cols": 2,
+        "cells": [
+          {
+            "row": 0,
+            "col": 0,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "칸 수식\nx^2\n\n칸 식 캡션",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 0,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "칸 상자 캡션\n\n칸 글상자",
+            "header": "none",
+            "text_source": "native"
+          }
+        ]
+      },
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 7
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_2e8e9bbecec54d303cc51771",
+      "content_hash": "c_89436f2367e454ba6eb23a25eb0f5c9e",
+      "order": 13,
+      "kind": "paragraph",
+      "text": "덧말 앞 본말(덧말) 덧말 뒤홀로 겹침 가나 원 ①㉑가",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 8
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_043a771da25730a8f4b876e9",
+      "content_hash": "c_1406f49e94dbeef599e33e699e0e4caf",
+      "order": 14,
+      "kind": "table",
+      "text": "칸 속 칸 본말(칸 덧말)\t다",
+      "table": {
+        "n_rows": 1,
+        "n_cols": 2,
+        "cells": [
+          {
+            "row": 0,
+            "col": 0,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "칸 속 칸 본말(칸 덧말)",
+            "header": "none",
+            "text_source": "native"
+          },
+          {
+            "row": 0,
+            "col": 1,
+            "rowspan": 1,
+            "colspan": 1,
+            "text": "다",
+            "header": "none",
+            "text_source": "native"
+          }
+        ]
+      },
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 9
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    },
+    {
+      "block_id": "b_fc58fd14b6d53964b96e9fb4",
+      "content_hash": "c_b6f3f40fb21c8f162f34d4d8ef922097",
+      "order": 15,
+      "kind": "paragraph",
+      "text": "줄 끝 하이-픈 뒤 글자",
+      "table": null,
+      "figure": null,
+      "level": null,
+      "section_path": [],
+      "locator": {
+        "kind": "flow",
+        "section_path": [],
+        "paragraph_index": 10
+      },
+      "confidence": 1.0,
+      "state": "det",
+      "text_source": "native",
+      "region_id": null
+    }
+  ]
+}
