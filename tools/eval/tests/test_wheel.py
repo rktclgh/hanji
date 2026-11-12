@@ -24,8 +24,21 @@ def _expected() -> set[str]:
 
     deps = {str(Requirement(d)) for d in project["dependencies"]}
     for extra, items in extras.items():
-        deps |= {str(Requirement(f'{d}; extra == "{extra}"')) for d in expand(items)}
+        deps |= {_with_extra(d, extra) for d in expand(items)}
     return deps
+
+
+def _with_extra(item: str, extra: str) -> str:
+    """extra 표시를 붙인다: 항목에 이미 표시가 있으면 hatchling처럼 (표시) and extra로 묶는다."""
+    req = Requirement(item)
+    marker = f"({req.marker}) and " if req.marker else ""
+    req.marker = None
+    return str(Requirement(f'{req}; {marker}extra == "{extra}"'))
+
+
+def test_an_extra_entry_with_its_own_marker_keeps_both_markers():
+    assert _with_extra("a>=1", "ocr") == 'a>=1; extra == "ocr"'
+    assert _with_extra('a>=1; sys_platform != "darwin"', "ocr") == 'a>=1; sys_platform != "darwin" and extra == "ocr"'
 
 
 def test_the_engine_wheel_has_no_eval_code_and_its_dependencies_are_unchanged(tmp_path):

@@ -3,6 +3,9 @@
 # or-alternative(branch로 고른 허용 쪽), runtime-exception(GCC 예외 등), weak-copyleft-library(고치지도 들여오지도 않는
 # 남의 휠의 LGPL·MPL), optional-not-shipped(SBOM에만 있고 설치 파일에 없음: absent의 glob이 비어야 한다),
 # build-only(빌드 스크립트, 바이너리에 들지 않음). evidence는 site-packages 기준 파일·절.
+# wheel_tags(WHEEL 파일 Tag: 값에 맞추는 fnmatch 패턴): 배포판 줄에서는 묶인 줄을 적은 휠(설치된 플랫폼 휠이 맞지 않으면
+# 시험이 실패한다), 묶인 줄에서는 그 줄이 맞는 휠(없으면 모든 휠). 적은 휠: macOS arm64는 eval venv(cp312), Linux x86_64는
+# tools/eval/uv.lock에 고정된 cp312 manylinux 휠(sha256 확인 뒤 메타데이터·SBOM·고지 파일만 읽음).
 
 [[package]]
 name = "annotated-types"
@@ -81,6 +84,7 @@ name = "numpy"
 version = "2.5.3"
 declared = "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0"
 basis = "metadata License-Expression"
+wheel_tags = ["*-macosx_*_arm64", "*-manylinux_*_x86_64"]
 
 [[package.bundled]]
 component = "libdivide"
@@ -182,31 +186,36 @@ evidence = "numpy-2.5.3.dist-info/licenses/numpy/random/src/splitmix64/LICENSE.m
 component = "OpenBLAS"
 spdx = "BSD-3-Clause"
 status = "allowed"
-evidence = "numpy-2.5.3.dist-info/licenses/LICENSE.txt section Name: OpenBLAS (Linux/Windows wheels)"
+evidence = "numpy-2.5.3.dist-info/licenses/LICENSE.txt section Name: OpenBLAS; numpy.libs/libscipy_openblas64_*.so"
+wheel_tags = ["*-manylinux_*_x86_64"]
 
 [[package.bundled]]
 component = "LAPACK in OpenBLAS"
 spdx = "BSD-3-Clause-Open-MPI"
 status = "allowed"
-evidence = "numpy-2.5.3.dist-info/licenses/LICENSE.txt section Name: LAPACK"
+evidence = "numpy-2.5.3.dist-info/licenses/LICENSE.txt section Name: LAPACK; inside numpy.libs/libscipy_openblas64_*.so"
+wheel_tags = ["*-manylinux_*_x86_64"]
 
 [[package.bundled]]
 component = "GCC runtime library (libgfortran, libgcc)"
 spdx = "GPL-3.0-or-later WITH GCC-exception-3.1"
 status = "runtime-exception"
-evidence = "numpy-2.5.3.dist-info/licenses/LICENSE.txt Name: GCC runtime library (Linux/Windows wheels only)"
+evidence = "numpy-2.5.3.dist-info/licenses/LICENSE.txt Name: GCC runtime library; numpy.libs/libgfortran-*.so.5.0.0"
+wheel_tags = ["*-manylinux_*_x86_64"]
 
 [[package.bundled]]
 component = "libquadmath"
 spdx = "LGPL-2.1-or-later"
 status = "weak-copyleft-library"
-evidence = "numpy-2.5.3.dist-info/licenses/LICENSE.txt Name: libquadmath (unmodified library, Linux wheel)"
+evidence = "numpy-2.5.3.dist-info/licenses/LICENSE.txt Name: libquadmath (unmodified); numpy.libs/libquadmath-*.so.0*"
+wheel_tags = ["*-manylinux_*_x86_64"]
 
 [[package]]
 name = "onnxruntime"
 version = "1.30.0"
 declared = "MIT"
 basis = "metadata License field MIT License and classifier MIT License"
+wheel_tags = ["*-macosx_*_arm64", "*-manylinux_*_x86_64"]
 
 [[package.bundled]]
 component = "protocolbuffers/protobuf"
@@ -641,6 +650,7 @@ name = "pillow"
 version = "12.3.0"
 declared = "MIT-CMU"
 basis = "metadata License-Expression"
+wheel_tags = ["*-macosx_*_arm64", "*-manylinux_*_x86_64"]
 
 [[package.bundled]]
 component = "PIL._avif 12.3.0"
@@ -812,6 +822,14 @@ evidence = "pillow-12.3.0.dist-info/sboms/*.cdx.json component zlib"
 sbom_name = "zlib"
 
 [[package.bundled]]
+component = "libXau 1.0.9 (auditwheel copy of the system library)"
+spdx = "MIT-open-group"
+status = "allowed"
+evidence = "pillow-12.3.0.dist-info/sboms/auditwheel.cdx.json component libXau (no licence field); LICENSE section XAU"
+sbom_name = "libXau"
+wheel_tags = ["*-manylinux_*_x86_64"]
+
+[[package.bundled]]
 component = "aom"
 spdx = "BSD-2-Clause"
 status = "allowed"
@@ -913,6 +931,7 @@ name = "pyclipper"
 version = "1.4.0"
 declared = "MIT"
 basis = "metadata License field MIT and classifier MIT License"
+wheel_tags = ["*-macosx_*_universal2", "*-manylinux_*_x86_64"]
 
 [[package.bundled]]
 component = "Clipper"
@@ -931,6 +950,7 @@ name = "pydantic-core"
 version = "2.46.5"
 declared = "MIT"
 basis = "metadata License-Expression"
+wheel_tags = ["*-macosx_*_arm64", "*-manylinux_*_x86_64"]
 
 [[package.bundled]]
 component = "1 Rust crates"
@@ -1021,6 +1041,7 @@ name = "pypdfium2"
 version = "5.13.0"
 declared = "Apache-2.0 AND BSD-3-Clause"
 basis = "metadata License field BSD-3-Clause, Apache-2.0, dependency licenses; License-File LICENSES/*"
+wheel_tags = ["*-macosx_*_arm64", "*-manylinux_*_x86_64"]
 
 [[package.bundled]]
 component = "abseil"
