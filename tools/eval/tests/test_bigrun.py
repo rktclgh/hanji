@@ -214,7 +214,7 @@ def test_missing_models_stop_the_run_unless_explicitly_allowed(tmp_path, monkeyp
     manifest, split, registry = _corpus(tmp_path)
     with pytest.raises(ModelError):
         bigrun.run(manifest, split, tmp_path / "out", registry, "synthetic", "2026-11-12")
-    assert bigrun.model_shas(allow_missing=True) == []
+    assert bigrun.model_shas(allow_missing=True) == ([], sorted(bigrun.models.names()))
 
 
 def test_a_hanging_worker_times_out_and_a_dying_worker_is_a_crash(tmp_path):
@@ -433,3 +433,95 @@ def test_untracked_files_under_the_engine_or_the_harness_make_the_run_dirty(tmp_
     assert bigrun.git_state(tmp_path)[1] is False
     (tmp_path / "tools" / "eval" / "src" / "new_module.py").write_text("x = 1\n", encoding="utf-8")
     assert bigrun.git_state(tmp_path)[1] is True
+
+
+def _recording_worker(log: Path) -> list[str]:
+    """받은 인자를 log에 적고 규약에 맞는 출력만 내는 지어낸 작업자(문서를 열지 않는다)."""
+    code = (
+        "import json, sys\n"
+        f"open({str(log)!r}, 'a', encoding='utf-8').write(json.dumps(sys.argv[1:]) + '\\n')\n"
+        "if sys.argv[1] == 'ingest':\n"
+        "    print(json.dumps({'status': 'created', 'error': None, 'seconds': 0.1, 'rss_before': None,\n"
+        "                      'rss_peak': None, 'pages': 1, 'kinds': {}, 'reasons': {}, 'tree_sha256': '0' * 64,\n"
+        "                      'history_sha256': '0' * 64, 'assets_sha256': '0' * 64, 'distribution': False}))\n"
+        "else:\n"
+        "    print(json.dumps({k: 1 for k in ('hangul_original', 'hangul_pdf', 'common', 'union', 'set_common',\n"
+        "                                     'set_union')}))\n")
+    return [sys.executable, "-c", code]
+
+
+def test_relative_manifest_and_extra_paths_reach_both_workers_as_absolute_paths(tmp_path, monkeypatch):
+    manifest, split, registry = _corpus(tmp_path)
+    extra = tmp_path / "extra"
+    extra.mkdir()
+    shutil.copyfile(FIXTURES / "ooxml" / "inputs" / "headings.docx", extra / "new.docx")
+    log = tmp_path / "args.jsonl"
+    monkeypatch.chdir(tmp_path)  # 작업자는 홈 폴더에서 돈다: 호출한 쪽의 상대 경로는 거기서 풀리면 안 된다
+    _run(Path("corpus") / "manifest.json", split, tmp_path / "out", registry, jobs=1,
+         extra_dirs=[Path("extra")], worker=_recording_worker(log))
+    calls = [json.loads(line) for line in log.read_text(encoding="utf-8").splitlines()]
+    paths = [Path(p) for c in calls for p in (c[1:2] if c[0] == "ingest" else c[1:3])]
+    assert {c[0] for c in calls} == {"ingest", "pair"} and len(paths) == 6 + 4
+    assert all(p.is_absolute() and p.is_file() for p in paths)
+
+
+def test_missing_models_keep_the_hashes_of_the_models_that_resolved(monkeypatch):
+    def resolve(name: str) -> Path:
+        if name == "layout":
+            raise ModelError("synthetic missing model")
+        return Path("/synthetic") / name
+
+    monkeypatch.setattr(bigrun.models, "resolve", resolve)
+    shas, missing = bigrun.model_shas(allow_missing=True)
+    assert missing == ["layout"]
+    assert shas == sorted(bigrun.models.MANIFEST[n].sha256 for n in bigrun.models.names() if n != "layout")
+    with pytest.raises(ModelError):
+        bigrun.model_shas(allow_missing=False)
+
+
+def test_a_summary_records_missing_model_names_and_the_committed_form_still_passes():
+    tools = {"tool": "hanji", "version": "0.1.0", "models": ["0" * 64]}
+    spec = guard.ENV
+    env = {"system": "Linux", "machine": "x86_64", "cpu_model": "other", "cores": 1, "memory_bytes": None,
+           "python": "3.12.13", "threads": {}, "datasets": [], "split": None}
+    guard.check(env | {"tools": [tools]}, spec)  # 커밋된 요약의 꼴(빠진 모델 없음)
+    guard.check(env | {"tools": [tools | {"models_missing": ["layout", "ocr-det"]}]}, spec)
+    for bad in (["/abs/path"], ["layout", "layout"], "layout"):
+        with pytest.raises(guard.GuardError):
+            guard.check(env | {"tools": [tools | {"models_missing": bad}]}, spec)
+
+
+def test_two_runs_cannot_reserve_the_same_work_folder(tmp_path):
+    out = tmp_path / "out"
+    lock = bigrun.reserve(out)
+    with pytest.raises(bigrun.BigrunError, match="in use"):
+        bigrun.reserve(out)
+    bigrun.release(lock)
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    lock = bigrun.reserve(empty)  # 이미 있는 빈 폴더도 같은 규칙(잠금 파일 하나로)
+    with pytest.raises(bigrun.BigrunError, match="in use"):
+        bigrun.reserve(empty)
+    bigrun.release(lock)
+    (empty / "old.txt").write_text("x", encoding="utf-8")
+    with pytest.raises(bigrun.BigrunError, match="new or empty"):
+        bigrun.reserve(empty)
+    assert sorted(p.name for p in empty.iterdir()) == ["old.txt"]
+
+
+def test_a_run_holds_the_work_folder_and_releases_it_when_done(tmp_path, monkeypatch):
+    manifest, split, registry = _corpus(tmp_path)
+    seen = []
+    real = bigrun.run_doc
+
+    def spy(*args, **kw):
+        seen.append((tmp_path / "out" / bigrun.LOCK).exists())
+        return real(*args, **kw)
+
+    monkeypatch.setattr(bigrun, "run_doc", spy)
+    _run(manifest, split, tmp_path / "out", registry, jobs=1, worker=_recording_worker(tmp_path / "args.jsonl"))
+    assert seen and all(seen) and not (tmp_path / "out" / bigrun.LOCK).exists()
+    (tmp_path / "busy").mkdir()
+    (tmp_path / "busy" / bigrun.LOCK).write_bytes(b"")  # 다른 실행이 잡은 폴더
+    with pytest.raises(bigrun.BigrunError):
+        _run(manifest, split, tmp_path / "busy", registry, worker=NEVER)

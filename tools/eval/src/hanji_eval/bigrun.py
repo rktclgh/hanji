@@ -31,6 +31,7 @@ MiB = 1024 * 1024
 KINDS = ("heading", "paragraph", "list_item", "caption", "page_header", "page_footer", "table", "figure", "other")
 EXTS = {".pdf": "pdf", ".hwp": "hwp", ".hwpx": "hwpx", ".docx": "docx", ".pptx": "pptx"}
 REPO = Path(__file__).resolve().parents[4]
+LOCK = ".run-lock"  # 작업 폴더를 잡은 실행 하나의 표시(O_EXCL로 만든다, 실행이 끝나면 지운다)
 # 스펙 §7.6: 문서 단위 상한은 근사이고 결과에 그 사실을 적는다(summary.md에 늘 같은 글로)
 CP_NOTE = ("- 문서 단위 95% 상한(한쪽 Clopper-Pearson)은 전수 집계를 문서 모집단에서 뽑은 표본으로 보는 근사다"
            "(스펙 §7.6).")
@@ -406,7 +407,7 @@ def extras(dirs: Sequence[Path], manifest: list[dict[str, Any]], split: dict[str
     held = _held(split, sealed)
     known = {d["sha256"] for d in manifest}
     out, skipped, bad = [], 0, 0
-    for folder in dirs:
+    for folder in (d.resolve() for d in dirs):  # 작업자는 홈 폴더에서 돈다: 절대 경로로 넘긴다
         if not folder.is_dir():
             raise BigrunError("an --extra folder does not exist")
         for path in sorted(p for p in folder.rglob("*") if p.is_file() and p.suffix.lower() in EXTS):
@@ -441,15 +442,46 @@ def git_state(root: Path) -> tuple[str, bool]:
     return commit, dirty
 
 
-def model_shas(allow_missing: bool) -> list[str]:
-    """기본 설정의 OCR·레이아웃 모델 파일(크기·sha256 확인). 하나라도 없거나 다르면 ModelError(allow_missing이면 빈
-    목록: 그 실행은 모델 없이 돈 것이고 요약의 env.tools[0].models가 빈다)."""
+def model_shas(allow_missing: bool) -> tuple[list[str], list[str]]:
+    """(찾은 모델 파일의 sha256, 찾지 못한 모델 이름). 기본 설정의 OCR·레이아웃 모델 파일(크기·sha256 확인). 하나라도
+    없거나 다르면 ModelError, allow_missing이면 찾은 것의 해시는 그대로 두고 빠진 이름을 따로 돌려준다(요약의
+    env.tools[0].models_missing)."""
+    shas, missing = [], []
+    for name in models.names():
+        try:
+            models.resolve(name)
+        except ModelError:
+            if not allow_missing:
+                raise
+            missing.append(name)
+            continue
+        shas.append(models.MANIFEST[name].sha256)
+    return sorted(shas), sorted(missing)
+
+
+def reserve(out: Path) -> Path:
+    """작업 폴더를 이 실행 하나에 잡는다: 새 폴더를 만들거나(os.mkdir) 이미 있는 빈 폴더를 쓰고, 어느 쪽이든 그 안에
+    LOCK을 O_CREAT|O_EXCL로 만든다(두 실행이 같은 폴더를 동시에 잡지 못한다). 이미 잡혀 있으면 BigrunError("in use"),
+    잠금 말고 다른 파일이 있으면 BigrunError("new or empty"). 돌려준 잠금 파일은 release로 푼다."""
+    out.parent.mkdir(parents=True, exist_ok=True)
     try:
-        return sorted(models.MANIFEST[name].sha256 for name in models.names() if models.resolve(name))
-    except ModelError:
-        if allow_missing:
-            return []
-        raise
+        os.mkdir(out)
+    except FileExistsError:
+        if not out.is_dir():
+            raise BigrunError("the work folder must be new or empty") from None
+    lock = out / LOCK
+    try:
+        os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644))
+    except FileExistsError:
+        raise BigrunError("the work folder is in use by another run") from None
+    if any(p.name != LOCK for p in out.iterdir()):
+        release(lock)
+        raise BigrunError("the work folder must be new or empty")
+    return lock
+
+
+def release(lock: Path) -> None:
+    lock.unlink(missing_ok=True)
 
 
 def run(manifest_path: Path, split_path: Path, out: Path, registry: Registry, name: str, date: str, jobs: int = 4,
@@ -476,56 +508,60 @@ def run(manifest_path: Path, split_path: Path, out: Path, registry: Registry, na
     corpus.assert_unsealed(todo, manifest, split)
     check_files(todo, manifest, manifest_path, _held(split, sealed))
     extra_jobs, skipped = extras(extra_dirs, manifest, split, sealed)
-    base = manifest_path.parent
+    base = manifest_path.parent.resolve()  # 작업자는 홈 폴더에서 돈다: 문서 경로는 절대 경로로 넘긴다
     sources = [registry.source("corpus-big", "dev")]
     provenance.check_selection(sources, registry)
-    shas = model_shas(allow_no_models)
+    shas, missing = model_shas(allow_no_models)
     # 작업 프로세스마다 ORT 스레드를 나눈다(ingest_many와 같은 규칙, 사용자가 정한 HANJI_ORT_THREADS가 이긴다)
     threads = os.environ.get("HANJI_ORT_THREADS") or str(pool_threads(jobs, cpu_count(), os.cpu_count() or 1) or "")
     env = dict(os.environ) | ({"HANJI_ORT_THREADS": threads} if threads else {})
     jobs_list = [(d["id"], d["format"], base / d["file"], "dev") for d in todo]
     jobs_list += [(doc, fmt, path, "extra") for doc, fmt, path in extra_jobs]
-    out.mkdir(parents=True, exist_ok=True)
-    lock = threading.Lock()
+    held = reserve(out)  # 여기부터 끝날 때까지 이 실행만 폴더에 쓴다
+    try:
+        lock = threading.Lock()
 
-    def append(name: str, record: dict[str, Any]) -> dict[str, Any]:
-        with lock, (out / name).open("a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=True) + "\n")
-        return record
+        def append(name: str, record: dict[str, Any]) -> dict[str, Any]:
+            with lock, (out / name).open("a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=True) + "\n")
+            return record
 
-    with ThreadPoolExecutor(max_workers=jobs) as pool:
-        records = list(pool.map(lambda j: append("docs.jsonl", run_doc(*j, timeout=timeout, twice=twice,
-                                                                       worker=worker, env=env)), jobs_list))
-    by_doc = {r["doc"]: r for r in records}
-    links = []
-    for b in corpus.bundles(manifest):
-        if b.pdf["id"] in by_doc:
-            links += [(b.bundle, by_doc[o["id"]], by_doc[b.pdf["id"]], base / o["file"], base / b.pdf["file"])
-                      for o in b.originals]
+        with ThreadPoolExecutor(max_workers=jobs) as pool:
+            records = list(pool.map(lambda j: append("docs.jsonl", run_doc(*j, timeout=timeout, twice=twice,
+                                                                           worker=worker, env=env)), jobs_list))
+        by_doc = {r["doc"]: r for r in records}
+        links = []
+        for b in corpus.bundles(manifest):
+            if b.pdf["id"] in by_doc:
+                links += [(b.bundle, by_doc[o["id"]], by_doc[b.pdf["id"]], base / o["file"], base / b.pdf["file"])
+                          for o in b.originals]
 
-    def one(link: tuple) -> dict[str, Any]:
-        bundle, original, pdf, opath, ppath = link
-        numbers = None
-        if original["status"] == "created" and pdf["status"] == "created" and not original["distribution"]:
-            state, numbers, _ = _run_worker(["pair", str(opath), str(ppath)], timeout, worker, env)
-            numbers = numbers if state == "ok" else None
-        return append("pairs.jsonl", pair_record(bundle, original, pdf, numbers))
+        def one(link: tuple) -> dict[str, Any]:
+            bundle, original, pdf, opath, ppath = link
+            numbers = None
+            if original["status"] == "created" and pdf["status"] == "created" and not original["distribution"]:
+                state, numbers, _ = _run_worker(["pair", str(opath), str(ppath)], timeout, worker, env)
+                numbers = numbers if state == "ok" else None
+            return append("pairs.jsonl", pair_record(bundle, original, pdf, numbers))
 
-    with ThreadPoolExecutor(max_workers=jobs) as pool:
-        pairs = list(pool.map(one, links))
-    dev = sorted((r for r in records if r["set"] == "dev"), key=lambda r: r["doc"])
-    machine = guard.machine_env({k: env.get(k, "") for k in ("HANJI_ORT_THREADS", "OMP_NUM_THREADS")})
-    tools = [{"tool": "hanji", "version": importlib.metadata.version("hanji"), "models": shas}]
-    env = {"machine": machine | {"tools": tools, "datasets": [{"dataset": "corpus-big", "version": dataset.version,
-                                                               "identity": dataset.identity}], "split": "hanji-ko-v1"},
-           "jobs": jobs, "timeout_s": timeout, "twice": twice}
-    run_info = {"name": name, "date": date, "harness_commit": commit, "engine_commit": commit, "dirty": dirty,
-                "manifest_sha256": sha, "split_sha256": split_sha}
-    counts = {"manifest": len(manifest), "sealed": len(sealed), "run": len(dev), "extra": len(extra_jobs),
-              "extra_skipped": skipped}
-    summary = summarize(run_info, env, [{"dataset": s.dataset, "split": s.split} for s in sources], counts, dev,
-                        {d["id"] for d in todo}, sorted(pairs, key=lambda p: (p["bundle"], p["original"])), twice)
-    provenance.check_report(provenance.sources_of([summary]), registry, holdout_open=False)
-    (out / "summary.json").write_text(json.dumps(summary, ensure_ascii=True, indent=1) + "\n", encoding="utf-8")
-    (out / "summary.md").write_text(render_md(summary), encoding="utf-8")
-    return summary
+        with ThreadPoolExecutor(max_workers=jobs) as pool:
+            pairs = list(pool.map(one, links))
+        dev = sorted((r for r in records if r["set"] == "dev"), key=lambda r: r["doc"])
+        machine = guard.machine_env({k: env.get(k, "") for k in ("HANJI_ORT_THREADS", "OMP_NUM_THREADS")})
+        tools = [{"tool": "hanji", "version": importlib.metadata.version("hanji"), "models": shas}
+                 | ({"models_missing": missing} if missing else {})]
+        used = [{"dataset": "corpus-big", "version": dataset.version, "identity": dataset.identity}]
+        env = {"machine": machine | {"tools": tools, "datasets": used, "split": "hanji-ko-v1"},
+               "jobs": jobs, "timeout_s": timeout, "twice": twice}
+        run_info = {"name": name, "date": date, "harness_commit": commit, "engine_commit": commit, "dirty": dirty,
+                    "manifest_sha256": sha, "split_sha256": split_sha}
+        counts = {"manifest": len(manifest), "sealed": len(sealed), "run": len(dev), "extra": len(extra_jobs),
+                  "extra_skipped": skipped}
+        summary = summarize(run_info, env, [{"dataset": s.dataset, "split": s.split} for s in sources], counts, dev,
+                            {d["id"] for d in todo}, sorted(pairs, key=lambda p: (p["bundle"], p["original"])), twice)
+        provenance.check_report(provenance.sources_of([summary]), registry, holdout_open=False)
+        (out / "summary.json").write_text(json.dumps(summary, ensure_ascii=True, indent=1) + "\n", encoding="utf-8")
+        (out / "summary.md").write_text(render_md(summary), encoding="utf-8")
+        return summary
+    finally:
+        release(held)

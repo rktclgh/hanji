@@ -11,6 +11,8 @@ import sys
 from collections.abc import Callable, Mapping
 from typing import Any
 
+from hanji import models as _models
+
 Spec = Callable[[Any, str], None]
 
 
@@ -79,12 +81,18 @@ def array(spec: Spec, min_len: int = 0, max_len: int = 1_000_000) -> Spec:
     return check
 
 
-def obj(fields: Mapping[str, Spec]) -> Spec:
+def obj(fields: Mapping[str, Spec], absent_ok: Mapping[str, Spec] | None = None) -> Spec:
+    """fields의 키는 모두 있어야 하고, absent_ok의 키는 없어도 된다(있으면 그 꼴을 본다)."""
+    extra = dict(absent_ok or {})
+
     def check(value: Any, path: str) -> None:
-        if not isinstance(value, dict) or set(value) != set(fields):
+        if not isinstance(value, dict) or not set(fields) <= set(value) <= set(fields) | set(extra):
             _fail(path, "keys differ from the schema")
         for key, spec in fields.items():
             spec(value[key], f"{path}.{key}")
+        for key, spec in extra.items():
+            if key in value:
+                spec(value[key], f"{path}.{key}")
     return check
 
 
@@ -95,6 +103,15 @@ def mapping(key: Spec, value_spec: Spec) -> Spec:
         for k, v in value.items():
             key(k, f"{path}<key>")
             value_spec(v, f"{path}.{k}")
+    return check
+
+
+def distinct(spec: Spec) -> Spec:
+    """같은 값이 두 번 없는 목록."""
+    def check(value: Any, path: str) -> None:
+        spec(value, path)
+        if len(set(value)) != len(value):
+            _fail(path, "repeated values")
     return check
 
 
@@ -129,6 +146,7 @@ DATASETS = ("hanji-ko-v1", "hanji-ko-scan-v1", "dp-bench", "tableeval-v0", "bord
 SPLITS = ("dev", "holdout", "all")
 SPLIT_FILES = ("hanji-ko-v1",)
 TOOLS = ("hanji", "docling", "opendataloader")
+MODELS = tuple(sorted(_models.MANIFEST))  # 엔진 모델 파일 이름(경로가 아니다)
 CONFIGS = ("default", "core", "ocr-ko", "local")
 FORMATS = ("pdf", "hwp", "hwpx", "docx", "pptx")
 STATUSES = ("created", "parse_error", "timeout", "crashed")
@@ -184,7 +202,9 @@ ENV = obj({
     "memory_bytes": optional(integer(1)),
     "python": pattern(VERSION),
     "threads": mapping(enum("HANJI_ORT_THREADS", "OMP_NUM_THREADS"), integer(1)),
-    "tools": array(obj({"tool": enum(*TOOLS), "version": pattern(VERSION), "models": array(pattern(SHA256))})),
+    # models_missing: --allow-no-models로 돌 때 찾지 못한 모델 이름(없으면 키도 없다: 모두 있었다)
+    "tools": array(obj({"tool": enum(*TOOLS), "version": pattern(VERSION), "models": array(pattern(SHA256))},
+                       {"models_missing": distinct(array(enum(*MODELS), 1))})),
     "datasets": array(obj({"dataset": enum(*DATASETS), "version": pattern(VERSION), "identity": pattern(SHA256)})),
     "split": optional(enum(*SPLIT_FILES)),
 })
