@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from hanji.errors import ModelError
 
-from hanji_eval import bigrun, cli, corpus, guard
+from hanji_eval import bigrun, cli, corpus, guard, provenance
 from hanji_eval.datasets import Registry, RegistryError
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -392,3 +392,21 @@ def test_a_missing_extra_folder_fails_and_duplicate_extra_files_run_once(tmp_pat
     shutil.copyfile(FIXTURES / "ooxml" / "inputs" / "headings.docx", extra / "b.docx")
     jobs, skipped = bigrun.extras([extra], corpus.load_manifest(manifest), corpus.load_split(split), [])
     assert (len(jobs), skipped) == (1, 1)
+
+
+RESULTS = sorted((ROOT / "tools" / "eval" / "results").glob("*/summary.json"))
+
+
+@pytest.mark.parametrize("path", RESULTS, ids=[p.parent.name for p in RESULTS])
+def test_every_committed_summary_matches_its_schema_bytes_markdown_and_sources(path):
+    # 손으로 고친 커밋 결과를 잡는다: 스키마, 쓴 그대로의 바이트, render_md, 보고서 출구 검사
+    raw = path.read_text(encoding="utf-8")
+    summary = json.loads(raw)
+    guard.check(summary, bigrun.SUMMARY)
+    assert raw == json.dumps(summary, ensure_ascii=True, indent=1) + "\n"
+    assert (path.parent / "summary.md").read_text(encoding="utf-8") == bigrun.render_md(summary)
+    provenance.check_report(provenance.sources_of([summary]), Registry.load(cli.DATASETS), holdout_open=False)
+
+
+def test_the_committed_results_folder_is_not_empty():
+    assert RESULTS
