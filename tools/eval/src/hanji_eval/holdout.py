@@ -1,5 +1,5 @@
 """봉인한 보류 세트: --open-holdout <사유> 없이는 봉인 분할을 채점하지 않고, 열 때마다 holdout-log.json에
-{차례, 날짜, 엔진 커밋, 보정 표 판, 사유}를 남긴다."""
+{차례, 날짜, 데이터셋 이름·identity, 분할, 엔진 커밋, 보정 표 판, 사유}를 남긴다."""
 
 import json
 import os
@@ -13,6 +13,7 @@ LOG_SCHEMA = guard.obj({
     "schema": guard.enum("hanji-eval-holdout-log/1"),
     "entries": guard.array(guard.obj({
         "entry": guard.integer(1), "date": guard.pattern(guard.DATE), "dataset": guard.enum(*guard.DATASETS),
+        "identity": guard.pattern(guard.SHA256),  # 연 때의 파일 sha256 묶음(이름이 같아도 파일이 바뀌면 다르다)
         "split": guard.enum(*guard.SPLITS),
         "engine_commit": guard.pattern(guard.COMMIT), "table_version": guard.optional(guard.integer(1)),
         "reason": guard.pattern(guard.SLUG),
@@ -69,7 +70,8 @@ def admit(dataset: Dataset, split: str, reason: str | None, log: Path, engine_co
     lock = _lock(log)
     try:
         entries = read_log(log)
-        entry = {"entry": len(entries) + 1, "date": date, "dataset": dataset.name, "split": split,
+        entry = {"entry": len(entries) + 1, "date": date, "dataset": dataset.name, "identity": dataset.identity,
+                 "split": split,
                  "engine_commit": engine_commit, "table_version": table_version, "reason": reason}
         data = {"schema": "hanji-eval-holdout-log/1", "entries": [*entries, entry]}
         guard.check(data, LOG_SCHEMA)

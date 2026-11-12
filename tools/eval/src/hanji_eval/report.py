@@ -47,7 +47,12 @@ def check_unique(part: str, rows: list[dict[str, Any]]) -> None:
 
 
 def merge(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
-    """두 보고서를 합친다(run·env가 같아야 한다). 결과의 출처는 그대로 따라간다."""
+    """두 보고서를 합친다(스키마가 같고 둘 다 그 스키마에 맞아야 하며 run·env가 같아야 한다). 결과의 출처는 그대로
+    따라간다."""
+    if a.get("schema") != b.get("schema"):
+        raise ReportError("reports with different schemas cannot be merged")
+    guard.check(a, guard.REPORT)  # 줄을 합치기 전에 둘 다 본다(합친 뒤의 검사만으로는 b의 틀린 꼴이 가려진다)
+    guard.check(b, guard.REPORT)
     if a["run"] != b["run"] or a["env"] != b["env"]:
         raise ReportError("reports from different runs cannot be merged")
     if a["holdout_opened"]["opened"] and b["holdout_opened"]["opened"] and a["holdout_opened"] != b["holdout_opened"]:
@@ -117,7 +122,7 @@ def _sealed(registry: Registry, source: Source) -> bool:
 
 
 def _check_opened(report: dict[str, Any], registry: Registry, holdout_log: Path, sources: set[Source]) -> None:
-    """보류 세트를 열었다면 인용한 기록이 이 보고서의 봉인 출처(데이터셋·분할)와 엔진 커밋에 맞아야 한다."""
+    """보류 세트를 열었다면 인용한 기록이 이 보고서의 봉인 출처(데이터셋·분할·identity)와 엔진 커밋에 맞아야 한다."""
     opened = report["holdout_opened"]
     if opened["opened"] != (opened["entry"] is not None):
         raise ReportError("holdout_opened.entry must be set exactly when the holdout was opened")
@@ -130,8 +135,12 @@ def _check_opened(report: dict[str, Any], registry: Registry, holdout_log: Path,
         raise ReportError("holdout_opened.entry is not in the holdout log")
     for source in sources:
         dataset = registry.by_identity(source.dataset)
-        if source.split in dataset.sealed_splits and (entry["dataset"], entry["split"]) != (dataset.name, source.split):
+        if source.split not in dataset.sealed_splits:
+            continue
+        if (entry["dataset"], entry["split"]) != (dataset.name, source.split):
             raise ReportError("the holdout log entry was opened for another dataset or split")
+        if entry["identity"] != source.dataset:
+            raise ReportError("the holdout log entry was opened for other dataset files (identity differs)")
     if entry["engine_commit"] != report["run"]["engine_commit"]:
         raise ReportError("the holdout log entry was opened for another engine commit")
 

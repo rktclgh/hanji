@@ -78,7 +78,8 @@ def test_the_cited_holdout_entry_must_match_the_dataset_split_and_engine_commit(
     log = tmp_path / "holdout-log.json"
     rep = _report([], "holdout")
     rep["holdout_opened"] = {"opened": True, "entry": 1}
-    entry = {"entry": 1, "date": "2026-11-12", "dataset": "corpus-big", "split": "holdout", "engine_commit": "b" * 40,
+    entry = {"entry": 1, "date": "2026-11-12", "dataset": "corpus-big",
+             "identity": REGISTRY.get("hanji-ko-v1").identity, "split": "holdout", "engine_commit": "b" * 40,
              "table_version": None, "reason": "ev-d-public-claim"}
     for changed, message in [({}, "another dataset or split"),
                              ({"dataset": "hanji-ko-v1", "engine_commit": "c" * 40}, "another engine commit")]:
@@ -171,4 +172,39 @@ def test_rows_with_the_same_key_are_refused_in_results_and_failures(tmp_path, pa
     rep[part] = [rep[part][0], rep[part][0]]  # 꼭 같은 줄도 쓰기에서는 중복이다(병합만 하나로 둔다)
     with pytest.raises(report.ReportError, match=f"duplicate {part} row"):
         report.write(rep, tmp_path / "out", REGISTRY, tmp_path / "log")
+    assert not (tmp_path / "out").exists()
+
+
+def test_merging_refuses_a_report_of_another_or_an_invalid_schema_before_combining_rows():
+    a = _report([_row("hanji", 10, 10, {})])
+    other = json.loads(json.dumps(a)) | {"schema": "hanji-eval-report/2"}
+    with pytest.raises(report.ReportError, match="different schemas"):
+        report.merge(a, other)
+    with pytest.raises(report.ReportError, match="different schemas"):
+        report.merge(other, a)
+    missing = {k: v for k, v in a.items() if k != "schema"}
+    with pytest.raises(report.ReportError, match="different schemas"):
+        report.merge(a, missing)
+    both_new = json.loads(json.dumps(other))
+    with pytest.raises(guard.GuardError):
+        report.merge(other, both_new)  # 같아도 알지 못하는 판이면 거부한다
+    broken = json.loads(json.dumps(a))
+    broken["results"][0]["value"] = "0.5"
+    with pytest.raises(guard.GuardError):
+        report.merge(a, broken)
+
+
+def test_a_holdout_admission_is_bound_to_the_dataset_files_it_opened(tmp_path):
+    log = tmp_path / "holdout-log.json"
+    entry = holdout.admit(REGISTRY.get("hanji-ko-v1"), "holdout", "ev-d-public-claim", log, "b" * 40, None,
+                          "2026-11-12")
+    assert holdout.read_log(log)[0]["identity"] == REGISTRY.get("hanji-ko-v1").identity
+    changed = Registry.from_text(TEXT.replace("1" * 64, "2" * 64))  # 같은 이름·분할, 파일이 바뀌었다
+    assert changed.get("hanji-ko-v1").identity != REGISTRY.get("hanji-ko-v1").identity
+    rep = _report([], "holdout")
+    source = changed.source("hanji-ko-v1", "holdout")
+    rep["results"][0]["sources"] = [{"dataset": source.dataset, "split": source.split}]
+    rep["holdout_opened"] = {"opened": True, "entry": entry}
+    with pytest.raises(report.ReportError, match="other dataset files"):
+        report.write(rep, tmp_path / "out", changed, log)  # 같은 엔진 커밋이어도 옛 기록을 인용할 수 없다
     assert not (tmp_path / "out").exists()
