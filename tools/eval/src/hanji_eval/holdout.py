@@ -2,6 +2,8 @@
 {차례, 날짜, 엔진 커밋, 보정 표 판, 사유}를 남긴다."""
 
 import json
+import os
+import time
 from pathlib import Path
 
 from . import guard
@@ -18,8 +20,29 @@ LOG_SCHEMA = guard.obj({
 })
 
 
+LOCK_TRIES = 200  # 기록 잠금(<log>.lock, O_EXCL)을 기다리는 횟수
+LOCK_WAIT = 0.05  # 한 번 기다리는 초(모두 10초)
+
+
 class HoldoutSealed(PermissionError):
     """봉인 분할을 --open-holdout 없이 채점하려 했다."""
+
+
+class HoldoutLogBusy(RuntimeError):
+    """다른 프로세스가 기록을 잡고 놓지 않는다(죽은 프로세스가 남긴 <log>.lock이면 손으로 지운다)."""
+
+
+def _lock(log: Path) -> Path:
+    """읽기–번호 매기기–쓰기를 프로세스 사이에서 하나씩 하도록 <log>.lock을 O_CREAT|O_EXCL로 만든다(fcntl 없이, 어느
+    운영 체제에서나)."""
+    lock = log.with_name(log.name + ".lock")
+    for _ in range(LOCK_TRIES):
+        try:
+            os.close(os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644))
+            return lock
+        except FileExistsError:
+            time.sleep(LOCK_WAIT)
+    raise HoldoutLogBusy(f"the holdout log is locked by another admission: {lock.name}")
 
 
 def read_log(path: Path) -> list[dict]:
@@ -41,13 +64,18 @@ def admit(dataset: Dataset, split: str, reason: str | None, log: Path, engine_co
         return None
     if reason is None:
         raise HoldoutSealed(f"{dataset.name}/{split} is sealed: pass --open-holdout <reason>")
-    entries = read_log(log)
-    entry = {"entry": len(entries) + 1, "date": date, "dataset": dataset.name, "split": split,
-             "engine_commit": engine_commit, "table_version": table_version, "reason": reason}
-    data = {"schema": "hanji-eval-holdout-log/1", "entries": [*entries, entry]}
-    guard.check(data, LOG_SCHEMA)
+    guard.pattern(guard.SLUG)(reason, "$.entries[].reason")  # 잠그기 전에 값부터 본다
     log.parent.mkdir(parents=True, exist_ok=True)
-    partial = log.with_name(log.name + ".tmp")  # 쓰다 끊겨도 기록이 반쯤 남지 않게 다 쓴 뒤 바꿔 넣는다
-    partial.write_text(json.dumps(data, ensure_ascii=True, indent=1) + "\n", encoding="utf-8")
-    partial.replace(log)
+    lock = _lock(log)
+    try:
+        entries = read_log(log)
+        entry = {"entry": len(entries) + 1, "date": date, "dataset": dataset.name, "split": split,
+                 "engine_commit": engine_commit, "table_version": table_version, "reason": reason}
+        data = {"schema": "hanji-eval-holdout-log/1", "entries": [*entries, entry]}
+        guard.check(data, LOG_SCHEMA)
+        partial = log.with_name(log.name + ".tmp")  # 쓰다 끊겨도 기록이 반쯤 남지 않게 다 쓴 뒤 바꿔 넣는다
+        partial.write_text(json.dumps(data, ensure_ascii=True, indent=1) + "\n", encoding="utf-8")
+        partial.replace(log)
+    finally:
+        lock.unlink(missing_ok=True)
     return entry["entry"]
