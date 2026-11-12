@@ -6,7 +6,9 @@ import json
 import sys
 from pathlib import Path
 
-from . import corpus, datasets, fetch, guard, workdir
+from hanji.errors import ModelError
+
+from . import bigrun, corpus, datasets, fetch, guard, provenance, workdir
 
 EVAL = Path(__file__).resolve().parents[2]
 ROOT = EVAL.parent.parent
@@ -14,6 +16,8 @@ DATASETS = EVAL / "datasets.toml"
 FETCHED = guard.obj({"command": guard.enum("fetch"), "dataset": guard.enum(*guard.DATASETS), "files": guard.integer()})
 _SPLITS = guard.obj({"dev": guard.integer(), "holdout": guard.integer()})
 SEALED = guard.obj({"command": guard.enum("seal"), "bundles": _SPLITS, "publishers": _SPLITS})
+RAN = guard.obj({"command": guard.enum("bigrun"), "run": guard.integer(), "sealed": guard.integer(),
+                 "extra": guard.integer(), "gate": guard.enum("pass", "fail")})
 
 
 def _fetch(args: argparse.Namespace) -> int:
@@ -50,6 +54,19 @@ def _seal(args: argparse.Namespace) -> int:
     return 0
 
 
+def _bigrun(args: argparse.Namespace) -> int:
+    name = args.name or f"{args.date}-bigrun-dev"
+    out = workdir.refuse_lab(Path(args.out) if args.out else workdir.work_dir() / "bigrun" / name, ROOT)
+    registry = datasets.Registry.load(DATASETS)
+    summary = bigrun.run(Path(args.manifest), Path(args.split), out, registry, name, args.date, jobs=args.jobs,
+                         timeout=args.timeout, twice=args.twice, extra_dirs=[Path(p) for p in args.extra],
+                         allow_no_models=args.allow_no_models)
+    c, g = summary["counts"], summary["gate"]
+    guard.emit({"command": "bigrun", "run": c["run"], "sealed": c["sealed"], "extra": c["extra"],
+                "gate": "pass" if g["passed"] else "fail"}, RAN)
+    return 0 if g["passed"] else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="hanji-eval")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -62,11 +79,23 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--out", default=str(EVAL / "splits" / "hanji-ko-v1.json"))
     p.add_argument("--date", default=datetime.date.today().isoformat())
     p.set_defaults(run=_seal)
+    p = sub.add_parser("bigrun", help="run the large corpus (development run set only) document by document")
+    p.add_argument("--manifest", default=str(ROOT / "lab" / "corpus-big" / "manifest.json"))
+    p.add_argument("--split", default=str(EVAL / "splits" / "hanji-ko-v1.json"))
+    p.add_argument("--out", default=None, help="new work folder (default <work>/bigrun/<name>, never under lab/)")
+    p.add_argument("--name", default=None)
+    p.add_argument("--date", default=datetime.date.today().isoformat())
+    p.add_argument("--jobs", type=int, default=4)
+    p.add_argument("--timeout", type=float, default=600.0)
+    p.add_argument("--twice", action="store_true", help="run every document twice and compare the hashes")
+    p.add_argument("--extra", action="append", default=[], help="extra folder outside hanji-ko (repeatable)")
+    p.add_argument("--allow-no-models", action="store_true", help="run even if the OCR or layout models are missing")
+    p.set_defaults(run=_bigrun)
     args = parser.parse_args(argv)
     try:
         return args.run(args)
-    except (datasets.RegistryError, fetch.FetchError, workdir.WorkDirError, guard.GuardError,
-            corpus.SealError) as error:
+    except (datasets.RegistryError, fetch.FetchError, workdir.WorkDirError, guard.GuardError, corpus.SealError,
+            provenance.ProvenanceError, bigrun.BigrunError, ModelError) as error:
         print(f"[hanji-eval] error: {type(error).__name__}", file=sys.stderr)
         return 2
 
