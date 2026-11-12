@@ -36,6 +36,16 @@ def check_ledger(ledger: list[dict[str, Any]]) -> None:
             raise ReportError(f"mask exclusions differ between tools: {'/'.join(key)}")
 
 
+def check_unique(part: str, rows: list[dict[str, Any]]) -> None:
+    """같은 열쇠(KEYS)의 줄이 둘 이상이면 실패한다(꼭 같은 줄도: 하나로 두는 것은 merge만 한다)."""
+    seen: set[tuple] = set()
+    for row in rows:
+        key = tuple(row[k] for k in KEYS[part])
+        if key in seen:
+            raise ReportError(f"duplicate {part} row: {'/'.join(map(str, key))}")
+        seen.add(key)
+
+
 def merge(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
     """두 보고서를 합친다(run·env가 같아야 한다). 결과의 출처는 그대로 따라간다."""
     if a["run"] != b["run"] or a["env"] != b["env"]:
@@ -131,6 +141,8 @@ def write(report: dict[str, Any], out_dir: Path, registry: Registry, holdout_log
     하고, 장부·실패 줄은 적힌 데이터셋·분할을 출처로 같은 검사를 받는다."""
     guard.check(report, guard.REPORT)
     check_ledger(report["ledger"])
+    check_unique("results", report["results"])
+    check_unique("failures", report["failures"])
     sources = set(provenance.sources_of(report["results"]))
     for row in report["results"]:
         named, carried = _named(registry, row), provenance.sources_of([row])

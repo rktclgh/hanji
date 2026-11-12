@@ -156,3 +156,19 @@ def test_the_markdown_failures_table_has_the_split():
     rep["failures"] = [{"dataset": "hanji-ko-v1", "split": "dev", "tool": "hanji", "doc": "pdf-0001",
                         "status": "timeout"}]
     assert "| hanji-ko-v1 | dev | hanji | pdf-0001 | timeout |" in report.render_md(rep)
+
+
+@pytest.mark.parametrize("part", ["results", "failures"])
+def test_rows_with_the_same_key_are_refused_in_results_and_failures(tmp_path, part):
+    rep = _report([])
+    if part == "failures":
+        rep["failures"] = [{"dataset": "hanji-ko-v1", "split": "dev", "tool": "hanji", "doc": "pdf-0001",
+                            "status": "timeout"}]
+    other = dict(rep[part][0]) | ({"value": 0.9} if part == "results" else {"status": "crashed"})
+    rep[part] = [rep[part][0], other]
+    with pytest.raises(report.ReportError, match=f"duplicate {part} row: hanji-ko-v1/dev/hanji"):
+        report.write(rep, tmp_path / "out", REGISTRY, tmp_path / "log")
+    rep[part] = [rep[part][0], rep[part][0]]  # 꼭 같은 줄도 쓰기에서는 중복이다(병합만 하나로 둔다)
+    with pytest.raises(report.ReportError, match=f"duplicate {part} row"):
+        report.write(rep, tmp_path / "out", REGISTRY, tmp_path / "log")
+    assert not (tmp_path / "out").exists()
