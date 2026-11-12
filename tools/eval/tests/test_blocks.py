@@ -40,6 +40,21 @@ def test_flow_blocks_have_no_page_and_headings_keep_their_level():
     assert levels and levels == [s.level for s in tree.blocks if s.kind == "heading"] and None not in levels
 
 
+def test_the_table_pdf_fixture_gives_the_golden_block_kinds_and_table_shape():
+    # 기대값은 엔진 골든(fixtures/pdf/expected/table.json)에서 옮겨 적은 글자 그대로의 수다(어댑터를 신탁으로 쓰지 않는다)
+    out = adapter.blocks(_tree(FIXTURES / "pdf" / "inputs" / "table.pdf"), "pdf-0001")
+    assert [b.kind for b in out] == ["heading", "paragraph", "table", "paragraph"]
+    (table,) = [b.table for b in out if b.table is not None]
+    assert (table.n_rows, table.n_cols, len(table.cells)) == (4, 4, 14)
+
+
+@pytest.mark.parametrize(("path", "n"), [(FIXTURES / "ooxml" / "inputs" / "basic.pptx", 15),
+                                         (FIXTURES / "inputs" / "report.md", 17)], ids=["slide", "lines"])
+def test_slide_and_line_locators_have_no_page(path, n):
+    out = adapter.blocks(_tree(path), "pptx-0001")
+    assert len(out) == n and all(b.page is None for b in out)
+
+
 def test_a_table_kind_needs_a_table_and_kinds_are_fixed():
     with pytest.raises(ValueError, match="table must be set"):
         Block("pdf-0001", 0, 1, "table", "")
@@ -63,7 +78,10 @@ def test_structure_match_needs_the_same_shape_and_cell_layout():
     (lambda: Table(2, 2, (Cell(2, 0),)), "outside the grid"),
     (lambda: Table(2, 2, (Cell(0, 1, 1, 2),)), "outside the grid"),
     (lambda: Table(2, 2, (Cell(0, 0), Cell(0, 0, text="x"))), "same position"),
-], ids=["no-rows", "no-cols", "row-outside", "span-outside", "same-start"])
+    (lambda: Table(2, 2, (Cell(0, 0, 1, 2), Cell(0, 1))), "overlap"),
+    (lambda: Table(2, 2, (Cell(1, 0), Cell(0, 0, 2, 1))), "overlap"),
+], ids=["no-rows", "no-cols", "row-outside", "span-outside", "same-start", "span-covers-a-start",
+        "later-span-covers-an-earlier-cell"])
 def test_a_malformed_table_is_rejected_before_any_metric_sees_it(table, message):
     with pytest.raises(ValueError, match=message):
         table()

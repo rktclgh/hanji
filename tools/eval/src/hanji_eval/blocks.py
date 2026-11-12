@@ -22,10 +22,11 @@ class Table:
     cells: tuple[Cell, ...]
 
     def __post_init__(self) -> None:
-        """행·열은 1 이상, 칸은 격자 안(병합 포함), 시작 자리가 겹치지 않는다(TEDS·GriTS가 이 전제를 쓴다)."""
+        """행·열은 1 이상, 칸은 격자 안(병합 포함), 칸끼리 겹치지 않는다(계약 Table과 같다, TEDS·GriTS가 이 전제를 쓴다).
+        덮이지 않은 자리는 받는다(빈 자리)."""
         if self.n_rows < 1 or self.n_cols < 1:
             raise ValueError("a table needs at least one row and one column")
-        starts = set()
+        starts, covered = set(), set()
         for c in self.cells:
             if c.row < 0 or c.col < 0 or c.rowspan < 1 or c.colspan < 1 or c.row + c.rowspan > self.n_rows \
                     or c.col + c.colspan > self.n_cols:
@@ -33,13 +34,17 @@ class Table:
             if (c.row, c.col) in starts:
                 raise ValueError("two table cells start at the same position")
             starts.add((c.row, c.col))
+            spots = {(r, k) for r in range(c.row, c.row + c.rowspan) for k in range(c.col, c.col + c.colspan)}
+            if spots & covered:
+                raise ValueError("two table cells overlap")
+            covered |= spots
 
     def layout(self) -> frozenset[tuple[int, int, int, int]]:
         """칸 배치(시작 행·열, 행·열 병합)의 집합."""
         return frozenset((c.row, c.col, c.rowspan, c.colspan) for c in self.cells)
 
     def grid(self) -> dict[tuple[int, int], str]:
-        """병합 칸 글자를 덮인 자리마다 편 격자. 덮이지 않은 자리는 없다."""
+        """병합 칸 글자를 덮인 자리마다 편 격자. 어느 칸도 덮지 않은 자리는 dict에 없다."""
         out: dict[tuple[int, int], str] = {}
         for c in self.cells:
             for r in range(c.row, c.row + c.rowspan):
