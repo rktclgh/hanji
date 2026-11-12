@@ -3,6 +3,7 @@
 import argparse
 import datetime
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -79,6 +80,17 @@ def _positive(text: str) -> int:
     return value
 
 
+def _timeout(text: str) -> float:
+    """작업자 하나의 시간 한도(초): 0보다 큰 유한한 수만(나쁜 값은 문서를 돌리기 전에 거부한다)."""
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError("must be a number of seconds") from None
+    if not math.isfinite(value) or value <= 0:
+        raise argparse.ArgumentTypeError("must be a finite number of seconds above 0")
+    return value
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="hanji-eval")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -98,7 +110,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--name", default=None)
     p.add_argument("--date", default=datetime.date.today().isoformat())
     p.add_argument("--jobs", type=_positive, default=4)
-    p.add_argument("--timeout", type=float, default=600.0)
+    p.add_argument("--timeout", type=_timeout, default=600.0)
     p.add_argument("--twice", action="store_true", help="run every document twice and compare the hashes")
     p.add_argument("--extra", action="append", default=[], help="extra folder outside hanji-ko (repeatable)")
     p.add_argument("--allow-no-models", action="store_true", help="run even if the OCR or layout models are missing")

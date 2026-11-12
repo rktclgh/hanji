@@ -379,6 +379,26 @@ def test_jobs_below_one_are_refused_by_the_command_line(capsys):
     assert caught.value.code == 2 and "at least 1" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("value", ["0", "-1", "nan", "inf", "-inf", "x"])
+def test_a_timeout_that_is_not_positive_and_finite_is_refused_by_the_command_line(value, capsys, monkeypatch):
+    monkeypatch.setattr(bigrun, "run", lambda *a, **k: pytest.fail("the run must not start"))
+    with pytest.raises(SystemExit) as caught:
+        cli.main(["bigrun", "--timeout", value])
+    assert caught.value.code == 2 and "--timeout" in capsys.readouterr().err
+
+
+def test_the_default_timeout_is_unchanged(tmp_path, monkeypatch):
+    seen = {}
+
+    def fake(*args, **kw):
+        seen.update(kw)
+        raise bigrun.BigrunError("stop")
+
+    monkeypatch.setattr(bigrun, "run", fake)
+    assert cli.main(["bigrun", "--out", str(tmp_path / "out")]) == 2
+    assert seen["timeout"] == 600.0 and cli._timeout("0.5") == 0.5 and not (tmp_path / "out").exists()
+
+
 def test_a_worker_that_cannot_start_is_a_crash_of_that_document(tmp_path):
     record = bigrun.run_doc("pdf-0009", "pdf", tmp_path / "a.pdf", "dev", 5, False,
                             worker=[str(tmp_path / "no-such-worker")])
