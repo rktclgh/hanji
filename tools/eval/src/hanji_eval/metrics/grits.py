@@ -4,7 +4,8 @@
 #   원 머리: Copyright (C) 2021 Microsoft Corporation. MIT License(전문은 tools/eval/NOTICE).
 # 바꾼 점: (1) numpy 배열 대신 파이썬 리스트(같은 float64 셈), (2) PyMuPDF(fitz) Rect 대신 같은 셈의 iou(교집합 넓이 ÷
 #   두 상자를 감싸는 상자 넓이), (3) GriTS-Con·Top만 남기고(Loc·HTML 파싱·상자 후처리는 뺐다) 격자는 공통 블록 표에서
-#   만든다: 어느 칸도 덮지 않은 자리는 빈 글자의 1×1 칸으로 본다(원본은 0으로 채워 실패한다).
+#   만든다: 어느 칸도 덮지 않은 자리는 빈 글자의 1×1 칸으로 본다(원본은 0으로 채워 실패한다), (4) 점수는 늘 float으로
+#   돌려준다(원본은 0·1을 int로 돌려줄 때가 있다).
 """GriTS-Con(칸 글자 LCS 유사도)·GriTS-Top(칸의 상대 범위 IoU): factored 2D-MSS의 F-score. 짝 표마다(스펙 §7.1)."""
 
 import itertools
@@ -160,7 +161,7 @@ def factored_2dmss(true_cell_grid, pred_cell_grid, reward_function):
         for true_column_num, pred_column_num in zip(true_column_nums, pred_column_nums):
             positive_match_score += pre_computed_rewards[(true_row_num, true_column_num, pred_row_num, pred_column_num)]
 
-    return GritsScore(*compute_fscore(positive_match_score, num_true, num_pos))
+    return GritsScore(*(float(v) for v in compute_fscore(positive_match_score, num_true, num_pos)))
 
 
 def lcs_similarity(string1, string2):

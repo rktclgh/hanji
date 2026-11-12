@@ -1,3 +1,4 @@
+import unicodedata
 from pathlib import Path
 
 import pytest
@@ -92,6 +93,27 @@ def test_perfect_needs_the_same_structure_and_the_same_cell_text_without_spaces(
     assert not tables.perfect(_t(2, 2, (0, 0, 1, 1, "연도별 현황"), (0, 1, 1, 1, ""), (1, 0, 1, 1, "2025"),
                                  (1, 1, 1, 1, "2026")), truth)
     assert not tables.perfect(None, truth)
+
+
+@pytest.mark.parametrize("pred_cell", ["2025\u00a0", "20\u200925", "\u2003\v2025\f\x85"], ids=["nbsp", "thin", "other"])
+def test_perfect_removes_every_unicode_whitespace_like_tableeval(pred_cell):
+    # 컨트롤러 판정 R7: research/tableeval의 norm() = NFC 뒤 re.sub(r"\s+", "")
+    truth = _t(1, 2, (0, 0, 1, 1, "연도"), (0, 1, 1, 1, "2025"))
+    assert tables.perfect(_t(1, 2, (0, 0, 1, 1, "연도"), (0, 1, 1, 1, pred_cell)), truth)
+
+
+def test_perfect_compares_hangul_after_nfc():
+    nfd = unicodedata.normalize("NFD", "연도")
+    assert nfd != "연도"
+    truth = _t(1, 1, (0, 0, 1, 1, "연도"))
+    assert tables.perfect(_t(1, 1, (0, 0, 1, 1, nfd)), truth)
+    assert tables.perfect(truth, _t(1, 1, (0, 0, 1, 1, nfd)))
+
+
+def test_grits_scores_are_always_floats():
+    empty, letter = _t(1, 1, (0, 0, 1, 1, "")), _t(1, 1, (0, 0, 1, 1, "a"))
+    for score in (grits.grits_con(empty, letter), grits.grits_top(empty, letter), grits.grits_con(letter, letter)):
+        assert all(type(v) is float for v in score)
 
 
 def test_detection_precision_and_recall():

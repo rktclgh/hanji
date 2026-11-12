@@ -60,7 +60,8 @@ class CustomConfig(Config):
 
 
 def table_tree(table: Table, structure_only: bool = False) -> tuple[TableTree, int]:
-    """(트리, table 아래 노드 수). 행마다 tr 하나(그 행에서 시작하는 칸이 없어도), 칸은 시작 행의 tr에 열 차례로."""
+    """(트리, table 아래 노드 수). 행마다 tr 하나(그 행에서 시작하는 칸이 없어도), 칸은 시작 행의 tr에 열 차례로.
+    어느 칸도 덮지 않은 자리는 td가 없다(원본 HTML과 같다. GriTS는 그 자리를 빈 1×1 칸으로 본다)."""
     body = TableTree('tbody', None, None, None, *deque())
     for row in range(table.n_rows):
         tr = TableTree('tr', None, None, None, *deque())
