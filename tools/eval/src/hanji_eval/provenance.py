@@ -1,6 +1,7 @@
 """출처 전파: 하네스가 만드는 값은 데이터 출처 집합(데이터셋 identity, 분할)을 달고 다니고, 값을 합치면 출처도 합친다.
 출구(커밋용 보고서·공개 내보내기, 보정 표 쓰기, 고르기·채택 게이트)는 경로·이름·병합과 상관없이 출처로 검사한다."""
 
+import copy
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -25,8 +26,9 @@ def trace(value: Any, *sources: Source) -> Traced:
 
 
 def combine(fn: Callable[..., Any], *items: Traced) -> Traced:
-    """값들을 fn으로 합치고 출처 집합의 합집합을 단다(병합·보정 결과도 이 길로 만든다)."""
-    return Traced(fn(*(t.value for t in items)), frozenset().union(*(t.sources for t in items)))
+    """값들을 fn으로 합치고 출처 집합의 합집합을 단다(병합·보정 결과도 이 길로 만든다). fn에는 값의 깊은 사본을 넘긴다:
+    fn이 입력을 바꿔도(목록 extend 등) 출처는 그대로인 입력 값에 다른 출처의 내용이 섞이지 않는다."""
+    return Traced(fn(*(copy.deepcopy(t.value) for t in items)), frozenset().union(*(t.sources for t in items)))
 
 
 def sources_of(items: Iterable[Traced | Mapping[str, Any]]) -> frozenset[Source]:

@@ -155,3 +155,20 @@ def test_failure_rows_of_the_sealed_split_need_an_opened_holdout(tmp_path):
                         "status": "timeout"}]
     with pytest.raises(provenance.ProvenanceError, match="sealed"):
         report.write(rep, tmp_path / "out", REGISTRY, tmp_path / "log.json")
+
+
+def test_a_callback_that_extends_its_first_input_cannot_change_the_traced_input():
+    dev = provenance.trace([1, 0, 1], DEV_SRC)
+    held = provenance.trace([1, 1], HOLDOUT_SRC)
+    nested = provenance.trace({"labels": [1]}, DEV_SRC)
+
+    def extend(a, b):
+        a.extend(b)
+        return a
+
+    merged = provenance.combine(extend, dev, held)
+    assert merged.value == [1, 0, 1, 1, 1] and merged.sources == {DEV_SRC, HOLDOUT_SRC}
+    assert dev.value == [1, 0, 1] and held.value == [1, 1]  # 출처가 그대로인 값은 내용도 그대로
+    provenance.check_calibration(dev.sources, REGISTRY)
+    provenance.combine(lambda d: d["labels"].append(0), nested)
+    assert nested.value == {"labels": [1]}
