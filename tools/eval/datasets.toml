@@ -1,0 +1,19 @@
+# 데이터셋 고정 판. identity = 파일 sha256을 정렬해 줄로 이은 것의 sha256(이름이 아니라 내용으로 식별한다).
+# path는 저장소 뿌리 기준(로컬 자료) 또는 받은 폴더 안 경로(url이 있는 자료). url은 revision(커밋 판)을 담아야 한다.
+# publishable: 파생 숫자를 커밋·공개해도 되는지. roles: selection(고르기·채택 게이트), calibration(보정 표),
+# diagnostic(진단만), bigrun(대규모 실행). sealed_splits: --open-holdout 실행에서만 보고서에 들 수 있는 분할.
+
+[[dataset]]
+name = "corpus-big"
+version = "1"
+license = "KOGL Type 1 text-only 533, KOGL Type 1 47, KOGL Type 1 with third-party rights 119, US public domain 299"
+license_basis = "lab/corpus-big/manifest.json fields license and license_evidence_url (spec §2)"
+publishable = true
+roles = ["bigrun", "selection"]
+splits = ["dev", "holdout"]
+sealed_splits = ["holdout"]
+use = "large corpus run (spec §5); holdout = documents of the sealed hanji-ko-v1 holdout publishers"
+
+[[dataset.files]]
+path = "lab/corpus-big/manifest.json"
+sha256 = "8da1a58b899159bad19a205770ec151dbc2b18f8af847dede0639bc3078a0fa0"
