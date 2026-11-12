@@ -88,11 +88,15 @@ def cluster_ci(units: Sequence[Unit], stat: Callable[[Sequence[Unit]], float] = 
 
 def paired_ci(a: Sequence[Unit], b: Sequence[Unit], stat: Callable[[Sequence[Unit]], float] = weighted_mean,
               reps: int = REPS, seed: int = SEED) -> Interval:
-    """stat(a) − stat(b)의 구간. 두 도구·설정이 같은 재표집 표본(같은 문서)을 쓴다."""
+    """stat(a) − stat(b)의 구간. 두 도구·설정이 같은 재표집 표본(같은 문서)을 쓴다. 문서마다 발행처도 같아야 한다."""
+    if not a and not b:
+        return Interval(math.nan, math.nan, ("no_units",))
     _, _, doc_a = _docs(a)
     _, _, doc_b = _docs(b)
     if doc_a.keys() != doc_b.keys():
         raise ValueError("paired units must cover the same documents")
+    if any(doc_a[d][0].publisher != doc_b[d][0].publisher for d in doc_a):
+        raise ValueError("paired units must give each document the same publisher")
     samples, few = resamples(a, reps, seed)
     values = sorted(stat([u for d in s for u in doc_a[d]]) - stat([u for d in s for u in doc_b[d]]) for s in samples)
     return Interval(percentile(values, 0.025), percentile(values, 0.975), ("few_clusters",) if few else ())
@@ -115,6 +119,8 @@ def cp_upper(x: int, n: int, alpha: float = 0.05) -> float:
     그 밖은 이항 누적 확률을 구간 [0, 1]에서 200번 이분해 구한다."""
     if not 0 <= x <= n or n < 1:
         raise ValueError("need 0 <= x <= n and n >= 1")
+    if not 0.0 < alpha < 1.0:
+        raise ValueError("alpha must be in (0, 1)")
     if x == n:
         return 1.0
     if x == 0:
@@ -131,6 +137,8 @@ def cp_upper(x: int, n: int, alpha: float = 0.05) -> float:
 
 def min_trials(x: int, alpha: float, bound: float) -> int:
     """오류 x건일 때 상한이 bound 이하가 되는 가장 작은 시행 수(손 점검 표본 크기, 스펙 §6.6)."""
+    if not 0.0 < bound < 1.0:
+        raise ValueError("bound must be in (0, 1)")  # 0 이하면 끝나지 않는다
     n = max(x, 1)
     while cp_upper(x, n, alpha) > bound:
         n += 1
@@ -138,13 +146,15 @@ def min_trials(x: int, alpha: float, bound: float) -> int:
 
 
 def rate_interval(units: Sequence[Unit], alpha: float = 0.05, reps: int = REPS, seed: int = SEED) -> Interval:
-    """0/1 사건 비율의 구간. 사건이나 그 여집합이 10건 이하면 독립 단위(여기서는 문서) 위의 한쪽 Clopper-Pearson
-    (사건이 적으면 [0, 상한], 여집합이 적으면 [하한, 1]), 아니면 군집 부트스트랩."""
-    by_doc: dict[str, float] = {}
-    for u in units:
-        by_doc[u.doc] = max(by_doc.get(u.doc, 0.0), u.value)
-    n = len(by_doc)
-    events = sum(1 for v in by_doc.values() if v > 0)
+    """0/1 사건 비율의 구간. 단위는 문서(뽑기)마다 하나, 값은 0 또는 1, 무게 1이어야 한다(컨트롤러 판정 R8: 그래야
+    두 길이 같은 비율을 잰다). 사건이나 그 여집합이 10건 이하면 한쪽 Clopper-Pearson(사건이 적으면 [0, 상한], 여집합이
+    적으면 [하한, 1]; n ≤ 20이라 둘 다 10건 이하면 사건 쪽 상한), 아니면 군집 부트스트랩."""
+    if len({u.doc for u in units}) != len(units):
+        raise ValueError("rate_interval needs exactly one unit per document")
+    if any(u.value not in (0.0, 1.0) or u.weight != 1.0 for u in units):
+        raise ValueError("rate_interval values must be 0 or 1 with weight 1")
+    n = len(units)
+    events = sum(1 for u in units if u.value == 1.0)
     if n and events <= SMALL_EVENTS:
         return Interval(0.0, cp_upper(events, n, alpha), ("one_sided_upper",))
     if n and n - events <= SMALL_EVENTS:

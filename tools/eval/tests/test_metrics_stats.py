@@ -179,3 +179,60 @@ def test_selective_risk_is_not_pushed_by_float_noise():
     conf = [1.0 - i / 100 for i in range(30)]
     labels = [1, 1, 0] + [1] * 27
     assert calib.selective_risk(conf, labels, 0.1) == pytest.approx(1 / 3)  # i = 3, 0.1 × 30 = 3.0000000000000004
+
+
+def test_the_bootstrap_draws_two_thousand_resamples():
+    assert bootstrap.REPS == 2000
+    assert len(bootstrap.resamples(_units(9, 2))[0]) == 2000
+
+
+def test_rate_interval_takes_exactly_one_zero_or_one_value_per_document():
+    # 컨트롤러 판정 R8: 문서(뽑기)마다 0/1 값 하나. 그래야 CP 쪽과 부트스트랩 쪽이 같은 비율을 잰다
+    units = _units(10, 3, lambda p, d: float(d == 0))
+    with pytest.raises(ValueError, match="one unit per document"):
+        bootstrap.rate_interval(units + [Unit("pub-000", "doc-0-0", 0.0)])
+    with pytest.raises(ValueError, match="0 or 1 with weight 1"):
+        bootstrap.rate_interval(units[:-1] + [Unit("pub-009", "doc-9-2", 0.5)])
+    with pytest.raises(ValueError, match="0 or 1 with weight 1"):
+        bootstrap.rate_interval(units[:-1] + [Unit("pub-009", "doc-9-2", 1.0, 2.0)])
+
+
+def test_the_complement_side_switches_between_ten_and_eleven_non_events():
+    ten = _units(10, 6, lambda p, d: float(d != 0))  # 60건 가운데 사건 아님 10건
+    assert bootstrap.rate_interval(ten) == bootstrap.Interval(1.0 - bootstrap.cp_upper(10, 60), 1.0,
+                                                              ("one_sided_lower",))
+    eleven = ten + [Unit("pub-000", "doc-x", 0.0)]
+    assert bootstrap.rate_interval(eleven).flags == ()
+
+
+def test_the_document_fallback_draws_as_many_documents_as_there_are():
+    samples, few = bootstrap.resamples(_units(7, 5), reps=20)
+    assert few and all(len(s) == 35 for s in samples)
+
+
+def test_cluster_ci_hands_every_unit_of_a_drawn_document_to_the_statistic():
+    units = [Unit(f"pub-{p}", f"doc-{p}-{d}", float(r)) for p in range(9) for d in range(3) for r in (0, 1)]
+    seen: list[Counter] = []
+
+    def stat(drawn):
+        seen.append(Counter(u.doc for u in drawn))
+        return bootstrap.weighted_mean(drawn)
+
+    bootstrap.cluster_ci(units, stat, reps=30)
+    assert len(seen) == 30 and all(n % 2 == 0 for c in seen for n in c.values())
+
+
+def test_bad_arguments_fail_instead_of_looping_or_clustering_silently():
+    with pytest.raises(ValueError, match="bound"):
+        bootstrap.min_trials(0, 0.05, 0.0)
+    with pytest.raises(ValueError, match="alpha"):
+        bootstrap.cp_upper(1, 10, 1.5)
+    a = _units(9, 2)
+    moved = [Unit("pub-x" if u.doc == "doc-0-0" else u.publisher, u.doc, u.value) for u in a]
+    with pytest.raises(ValueError, match="same publisher"):
+        bootstrap.paired_ci(a, moved)
+    assert bootstrap.paired_ci([], []).flags == ("no_units",)
+    with pytest.raises(ValueError, match=r"\[0, 1\]"):
+        calib.bin_of(-0.1)
+    with pytest.raises(ValueError, match=r"\[0, 1\]"):
+        calib.bin_of(1.2)

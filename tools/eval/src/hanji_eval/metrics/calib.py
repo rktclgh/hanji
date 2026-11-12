@@ -16,6 +16,8 @@ def _check(conf: Sequence[float], labels: Sequence[int]) -> None:
 
 def bin_of(confidence: float) -> int:
     """c_m = round(신뢰도 × 1000), k = min(14, ⌊c_m × 15 ÷ 1000⌋)(정수 나눗셈)."""
+    if not 0.0 <= confidence <= 1.0:
+        raise ValueError("confidence must be in [0, 1]")
     return min(BINS - 1, round(confidence * 1000) * BINS // 1000)
 
 

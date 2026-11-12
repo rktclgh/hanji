@@ -19,7 +19,9 @@ EXCLUDE = frozenset({
 })
 
 # 문서마다의 값이 아니라 세는 값(분자·분모를 모아 나눈다: 실패 문서의 몫은 집계하는 쪽이 센다. 표 찾기 재현율은
-# table_recall이 실패 문서의 원본 표를 모두 놓친 것으로 센다)
+# table_recall이 실패 문서의 원본 표를 모두 놓친 것으로 센다). missing_rate는 WORST(실패 문서 1.0)이므로 집계하는 쪽은
+# 실패 문서의 원본 글자를 두 갈래(missing_recorded·missing_unrecorded) 가운데 하나에 모두 넣어야 recorded + unrecorded =
+# missing이 맞는다(어느 갈래인지는 집계(EV-A2)에서 정한다)
 COUNTED = frozenset({
     "number_unverified_rate", "missing_recorded_rate", "missing_unrecorded_rate", "outside_gt_rate",
     "insertion_rate", "duplicate_rate", "ambiguous_rate", "failure_rate", "table_recall",
