@@ -10,6 +10,7 @@ from pathlib import Path
 from platformdirs import user_cache_dir
 
 ENV = "HANJI_EVAL_WORK"
+REPO = Path(__file__).resolve().parents[4]  # tools/eval/src/hanji_eval/workdir.py → 저장소 뿌리
 
 
 class WorkDirError(ValueError):
@@ -33,10 +34,22 @@ def lab_roots(repo: Path) -> list[Path]:
     return roots
 
 
+def _same(a: Path, b: Path) -> bool:
+    # 대소문자를 가리지 않는 파일 시스템(macOS APFS)에서는 LAB/이 lab/이다: 있는 경로는 samefile, 없으면 casefold로 본다
+    if str(a).casefold() == str(b).casefold():
+        return True
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return False
+
+
 def refuse_lab(path: Path, repo: Path) -> Path:
-    """path를 풀어(심볼릭 링크 포함) lab/ 아래면 WorkDirError, 아니면 푼 경로를 돌려준다."""
+    """path를 풀어(심볼릭 링크 포함) lab/ 아래면 WorkDirError, 아니면 푼 경로를 돌려준다. 아직 없는 경로는 있는
+    조상까지 따라가 보고, 대소문자만 다른 철자도 lab/으로 본다."""
     resolved = path.expanduser().resolve()
-    for lab in lab_roots(repo):
-        if resolved.is_relative_to(lab.resolve()):
+    labs = [lab.resolve() for lab in lab_roots(repo)]
+    for ancestor in (resolved, *resolved.parents):
+        if any(_same(ancestor, lab) for lab in labs):
             raise WorkDirError("output path must not be under lab/ (lab is read-only)")
     return resolved

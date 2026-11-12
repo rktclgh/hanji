@@ -11,6 +11,7 @@ ROLES = frozenset({"selection", "calibration", "diagnostic", "bigrun"})
 _NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 _SPLIT = re.compile(r"^[a-z][a-z0-9-]{0,15}$")
 _SHA = re.compile(r"^[0-9a-f]{64}$")
+_REVISION = re.compile(r"^[0-9a-f]{7,40}$")  # 커밋 해시(main 같은 움직이는 이름은 고정이 아니다)
 
 
 class RegistryError(ValueError):
@@ -78,7 +79,8 @@ def _dataset(raw: dict) -> Dataset:
         sha, url = f.get("sha256", ""), f.get("url")
         if not _SHA.match(sha):
             raise RegistryError(f"{name}: bad sha256 for {f.get('path')!r}")
-        if url is not None and (not revision or revision not in url):
+        if url is not None and not (isinstance(revision, str) and _REVISION.match(revision)
+                                    and revision in str(url).split("/")):
             raise RegistryError(f"{name}: url is not pinned to the dataset revision: {url!r}")
         files.append(FileEntry(_relative(f.get("path", "")), sha, url))
     if not files:
@@ -88,10 +90,10 @@ def _dataset(raw: dict) -> Dataset:
     if not isinstance(raw.get("publishable"), bool):
         raise RegistryError(f"{name}: publishable must be true or false")
     for field in ("version", "license", "license_basis", "use"):  # 스펙 §3.2: 판·라이선스와 그 근거·쓰임새
-        if not str(raw.get(field, "")).strip():
+        if not isinstance(raw.get(field), str) or not raw[field].strip():
             raise RegistryError(f"{name}: {field} is required")
-    return Dataset(name, str(raw.get("version", "")), raw.get("license", ""), raw.get("license_basis", ""),
-                   raw["publishable"], roles, splits, sealed, raw.get("use", ""), revision, tuple(files))
+    return Dataset(name, raw["version"], raw["license"], raw["license_basis"],
+                   raw["publishable"], roles, splits, sealed, raw["use"], revision, tuple(files))
 
 
 class Registry:

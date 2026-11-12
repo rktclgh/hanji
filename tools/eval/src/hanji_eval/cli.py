@@ -95,7 +95,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return args.run(args)
     except (datasets.RegistryError, fetch.FetchError, workdir.WorkDirError, guard.GuardError, corpus.SealError,
-            provenance.ProvenanceError, bigrun.BigrunError, ModelError) as error:
+            provenance.ProvenanceError, bigrun.BigrunError, ModelError, OSError) as error:  # 네트워크·파일 오류도 이름만
         print(f"[hanji-eval] error: {type(error).__name__}", file=sys.stderr)
         return 2
 

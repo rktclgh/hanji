@@ -44,18 +44,31 @@ def test_the_same_files_under_another_name_are_rejected_as_an_alias():
     (_entry("one", [("x.json", A)], license_basis='" "'), "license_basis is required"),
     (_entry("one", [("x.json", A)], use='""'), "use is required"),
     (_entry("one", [("x.json", A)], version='""'), "version is required"),
-], ids=["twice", "name", "path", "sha", "roles", "sealed", "files", "license", "basis", "use", "version"])
+    (_entry("one", [("x.json", A)], license="5"), "license is required"),
+    (_entry("one", [("x.json", A)], version="1"), "version is required"),
+    (_entry("one", [("x.json", A)], use='"  "'), "use is required"),
+], ids=["twice", "name", "path", "sha", "roles", "sealed", "files", "license", "basis", "use", "version",
+        "license-not-a-string", "version-not-a-string", "use-blank"])
 def test_rules_are_checked_when_loading(text, message):
     with pytest.raises(RegistryError, match=message):
         Registry.from_text(text)
 
 
 def test_a_download_url_must_be_pinned_to_the_revision():
-    pinned = _entry("one", [], revision='"abc123"') + '[[dataset.files]]\npath = "x"\nsha256 = "' + A + '"\n'
+    pinned = _entry("one", [], revision='"abc1234"') + '[[dataset.files]]\npath = "x"\nsha256 = "' + A + '"\n'
     with pytest.raises(RegistryError, match="not pinned"):
         Registry.from_text(pinned + 'url = "https://example.invalid/main/x"\n')
-    ok = Registry.from_text(pinned + 'url = "https://example.invalid/abc123/x"\n').get("one")
-    assert ok.files[0].url == "https://example.invalid/abc123/x"
+    with pytest.raises(RegistryError, match="not pinned"):  # 경로 조각 하나가 판이어야 한다(부분 문자열은 아니다)
+        Registry.from_text(pinned + 'url = "https://example.invalid/abc1234x/x"\n')
+    ok = Registry.from_text(pinned + 'url = "https://example.invalid/abc1234/x"\n').get("one")
+    assert ok.files[0].url == "https://example.invalid/abc1234/x"
+
+
+@pytest.mark.parametrize("revision", ['"main"', '"a"', '"ABC1234"', "7"])
+def test_a_revision_must_be_a_commit_hash(revision):
+    text = _entry("one", [], revision=revision) + '[[dataset.files]]\npath = "x"\nsha256 = "' + A + '"\n'
+    with pytest.raises(RegistryError, match="not pinned"):
+        Registry.from_text(text + 'url = "https://example.invalid/main/a/ABC1234/7/x"\n')
 
 
 def test_a_source_names_the_identity_and_a_known_split():
