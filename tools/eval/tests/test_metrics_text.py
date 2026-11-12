@@ -43,6 +43,15 @@ def test_mean_and_weighted_mean():
     assert text.mean([0.5, 1.0]) == 0.75 and text.mean([]) is None
     assert text.weighted_mean([0.5, 1.0], [3, 1]) == pytest.approx(0.625)
     assert text.weighted_mean([0.5], [0]) is None
+    with pytest.raises(ValueError, match="negative weight"):
+        text.weighted_mean([0.5, 1.0], [2, -1])
+
+
+def test_class_rates_refuse_negative_counts_and_counts_over_the_prediction_blocks():
+    with pytest.raises(ValueError, match="between 0 and the prediction blocks"):
+        text.class_rates({"insertion": -1}, 10)
+    with pytest.raises(ValueError, match="between 0 and the prediction blocks"):
+        text.class_rates({"insertion": 6, "outside_gt": 5}, 10)
 
 
 @pytest.mark.parametrize(("source", "expected"), [
@@ -52,7 +61,8 @@ def test_mean_and_weighted_mean():
     ("1,2,3", [("", "1", ""), ("", "2", ""), ("", "3", "")]),
     ("▲10% ▽0.5", [("▲", "10", "%"), ("▽", "0.5", "")]),
     ("5개월 5개 5개사", [("", "5", "개월"), ("", "5", "개"), ("", "5", "개사")]),
-    ("+ 5 10km2 3만명", [("", "5", ""), ("", "10", "km2"), ("", "3", "만명")]),
+    ("+ 5 10km2 3만명", [("+", "5", ""), ("", "10", "km2"), ("", "3", "만명")]),
+    ("▼5 +5", [("▼", "5", ""), ("+", "5", "")]),
 ])
 def test_num_v1_tokens(source, expected):
     assert numbers.tokens(source) == [Token(*t) for t in expected]
@@ -83,6 +93,7 @@ def test_numbers_in_tables_are_scored_cell_by_cell_only_when_the_structure_match
     ([4, 3, 2, 1], [1, 2, 3, 4], -1.0),
     ([1, 3, 2, 4], [1, 2, 3, 4], 2 / 3),
     ([1, 1, 2], [1, 2, 3], 2 / math.sqrt(6)),
+    ([1, 1, 2, 2], [1, 1, 2, 3], 4 / math.sqrt(20)),  # 두 쪽 모두 동점: C 4, D 0, n1 2, n2 1
 ])
 def test_kendall_tau_b(pred, truth, expected):
     assert order.kendall_tau(pred, truth) == pytest.approx(expected)
@@ -113,7 +124,27 @@ def test_spaced_units_attach_across_any_whitespace_and_adjacent_ones_only_when_t
     assert numbers.tokens("3 대학") == numbers.tokens("3\n대학") == [Token("", "3", "")]
     assert numbers.tokens("2 시간") == [Token("", "2", "시간")] and numbers.tokens("2 시청") == [Token("", "2", "")]
     assert numbers.tokens("3만원") == numbers.tokens("3 만원") == [Token("", "3", "만원")]
-    assert numbers.tokens("3만 원") == [Token("", "3", "만")]
+
+
+def test_r6_whitespace_inside_a_multi_character_unit_or_after_a_sign_does_not_change_the_token():
+    # 컨트롤러 판정 R6: 부호와 숫자 사이, 여러 글자 단위의 글자 사이에 어떤 공백이 있어도 같은 토큰(단위 값엔 공백 없음)
+    assert numbers.tokens("3억원") == numbers.tokens("3억 원") == numbers.tokens("3억\n원") == [Token("", "3", "억원")]
+    assert numbers.tokens("3만원") == numbers.tokens("3만 원") == numbers.tokens("3 만 원") == [Token("", "3", "만원")]
+    assert numbers.tokens("3천명") == numbers.tokens("3천 명") == [Token("", "3", "천명")]
+    assert numbers.tokens("5%p") == numbers.tokens("5 % p") == [Token("", "5", "%p")]
+    assert numbers.tokens("△ 1,234") == numbers.tokens("△1,234") == numbers.tokens("△\n1,234") == [
+        Token("△", "1,234", "")]
+    for unit in numbers.UNITS:
+        if len(unit) > 1:
+            spaced = " ".join(unit)
+            assert numbers.tokens(f"7{unit}") == numbers.tokens(f"7 {spaced}") == numbers.tokens(f"7\n{spaced}"), unit
+
+
+def test_one_character_units_keep_r5_so_a_space_before_them_still_matters():
+    # 남은 비대칭(받아들임, EV-A2에서 셈): 한 글자 단위는 숫자에 바로 붙을 때만 단위다
+    assert numbers.tokens("3대학") == [Token("", "3", "대")]
+    assert numbers.tokens("3 대학") == [Token("", "3", "")]
+    assert numbers.tokens("3억 54") == [Token("", "3", "억"), Token("", "54", "")]
 
 
 def test_numbers_in_text_blocks_compare_whole_token_sequences():

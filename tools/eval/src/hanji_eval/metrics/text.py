@@ -59,6 +59,8 @@ def class_rates(counts: Mapping[str, int], n_pred_blocks: int) -> dict[str, floa
     unknown = set(counts) - set(PREDICTION_CLASSES)
     if unknown:
         raise ValueError(f"unknown prediction classes: {sorted(unknown)}")
+    if any(v < 0 for v in counts.values()) or sum(counts.values()) > n_pred_blocks:
+        raise ValueError("class counts must be between 0 and the prediction blocks")
     return {c: (counts.get(c, 0) / n_pred_blocks if n_pred_blocks else None) for c in PREDICTION_CLASSES}
 
 
@@ -80,5 +82,7 @@ def mean(values: Iterable[float]) -> float | None:
 def weighted_mean(values: Iterable[float], weights: Iterable[float]) -> float | None:
     """글자 수 가중 평균 같은 가중 평균. 무게 합이 0이면 None."""
     pairs = list(zip(values, weights, strict=True))
+    if any(w < 0 for _, w in pairs):
+        raise ValueError("negative weight")
     total = sum(w for _, w in pairs)
     return sum(v * w for v, w in pairs) / total if total else None

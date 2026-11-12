@@ -1,5 +1,8 @@
 """숫자 정확 일치(NUM_V1, 스펙 §7.5). 토큰은 정규화 1~4단계 뒤·공백 지우기 전 글자에서 뽑은 (부호, 숫자 글자열, 단위)
-셋이고 셋 다 같아야 같은 토큰이다. 표는 구조가 맞을 때만 같은 (행, 열) 칸끼리 견주고, 아니면 unverified로 센다."""
+셋이고 셋 다 같아야 같은 토큰이다. 표는 구조가 맞을 때만 같은 (행, 열) 칸끼리 견주고, 아니면 unverified로 센다.
+공백(컨트롤러 판정 R5·R6): 부호와 숫자 사이, 여러 글자 단위의 글자 사이(억 원·천 명·% p)에는 어떤 공백이 있어도 같은
+토큰이다(단위 값은 공백을 뺀다). 한 글자 단위(ADJACENT_UNITS)는 숫자에 바로 붙을 때만 단위라 "3대학"과 "3 대학"은
+다른 토큰이다(남은 비대칭, EV-A2에서 센다)."""
 
 import re
 from collections import Counter
@@ -24,10 +27,11 @@ UNITS = SPACED_UNITS + ADJACENT_UNITS
 
 
 def _alt(units: tuple[str, ...]) -> str:
-    return "|".join(re.escape(u) for u in sorted(units, key=len, reverse=True))
+    """긴 단위부터. 여러 글자 단위는 글자 사이에 \\s*를 둔다(R6)."""
+    return "|".join(r"\s*".join(map(re.escape, u)) for u in sorted(units, key=len, reverse=True))
 
 
-_TOKEN = re.compile(rf"(?P<sign>[{re.escape(SIGNS)}])?(?P<num>[0-9]+(?:,[0-9]{{3}})*(?:\.[0-9]+)?)"
+_TOKEN = re.compile(rf"(?:(?P<sign>[{re.escape(SIGNS)}])\s*)?(?P<num>[0-9]+(?:,[0-9]{{3}})*(?:\.[0-9]+)?)"
                     rf"(?:\s*(?P<unit>{_alt(SPACED_UNITS)})|(?P<adjacent>{_alt(ADJACENT_UNITS)}))?")
 
 
@@ -38,9 +42,10 @@ class Token(NamedTuple):
 
 
 def tokens(text: str) -> list[Token]:
-    """[부호]? 숫자 [단위]? 토큰 열. 부호는 숫자 바로 앞. 단위는 SPACED_UNITS면 숫자 뒤 공백을 넘어, ADJACENT_UNITS면
-    숫자에 바로 붙을 때만."""
-    return [Token(m["sign"] or "", m["num"], m["unit"] or m["adjacent"] or "") for m in _TOKEN.finditer(text)]
+    """[부호]? 숫자 [단위]? 토큰 열. 부호는 숫자 앞(사이 공백 허용). 단위는 SPACED_UNITS면 숫자 뒤 공백을 넘어,
+    ADJACENT_UNITS면 숫자에 바로 붙을 때만. 여러 글자 단위 안의 공백은 단위 값에서 뺀다."""
+    return [Token(m["sign"] or "", m["num"], re.sub(r"\s+", "", m["unit"] or m["adjacent"] or ""))
+            for m in _TOKEN.finditer(text)]
 
 
 def token_pr(pred: list[Token], truth: list[Token]) -> tuple[float | None, float | None]:
