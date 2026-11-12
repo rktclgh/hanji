@@ -82,20 +82,29 @@ def _sorted_replicates(values: list[float]) -> list[float]:
     return sorted(values)
 
 
+def _quantiles(alpha: float) -> tuple[float, float]:
+    if not 0.0 < alpha < 1.0:
+        raise ValueError("alpha must be in (0, 1)")
+    return alpha / 2, 1 - alpha / 2
+
+
 def cluster_ci(units: Sequence[Unit], stat: Callable[[Sequence[Unit]], float] = weighted_mean,
-               reps: int = REPS, seed: int = SEED) -> Interval:
-    """백분위 95% 구간."""
+               reps: int = REPS, seed: int = SEED, alpha: float = 0.05) -> Interval:
+    """백분위 1 − α 구간(기본 95%: α/2와 1 − α/2 백분위)."""
+    q_lo, q_hi = _quantiles(alpha)
     if not units:
         return Interval(math.nan, math.nan, ("no_units",))
     _, _, by_doc = _docs(units)
     samples, few = resamples(units, reps, seed)
     values = _sorted_replicates([stat([u for d in s for u in by_doc[d]]) for s in samples])
-    return Interval(percentile(values, 0.025), percentile(values, 0.975), ("few_clusters",) if few else ())
+    return Interval(percentile(values, q_lo), percentile(values, q_hi), ("few_clusters",) if few else ())
 
 
 def paired_ci(a: Sequence[Unit], b: Sequence[Unit], stat: Callable[[Sequence[Unit]], float] = weighted_mean,
-              reps: int = REPS, seed: int = SEED) -> Interval:
-    """stat(a) − stat(b)의 구간. 두 도구·설정이 같은 재표집 표본(같은 문서)을 쓴다. 문서마다 발행처도 같아야 한다."""
+              reps: int = REPS, seed: int = SEED, alpha: float = 0.05) -> Interval:
+    """stat(a) − stat(b)의 1 − α 구간(기본 95%). 두 도구·설정이 같은 재표집 표본(같은 문서)을 쓴다. 문서마다 발행처도
+    같아야 한다."""
+    q_lo, q_hi = _quantiles(alpha)
     if not a and not b:
         return Interval(math.nan, math.nan, ("no_units",))
     _, _, doc_a = _docs(a)
@@ -107,7 +116,7 @@ def paired_ci(a: Sequence[Unit], b: Sequence[Unit], stat: Callable[[Sequence[Uni
     samples, few = resamples(a, reps, seed)
     values = _sorted_replicates([stat([u for d in s for u in doc_a[d]]) - stat([u for d in s for u in doc_b[d]])
                                  for s in samples])
-    return Interval(percentile(values, 0.025), percentile(values, 0.975), ("few_clusters",) if few else ())
+    return Interval(percentile(values, q_lo), percentile(values, q_hi), ("few_clusters",) if few else ())
 
 
 def _log_pmf(k: int, n: int, p: float) -> float:
@@ -167,4 +176,4 @@ def rate_interval(units: Sequence[Unit], alpha: float = 0.05, reps: int = REPS, 
         return Interval(0.0, cp_upper(events, n, alpha), ("one_sided_upper",))
     if n and n - events <= SMALL_EVENTS:
         return Interval(1.0 - cp_upper(n - events, n, alpha), 1.0, ("one_sided_lower",))
-    return cluster_ci(units, reps=reps, seed=seed)
+    return cluster_ci(units, reps=reps, seed=seed, alpha=alpha)

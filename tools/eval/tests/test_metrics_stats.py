@@ -245,3 +245,15 @@ def test_a_resample_with_zero_total_weight_raises_instead_of_sorting_nan():
         bootstrap.cluster_ci(units)
     with pytest.raises(ValueError, match="zero total weight"):
         bootstrap.paired_ci(units, units)
+
+
+def test_rate_interval_keeps_alpha_on_the_bootstrap_side():
+    units = _units(10, 3, lambda p, d: float((p + d) % 2 == 0))  # 30건 가운데 사건 15건: 부트스트랩 쪽
+    assert sum(u.value for u in units) == 15
+    wide, usual = bootstrap.rate_interval(units, alpha=0.01), bootstrap.rate_interval(units)
+    assert usual == bootstrap.rate_interval(units, alpha=0.05) == bootstrap.cluster_ci(units)
+    assert wide.flags == usual.flags == () and wide.lo < usual.lo and wide.hi > usual.hi
+    assert (wide.lo, wide.hi) == (pytest.approx(0.23333333333333334), pytest.approx(0.7666666666666667))  # 99%
+    assert (usual.lo, usual.hi) == (pytest.approx(0.3), pytest.approx(0.7))  # 95%
+    with pytest.raises(ValueError, match="alpha"):
+        bootstrap.cluster_ci(units, alpha=1.0)
