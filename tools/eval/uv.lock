@@ -128,11 +128,13 @@ dependencies = [
     { name = "hanji-contracts" },
     { name = "hanji-fonts" },
     { name = "platformdirs" },
+    { name = "pypdfium2" },
     { name = "rapidfuzz" },
 ]
 
 [package.dev-dependencies]
 dev = [
+    { name = "packaging" },
     { name = "pytest" },
 ]
 
@@ -144,11 +146,15 @@ requires-dist = [
     { name = "hanji-contracts", editable = "../../packages/contracts" },
     { name = "hanji-fonts", editable = "../../packages/fonts" },
     { name = "platformdirs", specifier = ">=4,<5" },
+    { name = "pypdfium2", specifier = "==5.13.0" },
     { name = "rapidfuzz", specifier = ">=3.9,<4" },
 ]
 
 [package.metadata.requires-dev]
-dev = [{ name = "pytest", specifier = ">=8.3" }]
+dev = [
+    { name = "packaging", specifier = "==26.3" },
+    { name = "pytest", specifier = ">=8.3" },
+]
 
 [[package]]
 name = "hanji-fonts"

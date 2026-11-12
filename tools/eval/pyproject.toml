@@ -15,13 +15,15 @@ dependencies = [
     "platformdirs>=4,<5",
     "rapidfuzz>=3.9,<4",
     "apted>=1.0.3,<2",
+    # 하네스가 직접 import한다(worker·cli의 PDF 쪽 수, 엔진을 거쳐 오던 것): 판은 아래 묶음과 같다
+    "pypdfium2==5.13.0",
 ]
 
 [project.scripts]
 hanji-eval = "hanji_eval.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8.3"]
+dev = ["pytest>=8.3", "packaging==26.3"]  # packaging: test_wheel이 직접 import한다
 
 [tool.uv]
 # 엔진이 쓰는 배포판은 루트 uv.lock과 같은 판으로 묶는다(평가가 라이브러리 CI와 같은 엔진 스택을 잰다, test_licenses가 본다)
