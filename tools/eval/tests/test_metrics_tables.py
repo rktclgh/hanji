@@ -133,3 +133,23 @@ def test_ported_files_keep_their_origin_and_both_notices_list_them():
         assert commit in head and license_name in head
         assert commit in eval_notice
         assert Path(module.__file__).name in root_notice
+
+
+def _dense(n_rows: int, n_cols: int) -> Table:
+    return _t(n_rows, n_cols, *((r, c, 1, 1, "가") for r in range(n_rows) for c in range(n_cols)))
+
+
+def test_grits_leaves_a_pair_of_very_large_tables_unscored_instead_of_filling_memory(monkeypatch):
+    from hanji_eval.metrics import failures
+
+    def boom(*args, **kw):
+        raise AssertionError("the reward table must not be built")
+
+    big = _dense(100, 100)  # 10,000칸 × 10,000칸 = 1억 칸 짝
+    monkeypatch.setattr(grits, "factored_2dmss", boom)
+    assert grits.grits_con(big, big) is None and grits.grits_top(big, big) is None
+    assert grits.MAX_CELL_PAIRS == 4_000_000
+    assert grits.scoreable(_dense(40, 50), _dense(40, 50))  # 2,000칸끼리는 셈한다
+    assert grits.scoreable(_dense(60, 50), _dense(20, 50)) and not grits.scoreable(_dense(41, 50), _dense(40, 50))
+    out = failures.apply("grits_con", {"pdf-0001": None, "pdf-0002": 0.5}, [])  # 셈하지 않은 짝은 n_undefined
+    assert out.values == (("pdf-0002", 0.5),) and out.n_undefined == 1

@@ -5,7 +5,7 @@
 # 바꾼 점: (1) numpy 배열 대신 파이썬 리스트(같은 float64 셈), (2) PyMuPDF(fitz) Rect 대신 같은 셈의 iou(교집합 넓이 ÷
 #   두 상자를 감싸는 상자 넓이), (3) GriTS-Con·Top만 남기고(Loc·HTML 파싱·상자 후처리는 뺐다) 격자는 공통 블록 표에서
 #   만든다: 어느 칸도 덮지 않은 자리는 빈 글자의 1×1 칸으로 본다(원본은 0으로 채워 실패한다), (4) 점수는 늘 float으로
-#   돌려준다(원본은 0·1을 int로 돌려줄 때가 있다).
+#   돌려준다(원본은 0·1을 int로 돌려줄 때가 있다), (5) 칸 짝 수가 MAX_CELL_PAIRS를 넘는 표 짝은 셈하지 않고 None.
 """GriTS-Con(칸 글자 LCS 유사도)·GriTS-Top(칸의 상대 범위 IoU): factored 2D-MSS의 F-score. 짝 표마다(스펙 §7.1)."""
 
 import itertools
@@ -13,6 +13,10 @@ from difflib import SequenceMatcher
 from typing import NamedTuple
 
 from ..blocks import Table
+
+# 정답 칸 수 × 예측 칸 수의 상한. 보상 표가 칸 짝마다 두 dict 항목(실측 약 270바이트)이라 400만 짝 ≈ 1.1 GB다.
+# 2,000칸 표끼리(예: 40×50 대 40×50)는 셈하고 100×100끼리(1억 짝, 약 27 GB)는 셈하지 않는다.
+MAX_CELL_PAIRS = 4_000_000
 
 
 class GritsScore(NamedTuple):
@@ -201,9 +205,20 @@ def relspan_grid(table: Table) -> list[list[list[int]]]:
     return grid
 
 
-def grits_con(pred: Table, truth: Table) -> GritsScore:
+def scoreable(pred: Table, truth: Table) -> bool:
+    """칸 짝 수(정답 행×열 × 예측 행×열)가 MAX_CELL_PAIRS 이하인가."""
+    return truth.n_rows * truth.n_cols * pred.n_rows * pred.n_cols <= MAX_CELL_PAIRS
+
+
+def grits_con(pred: Table, truth: Table) -> GritsScore | None:
+    """None = 셈하지 않음(표가 너무 크다): 문서 값으로 None을 넘기면 failures.apply가 n_undefined로 센다."""
+    if not scoreable(pred, truth):
+        return None
     return factored_2dmss(text_grid(truth), text_grid(pred), reward_function=lcs_similarity)
 
 
-def grits_top(pred: Table, truth: Table) -> GritsScore:
+def grits_top(pred: Table, truth: Table) -> GritsScore | None:
+    """None = 셈하지 않음(grits_con과 같다)."""
+    if not scoreable(pred, truth):
+        return None
     return factored_2dmss(relspan_grid(truth), relspan_grid(pred), reward_function=iou)
