@@ -95,6 +95,7 @@ def test_each_link_of_a_run_bundle_is_compared_and_outputs_carry_no_text(ran):
     for name in ("docs.jsonl", "pairs.jsonl", "summary.json"):
         assert (out / name).read_text(encoding="utf-8").isascii()
     assert (out / "summary.md").read_text(encoding="utf-8") == bigrun.render_md(summary)
+    assert bigrun.CP_NOTE in bigrun.render_md(summary).splitlines() and "근사" in bigrun.CP_NOTE  # 스펙 §7.6
     guard.check(json.loads((out / "summary.json").read_text(encoding="utf-8")), bigrun.SUMMARY)
 
 

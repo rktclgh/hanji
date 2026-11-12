@@ -31,6 +31,9 @@ MiB = 1024 * 1024
 KINDS = ("heading", "paragraph", "list_item", "caption", "page_header", "page_footer", "table", "figure", "other")
 EXTS = {".pdf": "pdf", ".hwp": "hwp", ".hwpx": "hwpx", ".docx": "docx", ".pptx": "pptx"}
 REPO = Path(__file__).resolve().parents[4]
+# 스펙 §7.6: 문서 단위 상한은 근사이고 결과에 그 사실을 적는다(summary.md에 늘 같은 글로)
+CP_NOTE = ("- 문서 단위 95% 상한(한쪽 Clopper-Pearson)은 전수 집계를 문서 모집단에서 뽑은 표본으로 보는 근사다"
+           "(스펙 §7.6).")
 
 _N = guard.optional(guard.number(0))
 _I = guard.optional(guard.integer())
@@ -348,6 +351,7 @@ def render_md(summary: dict[str, Any]) -> str:
     b = d["bounds"]["all"]
     lines.append(f"- 전체 {b['docs']}건: 실패율 상한 {_fmt(b['failure_upper'])}, coverage_mismatch 문서율 상한 "
                  f"{_fmt(b['coverage_mismatch_upper'])}, unassigned_text 문서율 상한 {_fmt(b['unassigned_text_upper'])}")
+    lines.append(CP_NOTE)
     p = summary["pairs"]
     lines += ["", f"- 짝 연결 {p['links']}: {p['status']}, 다중집합 Jaccard 규칙이면 셈 {p['measured_by_multiset_rule']}"]
     for fmt, v in sorted(p["by_format"].items()):
