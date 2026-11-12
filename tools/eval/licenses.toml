@@ -925,6 +925,10 @@ name = "protobuf"
 version = "7.36.2"
 declared = "BSD-3-Clause"
 basis = "metadata License field 3-Clause BSD License"
+wheel_tags = ["*-macosx_*_universal2", "*-manylinux2014_x86_64"]
+no_bundled = """macosx_10_9_universal2 (eval venv) and manylinux2014_x86_64 (uv.lock sha256 checked): only the \
+package's own extension google/_upb/_message.abi3.so, no .dylibs or *.libs folder, no SBOM, one licence file \
+protobuf-7.36.2.dist-info/LICENSE"""
 
 [[package]]
 name = "pyclipper"
@@ -1199,6 +1203,10 @@ name = "rapidfuzz"
 version = "3.14.6"
 declared = "MIT"
 basis = "metadata License-Expression"
+wheel_tags = ["*-macosx_*_arm64", "*-manylinux_*_x86_64"]
+no_bundled = """macosx_11_0_arm64 (eval venv) and manylinux_2_27_x86_64 (uv.lock sha256 checked): only the \
+package's own C++ extensions under rapidfuzz/, no .dylibs or *.libs folder, no SBOM, one licence file \
+rapidfuzz-3.14.6.dist-info/licenses/LICENSE"""
 
 [[package]]
 name = "typing-extensions"

@@ -22,10 +22,11 @@ def _lock(tmp_path: Path, packages: dict[str, str]) -> Path:
 
 
 def _table(tmp_path: Path, rows: list[tuple[str, str, str]], bundled: list[dict] | None = None,
-           entry_tags: list[str] | None = None) -> Path:
+           entry_tags: list[str] | None = None, no_bundled: str | None = None) -> Path:
     body = ""
     for n, v, s in rows:
         body += f'[[package]]\nname = "{n}"\nversion = "{v}"\ndeclared = "{s}"\nbasis = "metadata"\n'
+        body += f"no_bundled = {json.dumps(no_bundled)}\n" if no_bundled is not None else ""
         body += (f"wheel_tags = {json.dumps(entry_tags)}\n" if entry_tags is not None else "") + "\n"
         for b in bundled or []:
             body += "[[package.bundled]]\n" + "".join(f"{k} = {json.dumps(v)}\n" for k, v in b.items()) + "\n"
@@ -76,14 +77,27 @@ def _tags(dist) -> list[str]:
     return licenses.wheel_tags(dist.read_text("WHEEL") or "")
 
 
-def test_bundled_rows_were_recorded_for_the_installed_wheel():
-    # 플랫폼 휠의 묶인 줄은 그 휠에서 적은 것이어야 한다: 적지 않은 플랫폼은 건너뛰지 않고 실패한다
+def test_every_installed_platform_wheel_was_recorded_for_its_tag():
+    # 설치된 플랫폼 휠은 모두(묶인 줄이 없어도) 그 휠에서 적은 것이어야 한다: 적지 않은 플랫폼은 건너뛰지 않고 실패한다
     checked = 0
     for name, entry in TABLE.items():
-        if entry.bundled and name in INSTALLED and licenses.platform_specific(_tags(INSTALLED[name])):
+        if name in INSTALLED and licenses.platform_specific(_tags(INSTALLED[name])):
             assert licenses.recorded_for(entry, _tags(INSTALLED[name])), (name, _tags(INSTALLED[name]))
+            assert entry.bundled or entry.no_bundled, name
             checked += 1
-    assert checked >= 6
+    assert checked >= 8
+
+
+def test_wheels_recorded_without_bundled_components_ship_no_vendored_libraries():
+    checked = 0
+    for name, entry in TABLE.items():
+        if entry.no_bundled and name in INSTALLED:
+            files = [str(f) for f in INSTALLED[name].files or []]
+            vendored = [f for f in files if f.split("/")[0].endswith((".libs", ".dylibs")) or "/.dylibs/" in f
+                        or "/sboms/" in f or f.endswith(".dylib")]
+            assert vendored == [], name
+            checked += 1
+    assert checked >= 2
 
 
 def test_every_installed_sbom_component_is_recorded():
@@ -337,3 +351,18 @@ def test_an_unreadable_bundled_row_does_not_hide_the_rows_after_it(tmp_path):
     assert licenses.check(_lock(tmp_path, {"alpha": "1.0"}), _table(tmp_path, [("alpha", "1.0", "MIT")], rows)) == [
         "alpha: bundled one: unexpected end of SPDX expression: 'MIT AND ('",
         "alpha: bundled two: license GPL-3.0-only not allowed"]
+
+
+@pytest.mark.parametrize(("no_bundled", "tags", "bundled", "message"), [
+    ("no .libs folder", ["*-manylinux_*_x86_64"], None, None),
+    (" ", ["*-manylinux_*_x86_64"], None, "alpha: no_bundled must state its evidence"),
+    ("no .libs folder", None, None, "alpha: no_bundled needs the wheel_tags it was recorded from"),
+    ("no .libs folder", ["*-manylinux_*_x86_64"],
+     [{"component": "c", "spdx": "MIT", "status": "allowed", "evidence": "x"}],
+     "alpha: no_bundled together with bundled rows"),
+], ids=["ok", "empty", "no-tags", "with-rows"])
+def test_a_wheel_without_bundled_components_states_its_evidence_and_tags(tmp_path, no_bundled, tags, bundled,
+                                                                         message):
+    lock = _lock(tmp_path, {"alpha": "1.0"})
+    table = _table(tmp_path, [("alpha", "1.0", "MIT")], bundled, entry_tags=tags, no_bundled=no_bundled)
+    assert licenses.check(lock, table) == ([message] if message else [])

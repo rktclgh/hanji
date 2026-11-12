@@ -2,7 +2,8 @@
 묶인 구성 요소(bundled)가 정한 규칙을 넘지 않는지 본다. OR은 하나라도 허용이면, AND·WITH는 모두 허용이어야 통과.
 모르는 값·읽히지 않는 식은 실패다. 묶인 구성 요소의 status는 정해진 여섯 가지뿐이다(컨트롤러 판정 R4a).
 wheel_tags는 휠 WHEEL 파일 Tag: 값에 맞추는 fnmatch 패턴이다: 배포판 줄은 묶인 줄을 적은 휠, 묶인 줄은 그 줄이 맞는 휠.
-check()는 플랫폼을 보지 않고 모든 줄(플랫폼의 합집합)을 검사한다. 플랫폼별로 거르는 것은 설치 환경 시험뿐이다."""
+check()는 플랫폼을 보지 않고 모든 줄(플랫폼의 합집합)을 검사한다. 플랫폼별로 거르는 것은 설치 환경 시험뿐이다.
+설치된 플랫폼 휠은 모두 적은 휠(wheel_tags)이 맞아야 하고, 묶인 줄이 없으면 no_bundled에 그 근거를 적는다."""
 
 import collections
 import fnmatch
@@ -54,6 +55,7 @@ class Entry:
     basis: str
     bundled: tuple[Bundled, ...] = ()
     wheel_tags: tuple[str, ...] = ()  # 묶인 줄을 적은 휠(플랫폼 휠이면 설치된 휠이 여기 맞아야 한다)
+    no_bundled: str | None = None  # 플랫폼 휠에 묶인 구성 요소가 없다는 근거(bundled와 함께 쓰지 않는다)
 
 
 def normalize_name(name: str) -> str:
@@ -281,7 +283,8 @@ def _bundled(raw: dict) -> Bundled:
 def load_table(path: Path) -> list[Entry]:
     data = tomllib.loads(path.read_text(encoding="utf-8"))
     return [Entry(normalize_name(p["name"]), p["version"], p["declared"], p["basis"],
-                  tuple(_bundled(b) for b in p.get("bundled", ())), tuple(p.get("wheel_tags", ())))
+                  tuple(_bundled(b) for b in p.get("bundled", ())), tuple(p.get("wheel_tags", ())),
+                  p.get("no_bundled"))
             for p in data.get("package", [])]
 
 
@@ -312,6 +315,13 @@ def check(lock: Path, table: Path) -> list[str]:
             problems.append(f"{name}: no license basis")
         if not _tags_ok(entry.wheel_tags):
             problems.append(f"{name}: wheel_tags must be non-empty strings")
+        if entry.no_bundled is not None:
+            if not isinstance(entry.no_bundled, str) or not entry.no_bundled.strip():
+                problems.append(f"{name}: no_bundled must state its evidence")
+            elif entry.bundled:
+                problems.append(f"{name}: no_bundled together with bundled rows")
+            elif not entry.wheel_tags:
+                problems.append(f"{name}: no_bundled needs the wheel_tags it was recorded from")
         try:
             if not allowed(entry.declared):
                 problems.append(f"{name}: license {entry.declared} not allowed")
