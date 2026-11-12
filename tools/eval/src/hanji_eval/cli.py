@@ -72,6 +72,13 @@ def _bigrun(args: argparse.Namespace) -> int:
     return 0 if g["passed"] else 1
 
 
+def _positive(text: str) -> int:
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError("must be at least 1")
+    return value
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="hanji-eval")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -90,7 +97,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--out", default=None, help="new work folder (default <work>/bigrun/<name>, never under lab/)")
     p.add_argument("--name", default=None)
     p.add_argument("--date", default=datetime.date.today().isoformat())
-    p.add_argument("--jobs", type=int, default=4)
+    p.add_argument("--jobs", type=_positive, default=4)
     p.add_argument("--timeout", type=float, default=600.0)
     p.add_argument("--twice", action="store_true", help="run every document twice and compare the hashes")
     p.add_argument("--extra", action="append", default=[], help="extra folder outside hanji-ko (repeatable)")

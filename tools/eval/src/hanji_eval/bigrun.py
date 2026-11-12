@@ -18,7 +18,7 @@ from hanji import models
 from hanji.errors import ModelError
 from hanji.resources import cpu_count, pool_threads
 
-from . import corpus, guard, provenance
+from . import corpus, guard, provenance, workdir
 from .guard import GuardError
 from .datasets import Registry, RegistryError, file_sha256
 from .metrics.bootstrap import cp_upper, percentile
@@ -127,6 +127,8 @@ def _run_worker(args: Sequence[str], timeout: float, worker: Sequence[str],
                               env=None if env is None else dict(env))
     except subprocess.TimeoutExpired:
         return "timeout", None, os.times().elapsed - start
+    except OSError:  # 작업 프로세스를 띄우지 못함(실행 파일 없음·파일 기술자 부족 등): 그 문서만 crashed
+        return "crashed", None, os.times().elapsed - start
     elapsed = os.times().elapsed - start
     lines = done.stdout.decode("utf-8", "replace").strip().splitlines()
     if done.returncode != 0 or not lines:
@@ -365,11 +367,15 @@ def extras(dirs: Sequence[Path], manifest: list[dict[str, Any]], split: dict[str
     known = {d["sha256"] for d in manifest}
     out, skipped, bad = [], 0, 0
     for folder in dirs:
+        if not folder.is_dir():
+            raise BigrunError("an --extra folder does not exist")
         for path in sorted(p for p in folder.rglob("*") if p.is_file() and p.suffix.lower() in EXTS):
             sha = file_sha256(path)
             if sha in held:
                 bad += 1
             elif sha in known:
+                skipped += 1
+            elif any(doc == f"extra-{sha[:12]}" for doc, _, _ in out):  # 같은 파일은 한 번만 돈다
                 skipped += 1
             else:
                 out.append((f"extra-{sha[:12]}", EXTS[path.suffix.lower()], path))
@@ -399,6 +405,15 @@ def run(manifest_path: Path, split_path: Path, out: Path, registry: Registry, na
         worker: Sequence[str] = WORKER, allow_no_models: bool = False) -> dict[str, Any]:
     """manifest·분할 파일은 datasets.toml의 corpus-big·hanji-ko-v1 파일과 sha256이 같아야 한다(어느 체크아웃의 lab에서
     읽든). out은 새 폴더(또는 빈 폴더)여야 한다. 커밋은 이 하네스가 든 저장소의 HEAD(추적 파일이 바뀌었으면 dirty)."""
+    out = workdir.refuse_lab(out, REPO)  # CLI를 거치지 않아도 lab/ 아래에는 쓰지 않는다
+    guard.pattern(guard.SLUG)(name, "$.run.name")  # 이름·날짜·git은 문서를 돌리기 전에 본다(끝에서 실패하지 않게)
+    guard.pattern(guard.DATE)(date, "$.run.date")
+    try:
+        commit = _git(REPO, "rev-parse", "HEAD")
+        dirty = bool(_git(REPO, "status", "--porcelain", "--untracked-files=no")
+                     or _git(REPO, "status", "--porcelain", "--untracked-files=all", "--", "packages"))
+    except (OSError, subprocess.CalledProcessError):
+        raise BigrunError("the harness checkout is not a git repository with a commit") from None
     dataset = registry.get("corpus-big")
     sha = file_sha256(manifest_path)
     if sha not in {f.sha256 for f in dataset.files}:
@@ -451,8 +466,6 @@ def run(manifest_path: Path, split_path: Path, out: Path, registry: Registry, na
     with ThreadPoolExecutor(max_workers=jobs) as pool:
         pairs = list(pool.map(one, links))
     dev = sorted((r for r in records if r["set"] == "dev"), key=lambda r: r["doc"])
-    commit = _git(REPO, "rev-parse", "HEAD")
-    dirty = bool(_git(REPO, "status", "--porcelain", "--untracked-files=no"))
     machine = guard.machine_env({k: env.get(k, "") for k in ("HANJI_ORT_THREADS", "OMP_NUM_THREADS")})
     tools = [{"tool": "hanji", "version": importlib.metadata.version("hanji"), "models": shas}]
     env = {"machine": machine | {"tools": tools, "datasets": [{"dataset": "corpus-big", "version": dataset.version,

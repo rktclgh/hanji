@@ -297,3 +297,56 @@ def test_every_engine_reason_constant_is_a_known_reason():
                                 re.M))
     not_reasons = {"caption_ref", "figure_title"}  # 레이아웃 모델 분류 이름·캡션 연결 키
     assert found - not_reasons <= set(guard.REASONS)
+
+
+@pytest.mark.parametrize(("name", "date"), [("../escape", "2026-11-12"), ("Bad Name", "2026-11-12"),
+                                            ("synthetic", "12-11-2026")], ids=["path-name", "space-name", "bad-date"])
+def test_a_bad_name_or_date_fails_before_any_document_runs(tmp_path, name, date):
+    manifest, split, registry = _corpus(tmp_path)
+    with pytest.raises(guard.GuardError):
+        bigrun.run(manifest, split, tmp_path / "out", registry, name, date, allow_no_models=True,
+                   worker=[sys.executable, "-c", "raise SystemExit('a worker must not start')"])
+    assert not (tmp_path / "out").exists()
+
+
+def test_a_checkout_without_git_fails_before_any_document_runs(tmp_path, monkeypatch):
+    manifest, split, registry = _corpus(tmp_path)
+    (tmp_path / "not-a-repo").mkdir()
+    monkeypatch.setattr(bigrun, "REPO", tmp_path / "not-a-repo")
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    with pytest.raises(bigrun.BigrunError, match="git"):
+        _run(manifest, split, tmp_path / "out", registry)
+    assert not (tmp_path / "out").exists()
+
+
+def test_run_itself_refuses_a_work_folder_under_lab(tmp_path, monkeypatch):
+    manifest, split, registry = _corpus(tmp_path)
+    (tmp_path / "repo" / "lab").mkdir(parents=True)
+    monkeypatch.setattr(bigrun, "REPO", tmp_path / "repo")  # 진짜 lab/ 대신 지어낸 저장소의 lab/
+    with pytest.raises(bigrun.workdir.WorkDirError):
+        _run(manifest, split, tmp_path / "repo" / "LAB" / "w", registry)
+    assert list((tmp_path / "repo" / "lab").iterdir()) == []
+
+
+def test_jobs_below_one_are_refused_by_the_command_line(capsys):
+    with pytest.raises(SystemExit) as caught:
+        cli.main(["bigrun", "--jobs", "0"])
+    assert caught.value.code == 2 and "at least 1" in capsys.readouterr().err
+
+
+def test_a_worker_that_cannot_start_is_a_crash_of_that_document(tmp_path):
+    record = bigrun.run_doc("pdf-0009", "pdf", tmp_path / "a.pdf", "dev", 5, False,
+                            worker=[str(tmp_path / "no-such-worker")])
+    assert record["status"] == "crashed"
+
+
+def test_a_missing_extra_folder_fails_and_duplicate_extra_files_run_once(tmp_path):
+    manifest, split, registry = _corpus(tmp_path)
+    with pytest.raises(bigrun.BigrunError, match="--extra folder does not exist"):
+        _run(manifest, split, tmp_path / "out", registry, extra_dirs=[tmp_path / "missing"])
+    extra = tmp_path / "extra"
+    extra.mkdir()
+    shutil.copyfile(FIXTURES / "ooxml" / "inputs" / "headings.docx", extra / "a.docx")
+    shutil.copyfile(FIXTURES / "ooxml" / "inputs" / "headings.docx", extra / "b.docx")
+    jobs, skipped = bigrun.extras([extra], corpus.load_manifest(manifest), corpus.load_split(split), [])
+    assert (len(jobs), skipped) == (1, 1)
