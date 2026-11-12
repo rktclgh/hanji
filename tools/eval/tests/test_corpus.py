@@ -207,3 +207,16 @@ def test_seal_writes_the_split_from_the_manifest_and_the_pdf_page_counts(tmp_pat
     line = json.loads(capsys.readouterr().out)
     assert line == {"command": "seal", "bundles": expected["counts"]["bundles"],
                     "publishers": {k: len(v) for k, v in expected["publishers"].items()}}
+
+
+def test_a_copy_of_an_unpaired_holdout_publisher_document_under_a_development_publisher_is_sealed():
+    manifest, pages = _manifest()
+    split = corpus.make_split(manifest, "0" * 64, pages, "2026-11-12")
+    run, held = corpus.dev_run_set(manifest, "0" * 64, split)
+    lone = next(d for d in held if d["group"] is None)  # 짝 묶음 밖(분할의 묶음 목록에 없다)
+    assert lone["sha256"] not in {d["sha256"] for r in split["bundles"] for d in [r["pdf"], *r["originals"]]}
+    copy = dict(next(d for d in run if d["format"] == lone["format"]), id=f"{lone['format']}-0778",
+                sha256=lone["sha256"])  # 개발 발행처로 적힌 같은 바이트
+    with pytest.raises(corpus.SealError, match=f"{lone['format']}-0778"):
+        corpus.assert_unsealed(run + [copy], [*manifest, copy], split)
+    corpus.assert_unsealed(run, [*manifest, copy], split)  # 사본이 입력에 없으면 통과

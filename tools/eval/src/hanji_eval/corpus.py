@@ -172,10 +172,11 @@ def dev_run_set(manifest: list[dict[str, Any]], manifest_sha256: str,
 
 def assert_unsealed(docs: list[dict[str, Any]], manifest: list[dict[str, Any]], split: dict[str, Any]) -> None:
     """고르기·장부·메모리 입력에 보류 발행처 문서가 있으면 SealError(문서 번호만 알린다). 발행처로 다시 셈과 따로,
-    분할에 적힌 보류 묶음 문서의 sha256으로도 대조한다."""
+    sha256으로도 대조한다: manifest에서 보류 발행처의 모든 문서(짝이든 아니든)와 분할에 적힌 보류 묶음 문서."""
     ids = publisher_ids(manifest)
     sealed = set(split["publishers"]["holdout"])
-    held_sha = {d["sha256"] for r in split["bundles"] if r["split"] == "holdout" for d in [r["pdf"], *r["originals"]]}
+    held_sha = {d["sha256"] for d in manifest if publisher_of(d, ids) in sealed}
+    held_sha |= {d["sha256"] for r in split["bundles"] if r["split"] == "holdout" for d in [r["pdf"], *r["originals"]]}
     bad = sorted(d["id"] for d in docs if publisher_of(d, ids) in sealed or d["sha256"] in held_sha)
     if bad:
         raise SealError(f"sealed holdout documents in a tuning input: {', '.join(bad[:10])}")
