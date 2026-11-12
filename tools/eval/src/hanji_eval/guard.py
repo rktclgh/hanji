@@ -143,7 +143,7 @@ METRICS = (
     "ece", "ece_same_value", "brier", "aurc", "seconds_per_page", "max_rss_mib", "failure_rate",
 )
 AGGS = ("doc_mean", "char_weighted", "micro", "median", "p95", "max", "rate", "count")
-FLAGS = ("few_clusters", "one_sided_upper", "tau_undefined", "no_units")
+FLAGS = ("few_clusters", "one_sided_upper", "one_sided_lower", "tau_undefined", "no_units")
 UNITS = ("doc", "page", "block", "table")
 # 1단계(도구와 무관한) 제외: 모든 도구가 같은 수를 가져야 한다(§6.5 제외 장부)
 MASK_REASONS = (
