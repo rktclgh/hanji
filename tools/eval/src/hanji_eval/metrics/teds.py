@@ -5,7 +5,8 @@
 #   and/or modify it under the terms of the Apache 2.0 License."
 # 바꾼 점(Apache-2.0 §4(b)): (1) GPL distance.levenshtein 대신 rapidfuzz Levenshtein.distance(같은 값),
 #   (2) lxml HTML 파싱 대신 공통 블록 표(행·열·병합·글자)에서 table → tbody → tr → td 트리를 바로 만든다(td 내용
-#   토큰 = 칸 글자의 글자 하나하나, 원본의 tokenize와 같은 값), (3) 병렬 실행·tqdm·일괄 평가·main을 뺐다.
+#   토큰 = 칸 글자의 글자 하나하나, 원본의 tokenize와 같은 값), (3) 병렬 실행·tqdm·일괄 평가·main을 뺐다,
+#   (4) 어느 칸도 덮지 않은 자리는 그 행에 UNCOVERED 노드(1×1, 글자 없음)로 열 차례에 넣는다(칸의 열 자리가 점수에 든다).
 """TEDS·TEDS-S: 1 − 트리 편집 거리 ÷ 큰 쪽 노드 수. 짝 표마다(스펙 §7.1)."""
 
 from collections import deque
@@ -15,6 +16,8 @@ from apted.helpers import Tree
 from rapidfuzz.distance import Levenshtein
 
 from ..blocks import Table
+
+UNCOVERED = "td-uncovered"  # 덮이지 않은 자리의 노드 태그(td와 이름이 달라 바꾸면 1이 든다)
 
 
 class TableTree(Tree):
@@ -61,16 +64,20 @@ class CustomConfig(Config):
 
 def table_tree(table: Table, structure_only: bool = False) -> tuple[TableTree, int]:
     """(트리, table 아래 노드 수). 행마다 tr 하나(그 행에서 시작하는 칸이 없어도), 칸은 시작 행의 tr에 열 차례로.
-    어느 칸도 덮지 않은 자리는 td가 없다(원본 HTML과 같다. GriTS는 그 자리를 빈 1×1 칸으로 본다)."""
+    어느 칸도 덮지 않은 자리는 그 자리 행의 tr에 열 차례로 UNCOVERED 노드(1×1, 글자 없음)를 둔다: 그래야 1×2 표의
+    0열 칸과 1열 칸이 같은 트리가 되지 않는다(빽빽한 표는 원본과 같은 트리다)."""
+    covered = table.grid()
+    holes = [(r, k) for r in range(table.n_rows) for k in range(table.n_cols) if (r, k) not in covered]
     body = TableTree('tbody', None, None, None, *deque())
     for row in range(table.n_rows):
         tr = TableTree('tr', None, None, None, *deque())
-        for cell in sorted((c for c in table.cells if c.row == row), key=lambda c: c.col):
-            content = [] if structure_only else list(cell.text)
-            tr.children.append(TableTree('td', cell.colspan, cell.rowspan, content, *deque()))
+        nodes = [(cell.col, TableTree('td', cell.colspan, cell.rowspan, [] if structure_only else list(cell.text),
+                                      *deque())) for cell in table.cells if cell.row == row]
+        nodes += [(k, TableTree(UNCOVERED, 1, 1, [], *deque())) for r, k in holes if r == row]
+        tr.children.extend(node for _, node in sorted(nodes, key=lambda n: n[0]))
         body.children.append(tr)
     root = TableTree('table', None, None, None, body)
-    return root, 1 + table.n_rows + len(table.cells)
+    return root, 1 + table.n_rows + len(table.cells) + len(holes)
 
 
 def teds(pred: Table | None, truth: Table | None, structure_only: bool = False) -> float:

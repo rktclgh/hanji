@@ -153,3 +153,12 @@ def test_grits_leaves_a_pair_of_very_large_tables_unscored_instead_of_filling_me
     assert grits.scoreable(_dense(60, 50), _dense(20, 50)) and not grits.scoreable(_dense(41, 50), _dense(40, 50))
     out = failures.apply("grits_con", {"pdf-0001": None, "pdf-0002": 0.5}, [])  # 셈하지 않은 짝은 n_undefined
     assert out.values == (("pdf-0002", 0.5),) and out.n_undefined == 1
+
+
+def test_teds_sees_where_a_cell_sits_when_other_positions_are_uncovered():
+    left, right = _t(1, 2, (0, 0, 1, 1, "X")), _t(1, 2, (0, 1, 1, 1, "X"))  # 같은 칸 하나, 다른 열
+    assert teds.teds(left, right) < 1.0 and teds.teds(left, right, structure_only=True) < 1.0
+    assert teds.teds(left, left) == 1.0 and teds.teds(left, left, structure_only=True) == 1.0
+    tree, nodes = teds.table_tree(left)
+    assert nodes == 1 + 1 + 2  # tbody, tr 하나, 칸 하나와 덮이지 않은 자리 하나
+    assert [c.tag for c in tree.children[0].children[0].children] == ["td", teds.UNCOVERED]
