@@ -97,6 +97,8 @@ def test_each_link_of_a_run_bundle_is_compared_and_outputs_carry_no_text(ran):
         assert (out / name).read_text(encoding="utf-8").isascii()
     assert (out / "summary.md").read_text(encoding="utf-8") == bigrun.render_md(summary)
     assert bigrun.CP_NOTE in bigrun.render_md(summary).splitlines() and "근사" in bigrun.CP_NOTE  # 스펙 §7.6
+    md = bigrun.render_md(summary)
+    assert not re.search(r"True|False|[{}']", md) and "통과 예" in md and "pptx | parse_error 1 |" in md  # 평문 값
     guard.check(json.loads((out / "summary.json").read_text(encoding="utf-8")), bigrun.SUMMARY)
 
 
@@ -406,6 +408,7 @@ def test_every_committed_summary_matches_its_schema_bytes_markdown_and_sources(p
     guard.check(summary, bigrun.SUMMARY)
     assert raw == json.dumps(summary, ensure_ascii=True, indent=1) + "\n"
     assert (path.parent / "summary.md").read_text(encoding="utf-8") == bigrun.render_md(summary)
+    assert max(len(line) for line in bigrun.render_md(summary).splitlines()) <= 120
     provenance.check_report(provenance.sources_of([summary]), Registry.load(cli.DATASETS), holdout_open=False)
 
 

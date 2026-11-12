@@ -327,8 +327,13 @@ def summarize(run: dict[str, Any], env: dict[str, Any], sources: list[dict[str, 
 
 
 def _fmt(v: Any) -> str:
+    """요약 값 하나를 평문으로: 없음 -, 참·거짓 예·아니오, 상태 수 사전은 '이름 수'를 쉼표로 잇는다."""
     if v is None:
         return "-"
+    if isinstance(v, bool):
+        return "예" if v else "아니오"
+    if isinstance(v, dict):
+        return ", ".join(f"{k} {_fmt(n)}" for k, n in sorted(v.items())) or "-"
     return f"{v:.4f}" if isinstance(v, float) else str(v)
 
 
@@ -338,13 +343,14 @@ def render_md(summary: dict[str, Any]) -> str:
     lines = [f"# 대규모 실행 {summary['run']['name']}", "",
              f"- manifest {c['manifest']}, 실행 {c['run']}, 봉인(sealed) {c['sealed']}, 추가 {c['extra']}"
              f"(manifest와 같아 건너뜀 {c['extra_skipped']})",
-             f"- 게이트: 상태 완비 {g['status_complete']}, 네이티브 장부 {g['native_ledger_clean']}, "
-             f"PDF 장부 {g['pdf_coverage_clean']}, 통과 {g['passed']}", "",
-             "| 형식 | 상태 | coverage_mismatch 문서 | unassigned_text 문서 | 초 중앙값/p95/최대 | 최대 RSS MiB 중앙값/p95/최대 "
-             "| 배수 최대 | 실패율·coverage_mismatch 문서율 95% 상한 |", "|---|---|---|---|---|---|---|---|"]
+             f"- 게이트: 상태 완비 {_fmt(g['status_complete'])}, 네이티브 장부 {_fmt(g['native_ledger_clean'])}, "
+             f"PDF 장부 {_fmt(g['pdf_coverage_clean'])}, 통과 {_fmt(g['passed'])}", "",
+             "- 표의 cm = coverage_mismatch, ut = unassigned_text(그 사유가 있는 문서 수와 문서율)", "",
+             "| 형식 | 상태 | cm 문서 | ut 문서 | 초 중앙값/p95/최대 | 최대 RSS MiB 중앙값/p95/최대 | 배수 최대 "
+             "| 95% 상한 실패율·cm 문서율 |", "|---|---|---|---|---|---|---|---|"]
     for fmt in sorted(d["status"]):
         s, r, led, b = d["seconds"][fmt], d["rss_peak_mib"][fmt], d["ledger"][fmt], d["bounds"][fmt]
-        lines.append(f"| {fmt} | {d['status'][fmt]} | {led['coverage_mismatch_docs']} | "
+        lines.append(f"| {fmt} | {_fmt(d['status'][fmt])} | {led['coverage_mismatch_docs']} | "
                      f"{led['unassigned_text_docs']} | {_fmt(s['median'])}/{_fmt(s['p95'])}/{_fmt(s['max'])} | "
                      f"{_fmt(r['median'])}/{_fmt(r['p95'])}/{_fmt(r['max'])} | {_fmt(d['factor_max'][fmt])} | "
                      f"{_fmt(b['failure_upper'])}·{_fmt(b['coverage_mismatch_upper'])} |")
@@ -353,7 +359,8 @@ def render_md(summary: dict[str, Any]) -> str:
                  f"{_fmt(b['coverage_mismatch_upper'])}, unassigned_text 문서율 상한 {_fmt(b['unassigned_text_upper'])}")
     lines.append(CP_NOTE)
     p = summary["pairs"]
-    lines += ["", f"- 짝 연결 {p['links']}: {p['status']}, 다중집합 Jaccard 규칙이면 셈 {p['measured_by_multiset_rule']}"]
+    lines += ["", f"- 짝 연결 {p['links']}({_fmt(p['status'])}), "
+                  f"다중집합 Jaccard 규칙이면 셈 {p['measured_by_multiset_rule']}"]
     for fmt, v in sorted(p["by_format"].items()):
         lines.append(f"- {fmt}: n {v['n']}, 재현율 최소 {_fmt(v['recall_min'])}·중앙값 {_fmt(v['recall_median'])}, "
                      f"정밀도 최소 {_fmt(v['precision_min'])}·중앙값 {_fmt(v['precision_median'])}")
