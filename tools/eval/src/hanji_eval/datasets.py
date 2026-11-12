@@ -31,6 +31,7 @@ class FileEntry:
     path: str
     sha256: str
     url: str | None = None
+    size: int | None = None  # 바이트 수(받기의 상한, 없으면 fetch.MAX_BYTES)
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,7 +83,10 @@ def _dataset(raw: dict) -> Dataset:
         if url is not None and not (isinstance(revision, str) and _REVISION.match(revision)
                                     and revision in str(url).split("/")):
             raise RegistryError(f"{name}: url is not pinned to the dataset revision: {url!r}")
-        files.append(FileEntry(_relative(f.get("path", "")), sha, url))
+        size = f.get("size")
+        if size is not None and (isinstance(size, bool) or not isinstance(size, int) or size < 0):
+            raise RegistryError(f"{name}: size must be a byte count for {f.get('path')!r}")
+        files.append(FileEntry(_relative(f.get("path", "")), sha, url, size))
     if not files:
         raise RegistryError(f"{name}: no files")
     if len({f.path for f in files}) != len(files):

@@ -4,7 +4,8 @@ from pathlib import Path
 import pytest
 
 from hanji_eval import cli
-from hanji_eval.datasets import Registry
+from hanji_eval import fetch as fetch_module
+from hanji_eval.datasets import Registry, RegistryError
 from hanji_eval.fetch import FetchError, fetch
 from hanji_eval.workdir import WorkDirError
 
@@ -105,3 +106,116 @@ def test_a_network_failure_prints_only_the_error_class(tmp_path, monkeypatch, ca
     assert cli.main(["fetch", "tiny", "--dest", str(tmp_path / "eval-data")]) == 2
     assert capsys.readouterr().err == "[hanji-eval] error: URLError\n"
     assert not (tmp_path / "eval-data" / "tiny").exists()
+
+
+class _Endless:
+    """끝나지 않는 응답(지어낸 바이트를 계속 준다). 상한이 듣지 않으면 디스크를 채우기 전에 1 MiB에서 테스트를 멈춘다."""
+
+    def __init__(self, url: str) -> None:
+        self.url = url
+        self.given = 0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self, n: int) -> bytes:
+        self.given += min(n, 1024)
+        if self.given > 1 << 20:
+            raise AssertionError("the download was not cut off")
+        return b"x" * min(n, 1024)
+
+
+def _sized(tmp_path: Path, size: int | None) -> Registry:
+    served = tmp_path / "served" / "0123abc"
+    lines = ["[[dataset]]", 'name = "tiny"', 'version = "1"', 'revision = "0123abc"', "publishable = true",
+             'license = "MIT"', 'license_basis = "LICENSE"', 'use = "synthetic"', 'roles = ["diagnostic"]',
+             'splits = ["all"]', "[[dataset.files]]", 'path = "a.bin"', f'sha256 = "{"0" * 64}"',
+             f'url = "{(served / "a.bin").as_uri()}"'] + ([f"size = {size}"] if size is not None else [])
+    return Registry.from_text("\n".join(lines) + "\n")
+
+
+def test_a_response_longer_than_the_recorded_size_is_cut_off_and_removed(tmp_path, monkeypatch):
+    monkeypatch.setattr(fetch_module.urllib.request, "urlopen", lambda request, timeout: _Endless(request.full_url))
+    with pytest.raises(FetchError, match="more than 4096 bytes"):
+        fetch(_sized(tmp_path, 4096).get("tiny"), tmp_path / "eval-data")
+    assert not (tmp_path / "eval-data").exists()
+
+
+def test_without_a_recorded_size_the_default_byte_cap_applies(tmp_path, monkeypatch):
+    assert fetch_module.MAX_BYTES == 2 * 1024 ** 3 and fetch_module.DEADLINE == 30 * 60
+    monkeypatch.setattr(fetch_module, "MAX_BYTES", 10_000)
+    monkeypatch.setattr(fetch_module.urllib.request, "urlopen", lambda request, timeout: _Endless(request.full_url))
+    with pytest.raises(FetchError, match="more than 10000 bytes"):
+        fetch(_sized(tmp_path, None).get("tiny"), tmp_path / "eval-data")
+    assert not (tmp_path / "eval-data").exists()
+
+
+def test_a_download_past_the_total_deadline_is_removed(tmp_path, monkeypatch):
+    ticks = iter(range(0, 10 ** 6, 60))  # 읽을 때마다 60초가 지난 것으로 센다
+    monkeypatch.setattr(fetch_module, "_clock", lambda: next(ticks))
+    monkeypatch.setattr(fetch_module.urllib.request, "urlopen", lambda request, timeout: _Endless(request.full_url))
+    with pytest.raises(FetchError, match="deadline"):
+        fetch(_sized(tmp_path, None).get("tiny"), tmp_path / "eval-data")
+    assert not (tmp_path / "eval-data").exists()
+
+
+def test_a_bad_recorded_size_is_refused():
+    for bad in ("-1", '"4096"', "true", "1.5"):
+        with pytest.raises(RegistryError, match="size"):
+            Registry.from_text(
+                '[[dataset]]\nname = "tiny"\nversion = "1"\nrevision = "0123abc"\npublishable = true\n'
+                'license = "MIT"\nlicense_basis = "LICENSE"\nuse = "synthetic"\nroles = ["diagnostic"]\n'
+                f'splits = ["all"]\n[[dataset.files]]\npath = "a.bin"\nsha256 = "{"0" * 64}"\n'
+                f'url = "file:///x/0123abc/a.bin"\nsize = {bad}\n')
+
+
+def test_a_second_fetch_into_the_same_destination_fails_and_leaves_the_first_intact(tmp_path, monkeypatch):
+    registry = _served(tmp_path, {"a.json": b"[1]"})
+    real = fetch_module.urllib.request.urlopen
+    second: list[BaseException] = []
+
+    def during_first(request, timeout):
+        if not second:  # 첫 받기가 파일을 연 뒤, 같은 곳으로 두 번째 받기를 시작한다
+            try:
+                fetch(registry.get("tiny"), tmp_path / "eval-data")
+            except FetchError as error:
+                second.append(error)
+        return real(request, timeout=timeout)
+
+    monkeypatch.setattr(fetch_module.urllib.request, "urlopen", during_first)
+    target = fetch(registry.get("tiny"), tmp_path / "eval-data")
+    assert len(second) == 1  # 뒤의 받기는 실패하고 앞의 받기가 만든 파일을 지우지 않는다
+    assert (target / "sub" / "a.json").read_bytes() == b"[1]"
+    assert sorted(p.name for p in (tmp_path / "eval-data").iterdir()) == ["tiny"]  # 잠금 파일은 풀렸다
+
+
+def test_a_destination_held_by_another_fetch_is_refused_before_anything_is_written(tmp_path):
+    registry = _served(tmp_path, {"a.json": b"[1]"})
+    (tmp_path / "eval-data").mkdir()
+    lock = tmp_path / "eval-data" / ".tiny.fetch-lock"
+    lock.write_bytes(b"")  # 다른 받기가 잡았고 아직 아무것도 쓰지 않았다
+    with pytest.raises(FetchError, match="another fetch is writing this destination"):
+        fetch(registry.get("tiny"), tmp_path / "eval-data")
+    assert sorted(p.name for p in (tmp_path / "eval-data").iterdir()) == [".tiny.fetch-lock"]
+    lock.unlink()
+    assert (fetch(registry.get("tiny"), tmp_path / "eval-data") / "sub" / "a.json").read_bytes() == b"[1]"
+
+
+def test_a_file_that_this_fetch_did_not_create_is_never_removed(tmp_path, monkeypatch):
+    registry = _served(tmp_path, {"a.json": b"[1]", "b.json": b"[2]"})
+    real = fetch_module.urllib.request.urlopen
+
+    def foreign_writer(request, timeout):
+        if request.full_url.endswith("a.json"):  # 받기 도중 다른 무엇이 b.json을 먼저 만든다
+            (tmp_path / "eval-data" / "tiny" / "sub" / "b.json").write_bytes(b"theirs")
+        return real(request, timeout=timeout)
+
+    monkeypatch.setattr(fetch_module.urllib.request, "urlopen", foreign_writer)
+    with pytest.raises(FileExistsError):
+        fetch(registry.get("tiny"), tmp_path / "eval-data")
+    assert (tmp_path / "eval-data" / "tiny" / "sub" / "b.json").read_bytes() == b"theirs"
+    assert not (tmp_path / "eval-data" / "tiny" / "sub" / "a.json").exists()
+    assert not (tmp_path / "eval-data" / ".tiny.fetch-lock").exists()
