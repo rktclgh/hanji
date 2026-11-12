@@ -3,10 +3,12 @@
 놓은 1부터의 순번이다(이름은 커밋하지 않는다)."""
 
 import json
+import math
 import random
 import unicodedata
 from collections import defaultdict
 from dataclasses import dataclass
+from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
@@ -83,6 +85,11 @@ def bundles(manifest: list[dict[str, Any]]) -> list[Bundle]:
     return out
 
 
+def holdout_cap(n_bundles: int, fraction: float) -> int:
+    """⌊전체 × fraction⌋을 정수로(부동소수 곱이 하나 아래로 떨어지지 않게 소수 표기 그대로 분수로 바꾼다)."""
+    return math.floor(n_bundles * Fraction(repr(fraction)))
+
+
 def make_split(manifest: list[dict[str, Any]], manifest_sha256: str, pages: dict[str, int], created: str,
                seed: int = 0, fraction: float = 0.4) -> dict[str, Any]:
     """가장 큰 발행처(짝 PDF 쪽 수, 같으면 묶음 수, 그다음 번호)는 개발에 고정한다. 나머지 발행처 번호를 정렬해
@@ -95,7 +102,7 @@ def make_split(manifest: list[dict[str, Any]], manifest_sha256: str, pages: dict
     largest = min(by_pub, key=lambda p: (-size[p][0], -size[p][1], p))
     others = sorted(p for p in by_pub if p != largest)
     random.Random(seed).shuffle(others)
-    cap = int(len(found) * fraction)
+    cap = holdout_cap(len(found), fraction)
     holdout: list[str] = []
     taken = 0
     for p in others:
@@ -134,6 +141,8 @@ def check_split(split: dict[str, Any]) -> None:
     rows = split["bundles"]
     if len({r["bundle"] for r in rows}) != len(rows):
         raise SealError("split lists a bundle twice")
+    if sum(r["split"] == "holdout" for r in rows) > holdout_cap(len(rows), split["holdout_fraction"]):
+        raise SealError("split holdout has more bundles than the cap")
     for r in rows:
         if r["publisher"] not in (held if r["split"] == "holdout" else dev):
             raise SealError(f"split bundle {r['bundle']} does not follow its publisher")

@@ -48,7 +48,12 @@ def _seal(args: argparse.Namespace) -> int:
     pages = {b.pdf["id"]: _pdf_pages(manifest_path.parent / b.pdf["file"]) for b in corpus.bundles(manifest)}
     split = corpus.make_split(manifest, datasets.file_sha256(manifest_path), pages, args.date)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(split, ensure_ascii=True, indent=1) + "\n", encoding="utf-8")
+    try:
+        with out.open("x", encoding="utf-8") as f:  # 위 검사와 쓰기 사이에 생긴 파일도 덮어쓰지 않는다
+            f.write(json.dumps(split, ensure_ascii=True, indent=1) + "\n")
+    except FileExistsError:
+        print("[seal] error: the split is already sealed (refusing to overwrite)", file=sys.stderr)
+        return 2
     publishers = {k: len(v) for k, v in split["publishers"].items()}
     guard.emit({"command": "seal", "bundles": split["counts"]["bundles"], "publishers": publishers}, SEALED)
     return 0

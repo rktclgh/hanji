@@ -1,5 +1,6 @@
 import hashlib
 import json
+import random
 import unicodedata
 from collections import Counter
 from pathlib import Path
@@ -117,6 +118,14 @@ def test_the_committed_split_is_well_formed_and_registered():
     assert split["largest_publisher"] in split["publishers"]["dev"]
     assert not set(split["publishers"]["dev"]) & set(split["publishers"]["holdout"])
     guard.check(json.loads(text), corpus.SPLIT_SCHEMA)
+    # 봉인한 목록 그대로(리뷰에서 manifest로 따로 다시 계산해 같음을 확인한 값)
+    assert split["largest_publisher"] == "pub-088"
+    assert split["publishers"] == {
+        "dev": ["pub-010", "pub-012", "pub-024", "pub-029", "pub-033", "pub-036", "pub-041", "pub-057", "pub-073",
+                "pub-076", "pub-077", "pub-084", "pub-085", "pub-088", "pub-089", "pub-090", "pub-108"],
+        "holdout": ["pub-004", "pub-009", "pub-011", "pub-018", "pub-026", "pub-034", "pub-044", "pub-055", "pub-056",
+                    "pub-058", "pub-060", "pub-061", "pub-062", "pub-064", "pub-065", "pub-066", "pub-083", "pub-105",
+                    "pub-110"]}
 
 
 def test_the_holdout_follows_the_seeded_shuffle_and_skips_publishers_that_overflow():
@@ -131,16 +140,28 @@ def test_the_holdout_follows_the_seeded_shuffle_and_skips_publishers_that_overfl
     spec = [("가", 2, 1), ("나", 4, 1), ("다", 4, 1), ("라", 1, 1), ("마", 6, 40), ("바", 1, 1)]
     manifest, pages = _manifest(spec)
     skip = corpus.make_split(manifest, "0" * 64, pages, "2026-11-12")
-    assert order[:2] == ["pub-003", "pub-002"]
+    shuffled = ["pub-001", "pub-002", "pub-003", "pub-004", "pub-006"]
+    random.Random(0).shuffle(shuffled)
+    assert shuffled == order  # 손으로 적은 차례가 이 파이썬의 random.Random(0)과 같은지
     assert skip["publishers"]["holdout"] == ["pub-001", "pub-003", "pub-006"]
     assert skip["counts"]["bundles"]["holdout"] == 7
 
 
-@pytest.mark.parametrize("change", ["emptied", "overlap", "moved_bundle", "counts"])
+@pytest.mark.parametrize("change", ["emptied", "overlap", "moved_bundle", "counts", "over_cap"])
 def test_an_edited_split_is_refused(tmp_path, change):
     manifest, pages = _manifest()
     split = corpus.make_split(manifest, "0" * 64, pages, "2026-11-12")
-    if change == "emptied":
+    if change == "over_cap":  # 앞뒤가 맞게 고쳐도 보류 묶음이 상한 ⌊18 × 0.4⌋ = 7을 넘으면 거부한다
+        mover = next(p for p in split["publishers"]["dev"] if p != split["largest_publisher"])
+        split["publishers"]["dev"].remove(mover)
+        split["publishers"]["holdout"] = sorted(split["publishers"]["holdout"] + [mover])
+        for b in split["bundles"]:
+            b["split"] = "holdout" if b["publisher"] in split["publishers"]["holdout"] else "dev"
+        for key in ("bundles", "pages"):
+            split["counts"][key] = {s: sum(1 if key == "bundles" else b["pages"] for b in split["bundles"]
+                                           if b["split"] == s) for s in ("dev", "holdout")}
+        assert split["counts"]["bundles"]["holdout"] > 7
+    elif change == "emptied":
         split["publishers"]["dev"] += split["publishers"]["holdout"]
         split["publishers"]["holdout"] = []
     elif change == "overlap":
@@ -163,3 +184,26 @@ def test_a_copy_of_a_holdout_document_under_another_id_is_still_sealed():
     copy = dict(run[0], id="pdf-0777", sha256=held_pdf["sha256"])  # 개발 발행처로 적힌 보류 문서 사본
     with pytest.raises(corpus.SealError, match="pdf-0777"):
         corpus.assert_unsealed(run + [copy], manifest, split)
+
+
+def test_seal_writes_the_split_from_the_manifest_and_the_pdf_page_counts(tmp_path, capsys):
+    import pypdfium2
+
+    manifest, pages = _manifest()
+    for d in manifest:
+        if d["format"] == "pdf":
+            pdf = pypdfium2.PdfDocument.new()
+            for _ in range(pages[d["id"]]):
+                pdf.new_page(100, 100)
+            (tmp_path / d["file"]).parent.mkdir(parents=True, exist_ok=True)
+            pdf.save(str(tmp_path / d["file"]))
+            pdf.close()
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps(manifest), encoding="utf-8")
+    out = tmp_path / "splits" / "split.json"
+    assert cli.main(["seal", "--manifest", str(path), "--out", str(out), "--date", "2026-11-12"]) == 0
+    expected = corpus.make_split(manifest, file_sha256(path), pages, "2026-11-12")
+    assert json.loads(out.read_text(encoding="utf-8")) == expected
+    line = json.loads(capsys.readouterr().out)
+    assert line == {"command": "seal", "bundles": expected["counts"]["bundles"],
+                    "publishers": {k: len(v) for k, v in expected["publishers"].items()}}
