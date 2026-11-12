@@ -422,6 +422,18 @@ def _git(root: Path, *args: str) -> str:
                           check=True).stdout.strip()
 
 
+def git_state(root: Path) -> tuple[str, bool]:
+    """(HEAD 커밋, dirty). dirty = 추적 파일이 바뀌었거나 엔진(packages)·하네스(tools/eval) 아래에 추적하지 않는 파일이
+    있다(.gitignore가 빼는 파일은 세지 않는다). git 저장소가 아니면 BigrunError."""
+    try:
+        commit = _git(root, "rev-parse", "HEAD")
+        dirty = bool(_git(root, "status", "--porcelain", "--untracked-files=no")
+                     or _git(root, "status", "--porcelain", "--untracked-files=all", "--", "packages", "tools/eval"))
+    except (OSError, subprocess.CalledProcessError):
+        raise BigrunError("the harness checkout is not a git repository with a commit") from None
+    return commit, dirty
+
+
 def model_shas(allow_missing: bool) -> list[str]:
     """기본 설정의 OCR·레이아웃 모델 파일(크기·sha256 확인). 하나라도 없거나 다르면 ModelError(allow_missing이면 빈
     목록: 그 실행은 모델 없이 돈 것이고 요약의 env.tools[0].models가 빈다)."""
@@ -441,12 +453,7 @@ def run(manifest_path: Path, split_path: Path, out: Path, registry: Registry, na
     out = workdir.refuse_lab(out, REPO)  # CLI를 거치지 않아도 lab/ 아래에는 쓰지 않는다
     guard.pattern(guard.SLUG)(name, "$.run.name")  # 이름·날짜·git은 문서를 돌리기 전에 본다(끝에서 실패하지 않게)
     guard.pattern(guard.DATE)(date, "$.run.date")
-    try:
-        commit = _git(REPO, "rev-parse", "HEAD")
-        dirty = bool(_git(REPO, "status", "--porcelain", "--untracked-files=no")
-                     or _git(REPO, "status", "--porcelain", "--untracked-files=all", "--", "packages"))
-    except (OSError, subprocess.CalledProcessError):
-        raise BigrunError("the harness checkout is not a git repository with a commit") from None
+    commit, dirty = git_state(REPO)
     dataset = registry.get("corpus-big")
     sha = file_sha256(manifest_path)
     if sha not in {f.sha256 for f in dataset.files}:

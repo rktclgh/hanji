@@ -2,6 +2,7 @@ import hashlib
 import json
 import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -410,3 +411,22 @@ def test_every_committed_summary_matches_its_schema_bytes_markdown_and_sources(p
 
 def test_the_committed_results_folder_is_not_empty():
     assert RESULTS
+
+
+def test_untracked_files_under_the_engine_or_the_harness_make_the_run_dirty(tmp_path):
+    def git(*args: str) -> None:
+        subprocess.run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True)
+
+    git("init", "-q")
+    for folder in ("packages", "tools/eval/src", "notes"):
+        (tmp_path / folder).mkdir(parents=True)
+        (tmp_path / folder / "keep.txt").write_text("x", encoding="utf-8")
+    (tmp_path / ".gitignore").write_text("*.pyc\n", encoding="utf-8")
+    git("add", ".")
+    git("-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "-m", "init")
+    assert bigrun.git_state(tmp_path)[1] is False
+    (tmp_path / "notes" / "other.txt").write_text("x", encoding="utf-8")  # 엔진·하네스 밖은 세지 않는다
+    (tmp_path / "tools" / "eval" / "src" / "cache.pyc").write_bytes(b"x")  # .gitignore가 빼는 파일
+    assert bigrun.git_state(tmp_path)[1] is False
+    (tmp_path / "tools" / "eval" / "src" / "new_module.py").write_text("x = 1\n", encoding="utf-8")
+    assert bigrun.git_state(tmp_path)[1] is True
