@@ -4,18 +4,19 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import datasets, fetch, workdir
+from . import datasets, fetch, guard, workdir
 
 EVAL = Path(__file__).resolve().parents[2]
 ROOT = EVAL.parent.parent
 DATASETS = EVAL / "datasets.toml"
+FETCHED = guard.obj({"command": guard.enum("fetch"), "dataset": guard.enum(*guard.DATASETS), "files": guard.integer()})
 
 
 def _fetch(args: argparse.Namespace) -> int:
     dataset = datasets.Registry.load(DATASETS).get(args.name)
     dest = workdir.refuse_lab(Path(args.dest) if args.dest else workdir.work_dir() / "data", ROOT)
     fetch.fetch(dataset, dest)
-    print(f"[fetch] {dataset.name} {len(dataset.files)} files ok")
+    guard.emit({"command": "fetch", "dataset": dataset.name, "files": len(dataset.files)}, FETCHED)
     return 0
 
 
@@ -29,7 +30,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return args.run(args)
-    except (datasets.RegistryError, fetch.FetchError, workdir.WorkDirError) as error:
+    except (datasets.RegistryError, fetch.FetchError, workdir.WorkDirError, guard.GuardError) as error:
         print(f"[hanji-eval] error: {type(error).__name__}", file=sys.stderr)
         return 2
 
