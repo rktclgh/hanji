@@ -366,3 +366,11 @@ def test_a_wheel_without_bundled_components_states_its_evidence_and_tags(tmp_pat
     lock = _lock(tmp_path, {"alpha": "1.0"})
     table = _table(tmp_path, [("alpha", "1.0", "MIT")], bundled, entry_tags=tags, no_bundled=no_bundled)
     assert licenses.check(lock, table) == ([message] if message else [])
+
+
+def test_numpy_is_recorded_only_for_the_wheels_its_rows_were_read_from():
+    # 잠금의 macosx_11_0_arm64 휠은 OpenBLAS·gfortran을 묶는데 그 휠에서 적은 줄이 없다: 설치되면 시험이 실패해야 한다
+    numpy = TABLE["numpy"]
+    assert licenses.recorded_for(numpy, ["cp312-cp312-macosx_14_0_arm64"])
+    assert licenses.recorded_for(numpy, ["cp312-cp312-manylinux_2_27_x86_64", "cp312-cp312-manylinux_2_28_x86_64"])
+    assert not licenses.recorded_for(numpy, ["cp312-cp312-macosx_11_0_arm64"])

@@ -84,7 +84,8 @@ name = "numpy"
 version = "2.5.3"
 declared = "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0"
 basis = "metadata License-Expression"
-wheel_tags = ["*-macosx_*_arm64", "*-manylinux_*_x86_64"]
+# macOS는 적은 macosx_14_0_arm64 휠(Accelerate)만: 잠금의 macosx_11_0_arm64 휠(OpenBLAS·gfortran 묶음)은 적지 않았다
+wheel_tags = ["*-macosx_14_*_arm64", "*-manylinux_*_x86_64"]
 
 [[package.bundled]]
 component = "libdivide"
