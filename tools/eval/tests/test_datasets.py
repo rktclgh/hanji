@@ -93,8 +93,14 @@ def test_verify_checks_local_file_hashes(tmp_path):
 
 def test_the_committed_table_loads():
     registry = Registry.load(EVAL / "datasets.toml")
-    assert "corpus-big" in registry.names()
-    assert registry.get("corpus-big").sealed_splits == {"holdout"}
+    assert set(registry.names()) == {"corpus-big", "hanji-ko-v1"}
+    big, ko = registry.get("corpus-big"), registry.get("hanji-ko-v1")
+    # 봉인·역할·공개 가능 여부를 글자 그대로 고정한다(봉인을 비우거나 corpus-big을 보정에 넣으면 실패)
+    assert big.sealed_splits == ko.sealed_splits == {"holdout"}
+    assert ko.roles == {"selection", "calibration"}
+    assert big.roles == {"bigrun", "selection"}
+    assert big.publishable is True and ko.publishable is True
+    assert big.splits == ko.splits == ("dev", "holdout")
 
 
 def test_every_registered_dataset_name_can_be_printed():
