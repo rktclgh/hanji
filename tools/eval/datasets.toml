@@ -17,3 +17,22 @@ use = "large corpus run (spec §5); holdout = documents of the sealed hanji-ko-v
 [[dataset.files]]
 path = "lab/corpus-big/manifest.json"
 sha256 = "8da1a58b899159bad19a205770ec151dbc2b18f8af847dede0639bc3078a0fa0"
+
+[[dataset]]
+name = "hanji-ko-v1"
+version = "1"
+license = "KOGL Type 1 (text only), korea.kr press releases"
+license_basis = "lab/corpus-big/manifest.json fields license and license_evidence_url (spec §2: all 170 bundles)"
+publishable = true
+roles = ["selection", "calibration"]
+splits = ["dev", "holdout"]
+sealed_splits = ["holdout"]
+use = "Korean source/PDF pairs (spec §6); holdout publishers sealed in EV-A1, opened once in EV-D"
+
+[[dataset.files]]
+path = "lab/corpus-big/manifest.json"
+sha256 = "8da1a58b899159bad19a205770ec151dbc2b18f8af847dede0639bc3078a0fa0"
+
+[[dataset.files]]
+path = "tools/eval/splits/hanji-ko-v1.json"
+sha256 = "5736769338d7ff6d5d5e76ff801f071de67bfb0fe0548d3ffcfff2e6aae00d3b"
