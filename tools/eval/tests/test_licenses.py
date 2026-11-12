@@ -392,3 +392,11 @@ def test_a_scalar_where_a_list_of_strings_belongs_is_refused_not_split_into_char
         licenses.load_table(table)
     with pytest.raises(licenses.TableError):
         licenses.check(_lock(tmp_path, {"alpha": "1.0"}), table)
+
+
+@pytest.mark.parametrize("absent", [[1], [""], ["*.so", " "]], ids=["number", "empty", "blank"])
+def test_absent_patterns_must_be_non_empty_strings(tmp_path, absent):
+    row = {"component": "one", "spdx": "MIT", "status": "optional-not-shipped", "evidence": "x", "absent": absent}
+    table = _table(tmp_path, [("alpha", "1.0", "MIT")], [row])
+    assert licenses.check(_lock(tmp_path, {"alpha": "1.0"}), table) == [
+        "alpha: bundled one: absent must be non-empty strings"]

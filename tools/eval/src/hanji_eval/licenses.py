@@ -346,6 +346,8 @@ def check(lock: Path, table: Path) -> list[str]:
                 problem = str(error)
             if problem is None and not _tags_ok(b.wheel_tags):
                 problem = "wheel_tags must be non-empty strings"
+            if problem is None and not _tags_ok(b.absent):
+                problem = "absent must be non-empty strings"
             if problem is None and not set(b.wheel_tags) <= set(entry.wheel_tags):
                 extra = ", ".join(sorted(set(b.wheel_tags) - set(entry.wheel_tags)))
                 problem = f"wheel_tags {extra} not among the wheel_tags the package was recorded from"
