@@ -75,6 +75,13 @@ def percentile(sorted_values: Sequence[float], q: float) -> float:
     return sorted_values[lo] + (sorted_values[hi] - sorted_values[lo]) * (pos - lo)
 
 
+def _sorted_replicates(values: list[float]) -> list[float]:
+    """NaN 표본(가중치 합이 0인 재표집 등)이 하나라도 있으면 ValueError: NaN을 정렬하면 백분위가 조용히 틀린다."""
+    if any(math.isnan(v) for v in values):
+        raise ValueError("a bootstrap replicate is NaN (a resample has zero total weight)")
+    return sorted(values)
+
+
 def cluster_ci(units: Sequence[Unit], stat: Callable[[Sequence[Unit]], float] = weighted_mean,
                reps: int = REPS, seed: int = SEED) -> Interval:
     """백분위 95% 구간."""
@@ -82,7 +89,7 @@ def cluster_ci(units: Sequence[Unit], stat: Callable[[Sequence[Unit]], float] = 
         return Interval(math.nan, math.nan, ("no_units",))
     _, _, by_doc = _docs(units)
     samples, few = resamples(units, reps, seed)
-    values = sorted(stat([u for d in s for u in by_doc[d]]) for s in samples)
+    values = _sorted_replicates([stat([u for d in s for u in by_doc[d]]) for s in samples])
     return Interval(percentile(values, 0.025), percentile(values, 0.975), ("few_clusters",) if few else ())
 
 
@@ -98,7 +105,8 @@ def paired_ci(a: Sequence[Unit], b: Sequence[Unit], stat: Callable[[Sequence[Uni
     if any(doc_a[d][0].publisher != doc_b[d][0].publisher for d in doc_a):
         raise ValueError("paired units must give each document the same publisher")
     samples, few = resamples(a, reps, seed)
-    values = sorted(stat([u for d in s for u in doc_a[d]]) - stat([u for d in s for u in doc_b[d]]) for s in samples)
+    values = _sorted_replicates([stat([u for d in s for u in doc_a[d]]) - stat([u for d in s for u in doc_b[d]])
+                                 for s in samples])
     return Interval(percentile(values, 0.025), percentile(values, 0.975), ("few_clusters",) if few else ())
 
 

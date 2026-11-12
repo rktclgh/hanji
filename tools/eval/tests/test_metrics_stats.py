@@ -236,3 +236,12 @@ def test_bad_arguments_fail_instead_of_looping_or_clustering_silently():
         calib.bin_of(-0.1)
     with pytest.raises(ValueError, match=r"\[0, 1\]"):
         calib.bin_of(1.2)
+
+
+def test_a_resample_with_zero_total_weight_raises_instead_of_sorting_nan():
+    # 글자 가중 지표에서 빈 문서만 뽑힌 표본은 NaN이다: 정렬하면 백분위가 조용히 틀리므로 실패한다
+    units = [Unit("pub-001", "pdf-0001", 0.5, weight=0.0), Unit("pub-002", "pdf-0002", 0.9, weight=10.0)]
+    with pytest.raises(ValueError, match="zero total weight"):
+        bootstrap.cluster_ci(units)
+    with pytest.raises(ValueError, match="zero total weight"):
+        bootstrap.paired_ci(units, units)
