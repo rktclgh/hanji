@@ -358,12 +358,41 @@ def render_md(summary: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _held(split: dict[str, Any], sealed: list[dict[str, Any]]) -> set[str]:
+    """봉인 문서(보류 발행처의 문서와 분할에 적힌 보류 묶음 문서)의 sha256."""
+    return {d["sha256"] for d in sealed} | {d["sha256"] for r in split["bundles"] if r["split"] == "holdout"
+                                            for d in [r["pdf"], *r["originals"]]}
+
+
+def check_files(docs: list[dict[str, Any]], manifest: list[dict[str, Any]], manifest_path: Path,
+                held: set[str]) -> None:
+    """돌릴 문서와 짝으로 열 문서의 파일이 manifest의 sha256과 같은지 작업 프로세스를 띄우기 전에 본다(문서 번호만
+    알린다). 봉인 문서의 바이트면 SealError, 없거나 바뀌었거나 링크 등으로 manifest 폴더 밖으로 풀리면 RegistryError."""
+    in_run = {d["id"] for d in docs}
+    partners = [d for b in corpus.bundles(manifest) if b.pdf["id"] in in_run for d in [b.pdf, *b.originals]]
+    base = manifest_path.parent.resolve()
+    sealed, bad = set(), set()
+    for d in [*docs, *partners]:
+        path = (manifest_path.parent / d["file"]).resolve()
+        if not path.is_relative_to(base) or not path.is_file():
+            bad.add(d["id"])
+            continue
+        sha = file_sha256(path)
+        if sha in held and sha != d["sha256"]:
+            sealed.add(d["id"])
+        elif sha != d["sha256"]:
+            bad.add(d["id"])
+    if sealed:
+        raise corpus.SealError(f"run set files hold sealed documents: {', '.join(sorted(sealed)[:10])}")
+    if bad:
+        raise RegistryError(f"run set files differ from the manifest: {', '.join(sorted(bad)[:10])}")
+
+
 def extras(dirs: Sequence[Path], manifest: list[dict[str, Any]], split: dict[str, Any],
            sealed: list[dict[str, Any]]) -> tuple[list[tuple[str, str, Path]], int]:
     """(돌릴 추가 문서, 건너뛴 수). 봉인 문서(보류 발행처·보류 묶음)와 sha256이 같은 파일이 있으면 SealError, 개발
     실행 세트 문서와 같은 파일은 이미 돌므로 건너뛴다."""
-    held = {d["sha256"] for d in sealed} | {d["sha256"] for r in split["bundles"] if r["split"] == "holdout"
-                                            for d in [r["pdf"], *r["originals"]]}
+    held = _held(split, sealed)
     known = {d["sha256"] for d in manifest}
     out, skipped, bad = [], 0, 0
     for folder in dirs:
@@ -427,6 +456,7 @@ def run(manifest_path: Path, split_path: Path, out: Path, registry: Registry, na
     split = corpus.load_split(split_path)
     todo, sealed = corpus.dev_run_set(manifest, sha, split)
     corpus.assert_unsealed(todo, manifest, split)
+    check_files(todo, manifest, manifest_path, _held(split, sealed))
     extra_jobs, skipped = extras(extra_dirs, manifest, split, sealed)
     base = manifest_path.parent
     sources = [registry.source("corpus-big", "dev")]

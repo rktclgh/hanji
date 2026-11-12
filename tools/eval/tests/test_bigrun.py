@@ -129,6 +129,47 @@ def test_a_split_that_differs_from_the_table_is_refused_even_when_it_is_well_for
     assert not (tmp_path / "out").exists()
 
 
+NEVER = [sys.executable, "-c", "raise SystemExit('a worker must not start')"]
+
+
+def _relocated(tmp_path: Path, manifest: Path) -> Path:
+    """sha256이 같은 manifest를 다른 폴더로 옮기고 파일은 그대로 베낀다(리뷰 탐침 A1의 바탕)."""
+    shutil.copytree(manifest.parent, tmp_path / "copy")
+    return tmp_path / "copy" / "manifest.json"
+
+
+def test_sealed_bytes_under_development_file_names_are_refused_before_anything_runs(tmp_path):
+    manifest, split, registry = _corpus(tmp_path)
+    moved = _relocated(tmp_path, manifest)
+    for dev, held in {"pdf-0001": "pdf-0002", "hwpx-0001": "hwpx-0002", "docx-0001": "docx-0002"}.items():
+        fmt = dev.split("-")[0]
+        shutil.copyfile(manifest.parent / "files" / f"{held}.{fmt}", moved.parent / "files" / f"{dev}.{fmt}")
+    with pytest.raises(corpus.SealError, match=r"^run set files hold sealed documents: docx-0001, hwpx-0001, "
+                                               r"pdf-0001$"):
+        _run(moved, split, tmp_path / "out", registry, worker=NEVER)
+    assert not (tmp_path / "out").exists()
+
+
+def test_a_changed_or_missing_run_set_file_is_refused_before_anything_runs(tmp_path):
+    manifest, split, registry = _corpus(tmp_path)
+    (manifest.parent / "files" / "hwp-0001.hwp").write_bytes(b"truncated")
+    (manifest.parent / "files" / "pptx-0001.pptx").unlink()
+    with pytest.raises(RegistryError, match=r"^run set files differ from the manifest: hwp-0001, pptx-0001$"):
+        _run(manifest, split, tmp_path / "out", registry, worker=NEVER)
+    assert not (tmp_path / "out").exists()
+
+
+def test_a_run_set_file_that_resolves_outside_the_manifest_folder_is_refused(tmp_path):
+    manifest, split, registry = _corpus(tmp_path)
+    moved = _relocated(tmp_path, manifest)
+    link = moved.parent / "files" / "docx-0001.docx"
+    link.unlink()
+    link.symlink_to(manifest.parent / "files" / "docx-0001.docx")  # 바이트는 같지만 manifest 폴더 밖
+    with pytest.raises(RegistryError, match=r"^run set files differ from the manifest: docx-0001$"):
+        _run(moved, split, tmp_path / "out", registry, worker=NEVER)
+    assert not (tmp_path / "out").exists()
+
+
 def test_an_extra_folder_with_a_copy_of_a_sealed_document_is_refused(tmp_path):
     manifest, split, registry = _corpus(tmp_path)
     extra = tmp_path / "extra"
