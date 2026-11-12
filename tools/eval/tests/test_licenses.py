@@ -374,3 +374,21 @@ def test_numpy_is_recorded_only_for_the_wheels_its_rows_were_read_from():
     assert licenses.recorded_for(numpy, ["cp312-cp312-macosx_14_0_arm64"])
     assert licenses.recorded_for(numpy, ["cp312-cp312-manylinux_2_27_x86_64", "cp312-cp312-manylinux_2_28_x86_64"])
     assert not licenses.recorded_for(numpy, ["cp312-cp312-macosx_11_0_arm64"])
+
+
+@pytest.mark.parametrize("where", ["entry", "bundled-wheel_tags", "bundled-absent"])
+def test_a_scalar_where_a_list_of_strings_belongs_is_refused_not_split_into_characters(tmp_path, where):
+    row = {"component": "one", "spdx": "MIT", "status": "optional-not-shipped", "evidence": "x", "absent": ["*.so"]}
+    if where == "bundled-wheel_tags":
+        row["wheel_tags"] = "*-manylinux_*_x86_64"
+    if where == "bundled-absent":
+        row["absent"] = "*.so"
+    table = tmp_path / "licenses.toml"
+    _table(tmp_path, [("alpha", "1.0", "MIT")], [row])
+    if where == "entry":
+        table.write_text(table.read_text(encoding="utf-8").replace(
+            'basis = "metadata"\n', 'basis = "metadata"\nwheel_tags = "*-manylinux_*_x86_64"\n', 1), encoding="utf-8")
+    with pytest.raises(licenses.TableError, match="must be a list of strings"):
+        licenses.load_table(table)
+    with pytest.raises(licenses.TableError):
+        licenses.check(_lock(tmp_path, {"alpha": "1.0"}), table)

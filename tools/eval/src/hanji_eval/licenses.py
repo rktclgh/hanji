@@ -30,6 +30,10 @@ WEAK = ("LGPL-", "MPL-")
 _TOKEN = re.compile(r"\s*(\(|\)|[A-Za-z0-9.+-]+)")
 
 
+class TableError(ValueError):
+    """licenses.toml의 꼴이 틀렸다(목록이어야 할 값이 목록이 아님 등)."""
+
+
 class SpdxError(ValueError):
     """SPDX 식을 읽을 수 없다."""
 
@@ -274,16 +278,24 @@ def lock_packages(lock: Path) -> dict[str, str]:
     return {name: versions[-1] for name, versions in _lock_versions(lock).items()}
 
 
+def _strings(raw: dict, key: str) -> tuple:
+    """TOML 배열만 받는다(글자 하나하나로 쪼개지 않게 문자열 하나는 거부한다). 원소의 꼴은 check()가 본다."""
+    value = raw.get(key, [])
+    if not isinstance(value, list):
+        raise TableError(f"{key} must be a list of strings, not {type(value).__name__}")
+    return tuple(value)
+
+
 def _bundled(raw: dict) -> Bundled:
     return Bundled(raw.get("component", ""), raw.get("spdx", ""), raw.get("status", ""), raw.get("evidence", ""),
-                   raw.get("branch"), tuple(raw.get("absent", ())), raw.get("sbom_name"), raw.get("sbom_group"),
-                   tuple(raw.get("wheel_tags", ())))
+                   raw.get("branch"), _strings(raw, "absent"), raw.get("sbom_name"), raw.get("sbom_group"),
+                   _strings(raw, "wheel_tags"))
 
 
 def load_table(path: Path) -> list[Entry]:
     data = tomllib.loads(path.read_text(encoding="utf-8"))
     return [Entry(normalize_name(p["name"]), p["version"], p["declared"], p["basis"],
-                  tuple(_bundled(b) for b in p.get("bundled", ())), tuple(p.get("wheel_tags", ())),
+                  tuple(_bundled(b) for b in p.get("bundled", ())), _strings(p, "wheel_tags"),
                   p.get("no_bundled"))
             for p in data.get("package", [])]
 
