@@ -1,0 +1,109 @@
+import hashlib
+from pathlib import Path
+
+import pytest
+
+from hanji_eval import cli, guard
+from hanji_eval.datasets import Registry, RegistryError, Source, verify
+
+EVAL = Path(__file__).resolve().parents[1]
+A = "a" * 64
+B = "b" * 64
+
+
+def _entry(name: str, files: list[tuple[str, str]], **extra: str) -> str:
+    fields = {"version": '"1"', "license": '"MIT"', "license_basis": '"LICENSE"', "use": '"synthetic"',
+              "publishable": "true", "roles": '["selection"]', "splits": '["dev", "holdout"]',
+              "sealed_splits": '["holdout"]'} | extra
+    lines = ["[[dataset]]", f'name = "{name}"'] + [f"{k} = {v}" for k, v in fields.items()]
+    for path, sha in files:
+        lines += ["[[dataset.files]]", f'path = "{path}"', f'sha256 = "{sha}"']
+    return "\n".join(lines) + "\n"
+
+
+def test_identity_is_the_sorted_file_hashes_not_the_name_or_paths():
+    one = Registry.from_text(_entry("one", [("x.json", A), ("y.json", B)])).get("one")
+    two = Registry.from_text(_entry("two", [("other/b.json", B), ("a.json", A)])).get("two")
+    assert one.identity == two.identity == hashlib.sha256(f"{A}\n{B}".encode()).hexdigest()
+
+
+def test_the_same_files_under_another_name_are_rejected_as_an_alias():
+    text = _entry("one", [("x.json", A)]) + _entry("two", [("copy.json", A)])
+    with pytest.raises(RegistryError, match="two: same files as one"):
+        Registry.from_text(text)
+
+
+@pytest.mark.parametrize(("text", "message"), [
+    (_entry("one", [("x.json", A)]) * 2, "dataset listed twice: one"),
+    (_entry("Bad Name", [("x.json", A)]), "bad dataset name"),
+    (_entry("one", [("../x.json", A)]), "file path must be relative"),
+    (_entry("one", [("x.json", "c" * 63)]), "bad sha256"),
+    (_entry("one", [("x.json", A)], roles='["publish"]'), "unknown roles"),
+    (_entry("one", [("x.json", A)], sealed_splits='["test"]'), "sealed splits"),
+    (_entry("one", []), "no files"),
+    (_entry("one", [("x.json", A)], license='""'), "license is required"),
+    (_entry("one", [("x.json", A)], license_basis='" "'), "license_basis is required"),
+    (_entry("one", [("x.json", A)], use='""'), "use is required"),
+    (_entry("one", [("x.json", A)], version='""'), "version is required"),
+    (_entry("one", [("x.json", A)], license="5"), "license is required"),
+    (_entry("one", [("x.json", A)], version="1"), "version is required"),
+    (_entry("one", [("x.json", A)], use='"  "'), "use is required"),
+], ids=["twice", "name", "path", "sha", "roles", "sealed", "files", "license", "basis", "use", "version",
+        "license-not-a-string", "version-not-a-string", "use-blank"])
+def test_rules_are_checked_when_loading(text, message):
+    with pytest.raises(RegistryError, match=message):
+        Registry.from_text(text)
+
+
+def test_a_download_url_must_be_pinned_to_the_revision():
+    pinned = _entry("one", [], revision='"abc1234"') + '[[dataset.files]]\npath = "x"\nsha256 = "' + A + '"\n'
+    with pytest.raises(RegistryError, match="not pinned"):
+        Registry.from_text(pinned + 'url = "https://example.invalid/main/x"\n')
+    with pytest.raises(RegistryError, match="not pinned"):  # 경로 조각 하나가 판이어야 한다(부분 문자열은 아니다)
+        Registry.from_text(pinned + 'url = "https://example.invalid/abc1234x/x"\n')
+    ok = Registry.from_text(pinned + 'url = "https://example.invalid/abc1234/x"\n').get("one")
+    assert ok.files[0].url == "https://example.invalid/abc1234/x"
+
+
+@pytest.mark.parametrize("revision", ['"main"', '"a"', '"ABC1234"', "7"])
+def test_a_revision_must_be_a_commit_hash(revision):
+    text = _entry("one", [], revision=revision) + '[[dataset.files]]\npath = "x"\nsha256 = "' + A + '"\n'
+    with pytest.raises(RegistryError, match="not pinned"):
+        Registry.from_text(text + 'url = "https://example.invalid/main/a/ABC1234/7/x"\n')
+
+
+def test_a_source_names_the_identity_and_a_known_split():
+    registry = Registry.from_text(_entry("one", [("x.json", A)]))
+    assert registry.source("one", "dev") == Source(registry.get("one").identity, "dev")
+    with pytest.raises(RegistryError, match="unknown split"):
+        registry.source("one", "test")
+    with pytest.raises(RegistryError, match="unknown dataset identity"):
+        registry.by_identity("0" * 64)
+
+
+def test_verify_checks_local_file_hashes(tmp_path):
+    (tmp_path / "x.json").write_bytes(b"{}")
+    good = hashlib.sha256(b"{}").hexdigest()
+    verify(Registry.from_text(_entry("one", [("x.json", good)])).get("one"), tmp_path)
+    with pytest.raises(RegistryError, match="sha256 mismatch for x.json"):
+        verify(Registry.from_text(_entry("one", [("x.json", A)])).get("one"), tmp_path)
+    with pytest.raises(RegistryError, match="missing file y.json"):
+        verify(Registry.from_text(_entry("one", [("y.json", A)])).get("one"), tmp_path)
+
+
+def test_the_committed_table_loads():
+    registry = Registry.load(EVAL / "datasets.toml")
+    assert set(registry.names()) == {"corpus-big", "hanji-ko-v1"}
+    big, ko = registry.get("corpus-big"), registry.get("hanji-ko-v1")
+    # 봉인·역할·공개 가능 여부를 글자 그대로 고정한다(봉인을 비우거나 corpus-big을 보정에 넣으면 실패)
+    assert big.sealed_splits == ko.sealed_splits == {"holdout"}
+    assert ko.roles == {"selection", "calibration"}
+    assert big.roles == {"bigrun", "selection"}
+    assert big.publishable is True and ko.publishable is True
+    assert big.splits == ko.splits == ("dev", "holdout")
+
+
+def test_every_registered_dataset_name_can_be_printed():
+    # 받기는 끝났는데 출력 단계에서 GuardError가 나지 않게: 표의 이름은 모두 guard.DATASETS 열거 안이다
+    names = set(Registry.load(cli.DATASETS).names())
+    assert names and names <= set(guard.DATASETS)

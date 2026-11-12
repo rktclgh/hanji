@@ -1,0 +1,39 @@
+hanji-eval (tools/eval, 저장소 안의 평가 도구, 배포하지 않는다)
+
+들여와 고친 파일. 바꾼 점은 각 파일 머리에 적었다.
+
+1. src/hanji_eval/metrics/teds.py — TEDS(Tree-Edit-Distance-based Similarity)
+   원본: IBM PubTabNet src/metric.py
+   https://github.com/ibm-aur-nlp/PubTabNet/blob/8ffde9024bd331f5a61c3c549fdf30dd3c3e43a5/src/metric.py
+   (파일의 마지막 변경 커밋 7b03ef8f54f747fa3accf7b9354520a41b30ab40)
+   Copyright 2020 IBM. Author: peter.zhong@au1.ibm.com
+   라이선스: Apache License 2.0(원본 파일 머리). https://www.apache.org/licenses/LICENSE-2.0
+   원본의 GPL 의존성(distance)은 들여오지 않고 rapidfuzz(MIT)로 바꿨다.
+
+2. src/hanji_eval/metrics/grits.py — GriTS(Grid Table Similarity) Con·Top
+   원본: microsoft/table-transformer src/grits.py
+   https://github.com/microsoft/table-transformer/blob/16d124f616109746b7785f03085100f1f6247575/src/grits.py
+   (파일의 마지막 변경 커밋 ef21069f2a42254bbd049609f7d4bebc25abcf09)
+   라이선스: MIT License, 전문은 아래(저장소 LICENSE, 같은 커밋).
+
+    MIT License
+
+    Copyright (c) Microsoft Corporation.
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE

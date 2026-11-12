@@ -91,3 +91,27 @@ jobs:
         run: uv run python -W error::EncodingWarning packages/engine/tests/build_fixtures.py --check
       - name: Engine PDF fixtures up to date
         run: uv run python -W error::EncodingWarning packages/engine/tests/build_pdf_fixtures.py --check
+
+  # 평가 도구(tools/eval)는 루트 작업 공간 밖의 따로 된 uv 프로젝트다: 자체 잠금으로 깔고 지어낸 데이터 테스트만 돈다.
+  # 라이브러리 CI 시간을 늘리지 않으려고 ubuntu 하나에서만 돈다
+  eval-tools:
+    name: eval-tools (ubuntu-latest)
+    runs-on: ubuntu-latest
+    env:
+      PYTHONWARNDEFAULTENCODING: "1"
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Sync
+        run: uv sync --project tools/eval --locked
+      - name: Tests
+        working-directory: tools/eval
+        run: uv run --locked pytest -q

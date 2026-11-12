@@ -1,0 +1,1222 @@
+# 평가 도구 잠금(tools/eval/uv.lock)의 모든 배포판. 판은 잠금과 같아야 하고 declared(배포판이 밝힌 식)와 bundled(묶인
+# 구성 요소)의 spdx는 허용 목록 안이어야 한다(test_licenses, 컨트롤러 판정 R4·R4a). bundled.status: allowed(허용 목록),
+# or-alternative(branch로 고른 허용 쪽), runtime-exception(GCC 예외 등), weak-copyleft-library(고치지도 들여오지도 않는
+# 남의 휠의 LGPL·MPL), optional-not-shipped(SBOM에만 있고 설치 파일에 없음: absent의 glob이 비어야 한다),
+# build-only(빌드 스크립트, 바이너리에 들지 않음). evidence는 site-packages 기준 파일·절.
+# wheel_tags(WHEEL 파일 Tag: 값에 맞추는 fnmatch 패턴): 배포판 줄에서는 묶인 줄을 적은 휠(설치된 플랫폼 휠이 맞지 않으면
+# 시험이 실패한다), 묶인 줄에서는 그 줄이 맞는 휠(없으면 모든 휠). 적은 휠: macOS arm64는 eval venv(cp312), Linux x86_64는
+# tools/eval/uv.lock에 고정된 cp312 manylinux 휠(sha256 확인 뒤 메타데이터·SBOM·고지 파일만 읽음).
+
+[[package]]
+name = "annotated-types"
+version = "0.8.0"
+declared = "MIT"
+basis = "metadata License-Expression"
+
+[[package]]
+name = "apted"
+version = "1.0.3"
+declared = "MIT"
+basis = "metadata License field and classifier MIT License"
+
+[[package]]
+name = "colorama"
+version = "0.4.6"
+declared = "BSD-3-Clause"
+basis = "classifier BSD License; wheel LICENSE.txt is the 3-clause BSD text (pytest dependency on Windows)"
+
+[[package]]
+name = "flatbuffers"
+version = "25.12.19"
+declared = "Apache-2.0"
+basis = "metadata License field Apache 2.0 and classifier Apache Software License"
+
+[[package]]
+name = "hanji"
+version = "0.1.0"
+declared = "Apache-2.0"
+basis = "metadata License-Expression (this repository)"
+
+[[package]]
+name = "hanji-contracts"
+version = "0.4.0"
+declared = "Apache-2.0"
+basis = "metadata License-Expression (this repository)"
+
+[[package]]
+name = "hanji-eval"
+version = "0.0.0"
+declared = "Apache-2.0"
+basis = "metadata License-Expression (this repository)"
+
+[[package]]
+name = "hanji-fonts"
+version = "0.1.0"
+declared = "Apache-2.0 AND OFL-1.1"
+basis = "metadata License-Expression (this repository; Noto Sans KR under OFL-1.1)"
+
+[[package.bundled]]
+component = "Noto Sans KR"
+spdx = "OFL-1.1"
+status = "allowed"
+evidence = "hanji_fonts-0.1.0.dist-info License-File src/hanji_fonts/fonts/OFL.txt"
+
+[[package]]
+name = "iniconfig"
+version = "2.3.0"
+declared = "MIT"
+basis = "metadata License-Expression"
+
+[[package]]
+name = "markdown-it-py"
+version = "4.2.0"
+declared = "MIT"
+basis = "classifier MIT License; License-File LICENSE and LICENSE.markdown-it"
+
+[[package]]
+name = "mdurl"
+version = "0.1.2"
+declared = "MIT"
+basis = "classifier MIT License"
+
+[[package]]
+name = "numpy"
+version = "2.5.3"
+declared = "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0"
+basis = "metadata License-Expression"
+# macOS는 적은 macosx_14_0_arm64 휠(Accelerate)만: 잠금의 macosx_11_0_arm64 휠(OpenBLAS·gfortran 묶음)은 적지 않았다
+wheel_tags = ["*-macosx_14_*_arm64", "*-manylinux_*_x86_64"]
+
+[[package.bundled]]
+component = "libdivide"
+spdx = "Zlib"
+status = "allowed"
+evidence = "numpy-2.5.3.dist-info/licenses/numpy/_core/include/numpy/libdivide/LICENSE.txt"
+
+[[package.bundled]]
+component = "pythoncapi-compat"
+spdx = "0BSD"
+status = "allowed"
+evidence = "numpy-2.5.3.dist-info/licenses/numpy/_core/src/common/pythoncapi-compat/COPYING"
+
+[[package.bundled]]
+component = "highway"
+spdx = "(Apache-2.0 OR BSD-3-Clause) AND CC0-1.0"
+status = "allowed"
+evidence = "numpy-2.5.3.dist-info/licenses/numpy/_core/src/highway/LICENSE"
+
+[[package.bundled]]
+component = "dragon4"
+spdx = "MIT"
+status = "allowed"
+evidence = "numpy-2.5.3.dist-info/licenses/numpy/_core/src/multiarray/dragon4_LICENSE.txt"
+
+[[package.bundled]]
+component = "x86-simd-sort"
+spdx = "BSD-3-Clause"
+status = "allowed"
+evidence = "numpy-2.5.3.dist-info/licenses/numpy/_core/src/npysort/x86-simd-sort/LICENSE.md"
+
+[[package.bundled]]
+component = "svml"
+spdx = "BSD-3-Clause"
+status = "allowed"
+evidence = "numpy-2.5.3.dist-info/licenses/numpy/_core/src/umath/svml/LICENSE"
+
+[[package.bundled]]
+component = "pocketfft"
+spdx = "BSD-3-Clause"
+status = "allowed"
+evidence = "numpy-2.5.3.dist-info/licenses/numpy/fft/pocketfft/LICENSE.md"
+
+[[package.bundled]]
+component = "lapack_lite"
+spdx = "BSD-3-Clause-Open-MPI"
+status = "allowed"
+evidence = "numpy-2.5.3.dist-info/licenses/numpy/linalg/lapack_lite/LICENSE.txt"
+
+[[package.bundled]]
+component = "numpy.ma"
+spdx = "BSD-3-Clause"
+status = "allowed"
+evidence = "numpy-2.5.3.dist-info/licenses/numpy/ma/LICENSE"
+
+[[package.bundled]]
+component = "numpy.random"
+spdx = "NCSA OR BSD-3-Clause"
+status = "allowed"
+evidence = "numpy-2.5.3.dist-info/licenses/numpy/random/LICENSE.md"
+
+[[package.bundled]]
+component = "random distributions"
+spdx = "BSD-3-Clause"
+status = "allowed"
+evidence = "numpy-2.5.3.dist-info/licenses/numpy/random/src/distributions/LICENSE.md"
+
+[[package.bundled]]
+component = "mt19937"
+spdx = "MIT AND BSD-3-Clause"
+status = "allowed"
+evidence = "numpy-2.5.3.dist-info/licenses/numpy/random/src/mt19937/LICENSE.md"
+
+[[package.bundled]]
+component = "pcg64"
+spdx = "MIT"
+status = "allowed"
+evidence = "numpy-2.5.3.dist-info/licenses/numpy/random/src/pcg64/LICENSE.md"
+
+[[package.bundled]]
+component = "philox"
+spdx = "BSD-3-Clause"
+status = "allowed"
+evidence = "numpy-2.5.3.dist-info/licenses/numpy/random/src/philox/LICENSE.md"
+
+[[package.bundled]]
+component = "sfc64"
+spdx = "MIT"
+status = "allowed"
+evidence = "numpy-2.5.3.dist-info/licenses/numpy/random/src/sfc64/LICENSE.md"
+
+[[package.bundled]]
+component = "splitmix64"
+spdx = "CC0-1.0"
+status = "allowed"
+evidence = "numpy-2.5.3.dist-info/licenses/numpy/random/src/splitmix64/LICENSE.md"
+
+[[package.bundled]]
+component = "OpenBLAS"
+spdx = "BSD-3-Clause"
+status = "allowed"
+evidence = "numpy-2.5.3.dist-info/licenses/LICENSE.txt section Name: OpenBLAS; numpy.libs/libscipy_openblas64_*.so"
+wheel_tags = ["*-manylinux_*_x86_64"]
+
+[[package.bundled]]
+component = "LAPACK in OpenBLAS"
+spdx = "BSD-3-Clause-Open-MPI"
+status = "allowed"
+evidence = "numpy-2.5.3.dist-info/licenses/LICENSE.txt section Name: LAPACK; inside numpy.libs/libscipy_openblas64_*.so"
+wheel_tags = ["*-manylinux_*_x86_64"]
+
+[[package.bundled]]
+component = "GCC runtime library (libgfortran, libgcc)"
+spdx = "GPL-3.0-or-later WITH GCC-exception-3.1"
+status = "runtime-exception"
+evidence = "numpy-2.5.3.dist-info/licenses/LICENSE.txt Name: GCC runtime library; numpy.libs/libgfortran-*.so.5.0.0"
+wheel_tags = ["*-manylinux_*_x86_64"]
+
+[[package.bundled]]
+component = "libquadmath"
+spdx = "LGPL-2.1-or-later"
+status = "weak-copyleft-library"
+evidence = "numpy-2.5.3.dist-info/licenses/LICENSE.txt Name: libquadmath (unmodified); numpy.libs/libquadmath-*.so.0*"
+wheel_tags = ["*-manylinux_*_x86_64"]
+
+[[package]]
+name = "onnxruntime"
+version = "1.30.0"
+declared = "MIT"
+basis = "metadata License field MIT License and classifier MIT License"
+wheel_tags = ["*-macosx_*_arm64", "*-manylinux_*_x86_64"]
+
+[[package.bundled]]
+component = "protocolbuffers/protobuf"
+spdx = "BSD-3-Clause"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 92"
+
+[[package.bundled]]
+component = "madler/zlib"
+spdx = "Zlib"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 131"
+
+[[package.bundled]]
+component = "pybind/pybind11"
+spdx = "BSD-3-Clause"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 174"
+
+[[package.bundled]]
+component = "onnx"
+spdx = "Apache-2.0"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 208"
+
+[[package.bundled]]
+component = "Eigen"
+spdx = "MPL-2.0"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 417"
+
+[[package.bundled]]
+component = "intel/dnnl"
+spdx = "Apache-2.0 AND BSD-3-Clause"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 802"
+
+[[package.bundled]]
+component = "Microsoft GSL"
+spdx = "MIT"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 1040"
+
+[[package.bundled]]
+component = "Tensorflow"
+spdx = "Apache-2.0"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 1066"
+
+[[package.bundled]]
+component = "Microsoft Cognitive Toolkit"
+spdx = "MIT"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 1274"
+
+[[package.bundled]]
+component = "NumPy"
+spdx = "BSD-3-Clause"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 1295"
+
+[[package.bundled]]
+component = "Pytorch / Caffe2"
+spdx = "BSD-3-Clause"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 1311"
+
+[[package.bundled]]
+component = "Caffe"
+spdx = "BSD-2-Clause"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 1384"
+
+[[package.bundled]]
+component = "LLVM"
+spdx = "MIT"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 1433"
+
+[[package.bundled]]
+component = "google/benchmark"
+spdx = "Apache-2.0"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 1506"
+
+[[package.bundled]]
+component = "HalideIR"
+spdx = "MIT"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 1832"
+
+[[package.bundled]]
+component = "dmlc-core"
+spdx = "Apache-2.0"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 1851"
+
+[[package.bundled]]
+component = "DLPack"
+spdx = "Apache-2.0"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 1869"
+
+[[package.bundled]]
+component = "HowardHinnant/date"
+spdx = "MIT"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 2075"
+
+[[package.bundled]]
+component = "FreeBSD getopt.c"
+spdx = "BSD-3-Clause"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 2111"
+
+[[package.bundled]]
+component = "google/googletest"
+spdx = "BSD-3-Clause"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 2145"
+
+[[package.bundled]]
+component = "G3log"
+spdx = "Unlicense"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 2178"
+
+[[package.bundled]]
+component = "Scikit-learn"
+spdx = "BSD-3-Clause"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 2206"
+
+[[package.bundled]]
+component = "google/re2"
+spdx = "BSD-3-Clause"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 2240"
+
+[[package.bundled]]
+component = "onnx/onnx-tensorrt"
+spdx = "MIT"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 2270"
+
+[[package.bundled]]
+component = "nvidia/cutlass"
+spdx = "BSD-3-Clause"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 2296"
+
+[[package.bundled]]
+component = "Boost"
+spdx = "BSL-1.0"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 2327"
+
+[[package.bundled]]
+component = "JDAI-CV/DNNLibrary"
+spdx = "Apache-2.0"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 2356"
+
+[[package.bundled]]
+component = "google/flatbuffers"
+spdx = "Apache-2.0"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 2563"
+
+[[package.bundled]]
+component = "google/glog"
+spdx = "BSD-3-Clause"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 2771"
+
+[[package.bundled]]
+component = "abseil-cpp"
+spdx = "Apache-2.0"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 2841"
+
+[[package.bundled]]
+component = "microsoft/wil"
+spdx = "MIT"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 3049"
+
+[[package.bundled]]
+component = "nlohmann/json"
+spdx = "MIT"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 3075"
+
+[[package.bundled]]
+component = "dcleblanc/SafeInt"
+spdx = "MIT"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 3101"
+
+[[package.bundled]]
+component = "Open MPI"
+spdx = "BSD-3-Clause-Open-MPI"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 3126"
+
+[[package.bundled]]
+component = "Android Open Source Project"
+spdx = "Apache-2.0 AND BSD-3-Clause"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 3233"
+
+[[package.bundled]]
+component = "mpi4py"
+spdx = "BSD-2-Clause"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 3572"
+
+[[package.bundled]]
+component = "huggingface/transformers"
+spdx = "Apache-2.0"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 3609"
+
+[[package.bundled]]
+component = "msgpack-python"
+spdx = "Apache-2.0"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 3813"
+
+[[package.bundled]]
+component = "tensorboardX"
+spdx = "MIT"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 3829"
+
+[[package.bundled]]
+component = "tensorflow/tensorboard"
+spdx = "Apache-2.0"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 3853"
+
+[[package.bundled]]
+component = "cerberus"
+spdx = "ISC"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 4062"
+
+[[package.bundled]]
+component = "MurmurHash3"
+spdx = "LicenseRef-Public-Domain"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 4084"
+
+[[package.bundled]]
+component = "gtest-ios-framework"
+spdx = "MIT"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 4099"
+
+[[package.bundled]]
+component = "DLPack"
+spdx = "Apache-2.0"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 4126"
+
+[[package.bundled]]
+component = "emsdk"
+spdx = "MIT"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 4334"
+
+[[package.bundled]]
+component = "coremltools"
+spdx = "BSD-3-Clause"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 4370"
+
+[[package.bundled]]
+component = "react-native"
+spdx = "MIT"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 4391"
+
+[[package.bundled]]
+component = "pytorch/cpuinfo"
+spdx = "BSD-2-Clause"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 4419"
+
+[[package.bundled]]
+component = "SQLite"
+spdx = "LicenseRef-Public-Domain"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 4455"
+
+[[package.bundled]]
+component = "google/XNNPACK"
+spdx = "BSD-3-Clause"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 4483"
+
+[[package.bundled]]
+component = "google/sentencepiece"
+spdx = "Apache-2.0"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 4519"
+
+[[package.bundled]]
+component = "dlfcn-win32"
+spdx = "MIT"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 4726"
+
+[[package.bundled]]
+component = "Python Imaging Library"
+spdx = "MIT-CMU"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 4748"
+
+[[package.bundled]]
+component = "openssl"
+spdx = "Apache-2.0"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 4781"
+
+[[package.bundled]]
+component = "Tencent/rapidjson"
+spdx = "MIT AND BSD-3-Clause"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 4962"
+
+[[package.bundled]]
+component = "boostorg/boost"
+spdx = "BSL-1.0"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 5024"
+
+[[package.bundled]]
+component = "libb64"
+spdx = "LicenseRef-Public-Domain"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 5052"
+
+[[package.bundled]]
+component = "pthreads4w"
+spdx = "Apache-2.0"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 5066"
+
+[[package.bundled]]
+component = "Triton Inference Server"
+spdx = "BSD-3-Clause"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 5273"
+
+[[package.bundled]]
+component = "microsoft/mimalloc"
+spdx = "MIT"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 5303"
+
+[[package.bundled]]
+component = "TensorFlow.js"
+spdx = "Apache-2.0"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 5329"
+
+[[package.bundled]]
+component = "Intel neural-compressor"
+spdx = "Apache-2.0"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 5580"
+
+[[package.bundled]]
+component = "FlashAttention"
+spdx = "BSD-3-Clause"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 5788"
+
+[[package.bundled]]
+component = "neural-speed"
+spdx = "Apache-2.0"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 5822"
+
+[[package.bundled]]
+component = "dawn"
+spdx = "BSD-3-Clause"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 6029"
+
+[[package.bundled]]
+component = "KleidiAI"
+spdx = "Apache-2.0 AND BSD-3-Clause"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 6064"
+
+[[package.bundled]]
+component = "cpp_client_telemetry"
+spdx = "Apache-2.0"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 6138"
+
+[[package.bundled]]
+component = "DeepSeek DeepGEMM"
+spdx = "MIT"
+status = "allowed"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 6346"
+
+[[package.bundled]]
+component = "Mbed TLS"
+spdx = "Apache-2.0 OR GPL-2.0-or-later"
+status = "or-alternative"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 5567: 'This distribution uses Mbed TLS under the Apache License 2.0'"
+branch = "Apache-2.0"
+
+[[package.bundled]]
+component = "Intel Math Kernel Library"
+spdx = "LicenseRef-Intel-ISSL"
+status = "optional-not-shipped"
+evidence = "onnxruntime/ThirdPartyNotices.txt line 22: only for MKL/DNNL builds; no MKL file in the CPU wheel"
+absent = ["onnxruntime/**/*mkl*"]
+
+[[package]]
+name = "packaging"
+version = "26.3"
+declared = "Apache-2.0 OR BSD-2-Clause"
+basis = "metadata License-Expression"
+
+[[package]]
+name = "pillow"
+version = "12.3.0"
+declared = "MIT-CMU"
+basis = "metadata License-Expression"
+wheel_tags = ["*-macosx_*_arm64", "*-manylinux_*_x86_64"]
+
+[[package.bundled]]
+component = "PIL._avif 12.3.0"
+spdx = "MIT-CMU"
+status = "allowed"
+evidence = "pillow-12.3.0.dist-info/sboms/*.cdx.json component PIL._avif"
+sbom_name = "PIL._avif"
+
+[[package.bundled]]
+component = "PIL._imaging 12.3.0"
+spdx = "MIT-CMU"
+status = "allowed"
+evidence = "pillow-12.3.0.dist-info/sboms/*.cdx.json component PIL._imaging"
+sbom_name = "PIL._imaging"
+
+[[package.bundled]]
+component = "PIL._imagingcms 12.3.0"
+spdx = "MIT-CMU"
+status = "allowed"
+evidence = "pillow-12.3.0.dist-info/sboms/*.cdx.json component PIL._imagingcms"
+sbom_name = "PIL._imagingcms"
+
+[[package.bundled]]
+component = "PIL._imagingft 12.3.0"
+spdx = "MIT-CMU"
+status = "allowed"
+evidence = "pillow-12.3.0.dist-info/sboms/*.cdx.json component PIL._imagingft"
+sbom_name = "PIL._imagingft"
+
+[[package.bundled]]
+component = "PIL._imagingmath 12.3.0"
+spdx = "MIT-CMU"
+status = "allowed"
+evidence = "pillow-12.3.0.dist-info/sboms/*.cdx.json component PIL._imagingmath"
+sbom_name = "PIL._imagingmath"
+
+[[package.bundled]]
+component = "PIL._imagingmorph 12.3.0"
+spdx = "MIT-CMU"
+status = "allowed"
+evidence = "pillow-12.3.0.dist-info/sboms/*.cdx.json component PIL._imagingmorph"
+sbom_name = "PIL._imagingmorph"
+
+[[package.bundled]]
+component = "PIL._imagingtk 12.3.0"
+spdx = "MIT-CMU"
+status = "allowed"
+evidence = "pillow-12.3.0.dist-info/sboms/*.cdx.json component PIL._imagingtk"
+sbom_name = "PIL._imagingtk"
+
+[[package.bundled]]
+component = "PIL._webp 12.3.0"
+spdx = "MIT-CMU"
+status = "allowed"
+evidence = "pillow-12.3.0.dist-info/sboms/*.cdx.json component PIL._webp"
+sbom_name = "PIL._webp"
+
+[[package.bundled]]
+component = "fribidi-shim 1.x"
+spdx = "LGPL-2.1-or-later"
+status = "weak-copyleft-library"
+evidence = "pillow-12.3.0.dist-info/sboms/*.cdx.json component fribidi-shim (unmodified, not vendored)"
+sbom_name = "fribidi-shim"
+
+[[package.bundled]]
+component = "pythoncapi_compat"
+spdx = "0BSD"
+status = "allowed"
+evidence = "pillow-12.3.0.dist-info/sboms/*.cdx.json component pythoncapi_compat"
+sbom_name = "pythoncapi_compat"
+
+[[package.bundled]]
+component = "raqm 0.10.5"
+spdx = "MIT"
+status = "allowed"
+evidence = "pillow-12.3.0.dist-info/sboms/*.cdx.json component raqm"
+sbom_name = "raqm"
+
+[[package.bundled]]
+component = "FreeType 2.14.3"
+spdx = "FTL"
+status = "allowed"
+evidence = "pillow-12.3.0.dist-info/sboms/*.cdx.json component FreeType"
+sbom_name = "FreeType"
+
+[[package.bundled]]
+component = "FriBiDi 1.0.16"
+spdx = "LGPL-2.1-or-later"
+status = "weak-copyleft-library"
+evidence = "pillow-12.3.0.dist-info/sboms/*.cdx.json component FriBiDi (unmodified, not vendored)"
+sbom_name = "FriBiDi"
+
+[[package.bundled]]
+component = "HarfBuzz 14.2.1"
+spdx = "MIT"
+status = "allowed"
+evidence = "pillow-12.3.0.dist-info/sboms/*.cdx.json component HarfBuzz"
+sbom_name = "HarfBuzz"
+
+[[package.bundled]]
+component = "libavif 1.4.2"
+spdx = "BSD-2-Clause"
+status = "allowed"
+evidence = "pillow-12.3.0.dist-info/sboms/*.cdx.json component libavif"
+sbom_name = "libavif"
+
+[[package.bundled]]
+component = "libimagequant 4.4.1"
+spdx = "GPL-3.0-or-later"
+status = "optional-not-shipped"
+evidence = "pillow-12.3.0.dist-info/sboms/*.cdx.json component libimagequant (scope optional, not installed)"
+sbom_name = "libimagequant"
+absent = ["PIL/.dylibs/*imagequant*", "pillow.libs/*imagequant*", "PIL/*imagequant*"]
+
+[[package.bundled]]
+component = "libjpeg / libjpeg-turbo 3.1.4.1"
+spdx = "IJG AND BSD-3-Clause"
+status = "allowed"
+evidence = "pillow-12.3.0.dist-info/sboms/*.cdx.json component libjpeg / libjpeg-turbo"
+sbom_name = "libjpeg / libjpeg-turbo"
+
+[[package.bundled]]
+component = "libtiff 4.7.1"
+spdx = "libtiff"
+status = "allowed"
+evidence = "pillow-12.3.0.dist-info/sboms/*.cdx.json component libtiff"
+sbom_name = "libtiff"
+
+[[package.bundled]]
+component = "libwebp 1.6.0"
+spdx = "BSD-3-Clause"
+status = "allowed"
+evidence = "pillow-12.3.0.dist-info/sboms/*.cdx.json component libwebp"
+sbom_name = "libwebp"
+
+[[package.bundled]]
+component = "libxcb 1.17.0"
+spdx = "X11"
+status = "allowed"
+evidence = "pillow-12.3.0.dist-info/sboms/*.cdx.json component libxcb"
+sbom_name = "libxcb"
+
+[[package.bundled]]
+component = "Little CMS 2 2.19.1"
+spdx = "MIT"
+status = "allowed"
+evidence = "pillow-12.3.0.dist-info/sboms/*.cdx.json component Little CMS 2"
+sbom_name = "Little CMS 2"
+
+[[package.bundled]]
+component = "OpenJPEG 2.5.4"
+spdx = "BSD-2-Clause"
+status = "allowed"
+evidence = "pillow-12.3.0.dist-info/sboms/*.cdx.json component OpenJPEG"
+sbom_name = "OpenJPEG"
+
+[[package.bundled]]
+component = "pybind11"
+spdx = "BSD-3-Clause"
+status = "allowed"
+evidence = "pillow-12.3.0.dist-info/sboms/*.cdx.json component pybind11"
+sbom_name = "pybind11"
+
+[[package.bundled]]
+component = "zlib 2.3.3"
+spdx = "Zlib"
+status = "allowed"
+evidence = "pillow-12.3.0.dist-info/sboms/*.cdx.json component zlib"
+sbom_name = "zlib"
+
+[[package.bundled]]
+component = "libXau 1.0.9 (auditwheel copy of the system library)"
+spdx = "MIT-open-group"
+status = "allowed"
+evidence = "pillow-12.3.0.dist-info/sboms/auditwheel.cdx.json component libXau (no licence field); LICENSE section XAU"
+sbom_name = "libXau"
+wheel_tags = ["*-manylinux_*_x86_64"]
+
+[[package.bundled]]
+component = "aom"
+spdx = "BSD-2-Clause"
+status = "allowed"
+evidence = "pillow-12.3.0.dist-info/licenses/LICENSE section AOM"
+
+[[package.bundled]]
+component = "brotli"
+spdx = "MIT"
+status = "allowed"
+evidence = "pillow-12.3.0.dist-info/licenses/LICENSE section BROTLI"
+
+[[package.bundled]]
+component = "bzip2"
+spdx = "bzip2-1.0.6"
+status = "allowed"
+evidence = "pillow-12.3.0.dist-info/licenses/LICENSE section BZIP2"
+
+[[package.bundled]]
+component = "dav1d"
+spdx = "BSD-2-Clause"
+status = "allowed"
+evidence = "pillow-12.3.0.dist-info/licenses/LICENSE section DAV1D"
+
+[[package.bundled]]
+component = "libpng"
+spdx = "libpng-2.0"
+status = "allowed"
+evidence = "pillow-12.3.0.dist-info/licenses/LICENSE section LIBPNG"
+
+[[package.bundled]]
+component = "libyuv"
+spdx = "BSD-3-Clause"
+status = "allowed"
+evidence = "pillow-12.3.0.dist-info/licenses/LICENSE section LIBYUV"
+
+[[package.bundled]]
+component = "tcl/tk"
+spdx = "TCL"
+status = "allowed"
+evidence = "pillow-12.3.0.dist-info/licenses/LICENSE section TCL_TK"
+
+[[package.bundled]]
+component = "xau"
+spdx = "MIT-open-group"
+status = "allowed"
+evidence = "pillow-12.3.0.dist-info/licenses/LICENSE section XAU"
+
+[[package.bundled]]
+component = "xdmcp"
+spdx = "MIT-open-group"
+status = "allowed"
+evidence = "pillow-12.3.0.dist-info/licenses/LICENSE section XDMCP"
+
+[[package.bundled]]
+component = "zstd"
+spdx = "BSD-3-Clause"
+status = "allowed"
+evidence = "pillow-12.3.0.dist-info/licenses/LICENSE section ZSTD"
+
+[[package.bundled]]
+component = "liblzma (XZ Utils)"
+spdx = "LicenseRef-Public-Domain"
+status = "allowed"
+evidence = "pillow-12.3.0.dist-info/licenses/LICENSE section LIBLZMA: liblzma is in the public domain"
+
+[[package.bundled]]
+component = "XZ Utils tools and scripts (getopt_long, xzgrep etc.)"
+spdx = "LGPL-2.1-or-later AND GPL-2.0-or-later"
+status = "optional-not-shipped"
+evidence = "pillow LICENSE section LIBLZMA: command line tools and scripts; only liblzma is in the wheel"
+absent = ["PIL/.dylibs/xz*", "PIL/.dylibs/*xzgrep*", "pillow.libs/xz*"]
+
+[[package.bundled]]
+component = "XZ Utils build system"
+spdx = "GPL-2.0-or-later AND GPL-3.0-or-later"
+status = "build-only"
+evidence = "pillow LICENSE section LIBLZMA: 'None of these files end up in the binaries being built'"
+
+[[package]]
+name = "platformdirs"
+version = "4.12.2"
+declared = "MIT"
+basis = "metadata License-Expression"
+
+[[package]]
+name = "pluggy"
+version = "1.6.0"
+declared = "MIT"
+basis = "metadata License field MIT and classifier MIT License"
+
+[[package]]
+name = "protobuf"
+version = "7.36.2"
+declared = "BSD-3-Clause"
+basis = "metadata License field 3-Clause BSD License"
+wheel_tags = ["*-macosx_*_universal2", "*-manylinux2014_x86_64"]
+no_bundled = """macosx_10_9_universal2 (eval venv) and manylinux2014_x86_64 (uv.lock sha256 checked): only the \
+package's own extension google/_upb/_message.abi3.so, no .dylibs or *.libs folder, no SBOM, one licence file \
+protobuf-7.36.2.dist-info/LICENSE"""
+
+[[package]]
+name = "pyclipper"
+version = "1.4.0"
+declared = "MIT"
+basis = "metadata License field MIT and classifier MIT License"
+wheel_tags = ["*-macosx_*_universal2", "*-manylinux_*_x86_64"]
+
+[[package.bundled]]
+component = "Clipper"
+spdx = "BSL-1.0"
+status = "allowed"
+evidence = "pyclipper-1.4.0.dist-info/METADATA: 'The core Clipper library is available under Boost Software License'"
+
+[[package]]
+name = "pydantic"
+version = "2.13.5"
+declared = "MIT"
+basis = "metadata License-Expression"
+
+[[package]]
+name = "pydantic-core"
+version = "2.46.5"
+declared = "MIT"
+basis = "metadata License-Expression"
+wheel_tags = ["*-macosx_*_arm64", "*-manylinux_*_x86_64"]
+
+[[package.bundled]]
+component = "1 Rust crates"
+spdx = "(MIT OR Apache-2.0) AND Unicode-DFS-2016"
+status = "allowed"
+evidence = "pydantic_core-2.46.5.dist-info/sboms/pydantic-core.cyclonedx.json"
+sbom_group = 1
+
+[[package.bundled]]
+component = "8 Rust crates"
+spdx = "Apache-2.0 OR MIT"
+status = "allowed"
+evidence = "pydantic_core-2.46.5.dist-info/sboms/pydantic-core.cyclonedx.json"
+sbom_group = 8
+
+[[package.bundled]]
+component = "1 Rust crates"
+spdx = "Apache-2.0 WITH LLVM-exception"
+status = "allowed"
+evidence = "pydantic_core-2.46.5.dist-info/sboms/pydantic-core.cyclonedx.json"
+sbom_group = 1
+
+[[package.bundled]]
+component = "2 Rust crates"
+spdx = "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT"
+status = "allowed"
+evidence = "pydantic_core-2.46.5.dist-info/sboms/pydantic-core.cyclonedx.json"
+sbom_group = 2
+
+[[package.bundled]]
+component = "2 Rust crates"
+spdx = "BSD-2-Clause OR Apache-2.0 OR MIT"
+status = "allowed"
+evidence = "pydantic_core-2.46.5.dist-info/sboms/pydantic-core.cyclonedx.json"
+sbom_group = 2
+
+[[package.bundled]]
+component = "13 Rust crates"
+spdx = "MIT"
+status = "allowed"
+evidence = "pydantic_core-2.46.5.dist-info/sboms/pydantic-core.cyclonedx.json"
+sbom_group = 13
+
+[[package.bundled]]
+component = "53 Rust crates"
+spdx = "MIT OR Apache-2.0"
+status = "allowed"
+evidence = "pydantic_core-2.46.5.dist-info/sboms/pydantic-core.cyclonedx.json"
+sbom_group = 53
+
+[[package.bundled]]
+component = "1 Rust crates"
+spdx = "MIT OR Apache-2.0 OR LGPL-2.1-or-later"
+status = "or-alternative"
+evidence = "pydantic_core-2.46.5.dist-info/sboms/pydantic-core.cyclonedx.json"
+sbom_group = 1
+branch = "MIT"
+
+[[package.bundled]]
+component = "19 Rust crates"
+spdx = "Unicode-3.0"
+status = "allowed"
+evidence = "pydantic_core-2.46.5.dist-info/sboms/pydantic-core.cyclonedx.json"
+sbom_group = 19
+
+[[package.bundled]]
+component = "2 Rust crates"
+spdx = "Unlicense OR MIT"
+status = "allowed"
+evidence = "pydantic_core-2.46.5.dist-info/sboms/pydantic-core.cyclonedx.json"
+sbom_group = 2
+
+[[package.bundled]]
+component = "1 Rust crates"
+spdx = "Zlib"
+status = "allowed"
+evidence = "pydantic_core-2.46.5.dist-info/sboms/pydantic-core.cyclonedx.json"
+sbom_group = 1
+
+[[package]]
+name = "pygments"
+version = "2.21.0"
+declared = "BSD-2-Clause"
+basis = "metadata License-Expression"
+
+[[package]]
+name = "pypdfium2"
+version = "5.13.0"
+declared = "Apache-2.0 AND BSD-3-Clause"
+basis = "metadata License field BSD-3-Clause, Apache-2.0, dependency licenses; License-File LICENSES/*"
+wheel_tags = ["*-macosx_*_arm64", "*-manylinux_*_x86_64"]
+
+[[package.bundled]]
+component = "abseil"
+spdx = "Apache-2.0"
+status = "allowed"
+evidence = "pypdfium2-5.13.0.dist-info/licenses/data/*/BUILD_LICENSES/abseil.txt"
+
+[[package.bundled]]
+component = "Anti-Grain Geometry 2.3"
+spdx = "LicenseRef-AGG-2.3"
+status = "allowed"
+evidence = "pypdfium2-5.13.0.dist-info/licenses/data/*/BUILD_LICENSES/agg23.txt"
+
+[[package.bundled]]
+component = "fast_float"
+spdx = "MIT"
+status = "allowed"
+evidence = "pypdfium2-5.13.0.dist-info/licenses/data/*/BUILD_LICENSES/fast_float.txt"
+
+[[package.bundled]]
+component = "FreeType"
+spdx = "FTL"
+status = "allowed"
+evidence = "pypdfium2-5.13.0.dist-info/licenses/data/*/BUILD_LICENSES/freetype.txt"
+
+[[package.bundled]]
+component = "Little CMS"
+spdx = "MIT"
+status = "allowed"
+evidence = "pypdfium2-5.13.0.dist-info/licenses/data/*/BUILD_LICENSES/lcms.txt"
+
+[[package.bundled]]
+component = "libjpeg-turbo"
+spdx = "IJG AND BSD-3-Clause AND Zlib"
+status = "allowed"
+evidence = "pypdfium2-5.13.0.dist-info/licenses/data/*/BUILD_LICENSES/libjpeg_turbo.md, libjpeg_turbo.ijg"
+
+[[package.bundled]]
+component = "OpenJPEG"
+spdx = "BSD-2-Clause"
+status = "allowed"
+evidence = "pypdfium2-5.13.0.dist-info/licenses/data/*/BUILD_LICENSES/libopenjpeg.txt"
+
+[[package.bundled]]
+component = "libpng"
+spdx = "libpng-2.0"
+status = "allowed"
+evidence = "pypdfium2-5.13.0.dist-info/licenses/data/*/BUILD_LICENSES/libpng.txt"
+
+[[package.bundled]]
+component = "libtiff"
+spdx = "libtiff"
+status = "allowed"
+evidence = "pypdfium2-5.13.0.dist-info/licenses/data/*/BUILD_LICENSES/libtiff.txt"
+
+[[package.bundled]]
+component = "llvm-libc"
+spdx = "Apache-2.0 WITH LLVM-exception"
+status = "allowed"
+evidence = "pypdfium2-5.13.0.dist-info/licenses/data/*/BUILD_LICENSES/llvm-libc.txt"
+
+[[package.bundled]]
+component = "pdfium-binaries"
+spdx = "MIT"
+status = "allowed"
+evidence = "pypdfium2-5.13.0.dist-info/licenses/data/*/BUILD_LICENSES/pdfium-binaries.txt"
+
+[[package.bundled]]
+component = "PDFium"
+spdx = "BSD-3-Clause"
+status = "allowed"
+evidence = "pypdfium2-5.13.0.dist-info/licenses/data/*/BUILD_LICENSES/pdfium.txt"
+
+[[package.bundled]]
+component = "simdutf"
+spdx = "MIT"
+status = "allowed"
+evidence = "pypdfium2-5.13.0.dist-info/licenses/data/*/BUILD_LICENSES/simdutf.txt"
+
+[[package.bundled]]
+component = "zlib"
+spdx = "Zlib"
+status = "allowed"
+evidence = "pypdfium2-5.13.0.dist-info/licenses/data/*/BUILD_LICENSES/zlib.txt"
+
+[[package.bundled]]
+component = "ICU"
+spdx = "Unicode-3.0"
+status = "allowed"
+evidence = "pypdfium2-5.13.0.dist-info/licenses/data/*/BUILD_LICENSES/icu.txt (UNICODE LICENSE V3)"
+
+[[package.bundled]]
+component = "ICU cjdict, laodict, burmesedict"
+spdx = "BSD-3-Clause AND NAIST-2003"
+status = "allowed"
+evidence = "pypdfium2-5.13.0.dist-info/licenses/data/*/BUILD_LICENSES/icu.txt dictionary data sections"
+
+[[package.bundled]]
+component = "ICU Time Zone Database"
+spdx = "LicenseRef-Public-Domain"
+status = "allowed"
+evidence = "pypdfium2-5.13.0.dist-info/licenses/data/*/BUILD_LICENSES/icu.txt section Time Zone Database"
+
+[[package.bundled]]
+component = "ICU double-conversion"
+spdx = "BSD-3-Clause"
+status = "allowed"
+evidence = "pypdfium2-5.13.0.dist-info/licenses/data/*/BUILD_LICENSES/icu.txt section Google double-conversion"
+
+[[package.bundled]]
+component = "ICU nlohmann/json"
+spdx = "MIT"
+status = "allowed"
+evidence = "pypdfium2-5.13.0.dist-info/licenses/data/*/BUILD_LICENSES/icu.txt section JSON parsing library"
+
+[[package.bundled]]
+component = "ICU4C aclocal.m4 (pkg.m4)"
+spdx = "GPL-2.0-or-later WITH Autoconf-exception-generic"
+status = "build-only"
+evidence = "pypdfium2 BUILD_LICENSES/icu.txt section File: aclocal.m4 (only for ICU4C): autoconf macro, not compiled"
+
+[[package.bundled]]
+component = "ICU4C config.guess"
+spdx = "GPL-3.0-or-later WITH Autoconf-exception-generic-3.0"
+status = "build-only"
+evidence = "pypdfium2 BUILD_LICENSES/icu.txt section File: config.guess (only for ICU4C): build script, not compiled"
+
+[[package.bundled]]
+component = "ICU4C install-sh"
+spdx = "X11"
+status = "build-only"
+evidence = "pypdfium2 BUILD_LICENSES/icu.txt section File: install-sh (only for ICU4C): build script"
+
+[[package.bundled]]
+component = "ICU4J sorttable.js"
+spdx = "MIT"
+status = "optional-not-shipped"
+evidence = "pypdfium2 BUILD_LICENSES/icu.txt section File: sorttable.js (only for ICU4J; PDFium links ICU4C)"
+absent = ["pypdfium2_raw/*sorttable*", "pypdfium2/*sorttable*"]
+
+[[package.bundled]]
+component = "pypdfium2 documentation"
+spdx = "CC-BY-4.0"
+status = "allowed"
+evidence = "pypdfium2-5.13.0.dist-info/licenses/LICENSES/CC-BY-4.0.txt"
+
+[[package]]
+name = "pytest"
+version = "9.1.1"
+declared = "MIT"
+basis = "metadata License-Expression"
+
+[[package]]
+name = "rapidfuzz"
+version = "3.14.6"
+declared = "MIT"
+basis = "metadata License-Expression"
+wheel_tags = ["*-macosx_*_arm64", "*-manylinux_*_x86_64"]
+no_bundled = """macosx_11_0_arm64 (eval venv) and manylinux_2_27_x86_64 (uv.lock sha256 checked): only the \
+package's own C++ extensions under rapidfuzz/, no .dylibs or *.libs folder, no SBOM, one licence file \
+rapidfuzz-3.14.6.dist-info/licenses/LICENSE"""
+
+[[package]]
+name = "typing-extensions"
+version = "4.16.0"
+declared = "PSF-2.0"
+basis = "metadata License-Expression"
+
+[[package]]
+name = "typing-inspection"
+version = "0.4.4"
+declared = "MIT"
+basis = "metadata License-Expression"
