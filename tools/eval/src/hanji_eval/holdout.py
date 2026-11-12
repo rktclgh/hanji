@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from . import guard
-from .datasets import Dataset
+from .datasets import Dataset, RegistryError
 
 LOG_SCHEMA = guard.obj({
     "schema": guard.enum("hanji-eval-holdout-log/1"),
@@ -27,12 +27,16 @@ def read_log(path: Path) -> list[dict]:
         return []
     data = json.loads(path.read_text(encoding="utf-8"))
     guard.check(data, LOG_SCHEMA)
+    if [e["entry"] for e in data["entries"]] != list(range(1, len(data["entries"]) + 1)):
+        raise guard.GuardError("holdout log: entries must be numbered 1..n")
     return data["entries"]
 
 
 def admit(dataset: Dataset, split: str, reason: str | None, log: Path, engine_commit: str,
           table_version: int | None, date: str) -> int | None:
     """채점 전에 부른다. 봉인되지 않은 분할이면 None. 봉인 분할이면 사유가 있어야 하고 기록을 남겨 그 차례를 돌려준다."""
+    if split not in dataset.splits:  # 닫힌 쪽: 없는 분할 이름(all 등)으로 봉인을 비켜 가지 못한다
+        raise RegistryError(f"{dataset.name}: unknown split {split!r}")
     if split not in dataset.sealed_splits:
         return None
     if reason is None:
@@ -43,5 +47,7 @@ def admit(dataset: Dataset, split: str, reason: str | None, log: Path, engine_co
     data = {"schema": "hanji-eval-holdout-log/1", "entries": [*entries, entry]}
     guard.check(data, LOG_SCHEMA)
     log.parent.mkdir(parents=True, exist_ok=True)
-    log.write_text(json.dumps(data, ensure_ascii=True, indent=1) + "\n", encoding="utf-8")
+    partial = log.with_name(log.name + ".tmp")  # 쓰다 끊겨도 기록이 반쯤 남지 않게 다 쓴 뒤 바꿔 넣는다
+    partial.write_text(json.dumps(data, ensure_ascii=True, indent=1) + "\n", encoding="utf-8")
+    partial.replace(log)
     return entry["entry"]

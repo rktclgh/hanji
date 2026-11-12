@@ -87,3 +87,72 @@ def test_the_cited_holdout_entry_must_match_the_dataset_split_and_engine_commit(
         with pytest.raises(report.ReportError, match=message):
             report.write(rep, tmp_path / "out", REGISTRY, log)
     assert not (tmp_path / "out").exists()
+
+
+def test_a_duplicate_ledger_row_cannot_hide_a_mask_mismatch(tmp_path):
+    # 같은 (데이터셋·분할·단위·도구) 줄이 둘이면 앞 줄을 덮어써 마스크 같음 검사를 건너뛸 수 있었다
+    ledger = [_row("hanji", 10, 9, {"excluded_ruby": 1}), _row("hanji", 10, 8, {"excluded_ruby": 2}),
+              _row("docling", 10, 8, {"excluded_ruby": 2})]
+    with pytest.raises(report.ReportError, match="duplicate ledger row: hanji-ko-v1/dev/block/hanji"):
+        report.check_ledger(ledger)
+    with pytest.raises(report.ReportError, match="duplicate ledger row"):
+        report.check_ledger([_row("hanji", 10, 9, {"excluded_ruby": 1})] * 2)
+    with pytest.raises(report.ReportError, match="duplicate ledger row"):
+        report.write(_report(ledger), tmp_path, REGISTRY, tmp_path / "log")
+    assert not (tmp_path / "report.json").exists()
+
+
+def test_merging_drops_exact_duplicates_and_refuses_conflicting_rows():
+    rep = _report([_row("hanji", 10, 9, {"excluded_ruby": 1})])
+    merged = report.merge(rep, json.loads(json.dumps(rep)))  # 자기 자신과 합쳐도 줄이 늘지 않는다
+    assert merged["ledger"] == rep["ledger"] and merged["results"] == rep["results"]
+    report.check_ledger(merged["ledger"])
+    other = _report([_row("hanji", 10, 8, {"excluded_ruby": 2})])
+    with pytest.raises(report.ReportError, match="conflicting ledger rows: hanji-ko-v1/dev/block/hanji"):
+        report.merge(rep, other)
+    changed = json.loads(json.dumps(rep))
+    changed["results"][0]["value"] = 0.5
+    with pytest.raises(report.ReportError, match="conflicting results rows"):
+        report.merge(rep, changed)
+
+
+def test_merging_two_reports_that_opened_different_entries_is_refused():
+    a, b = _report([], "holdout"), _report([], "holdout")
+    a["holdout_opened"] = {"opened": True, "entry": 1}
+    b["holdout_opened"] = {"opened": True, "entry": 2}
+    with pytest.raises(report.ReportError, match="different holdout log entries"):
+        report.merge(a, b)
+    assert report.merge(a, json.loads(json.dumps(a)))["holdout_opened"] == {"opened": True, "entry": 1}
+
+
+def test_a_row_labelled_dev_cannot_carry_holdout_values(tmp_path):
+    log = tmp_path / "holdout-log.json"
+    entry = holdout.admit(REGISTRY.get("hanji-ko-v1"), "holdout", "ev-d-public-claim", log, "b" * 40, None,
+                          "2026-11-12")
+    rep = _report([], "dev")
+    rep["results"][0]["sources"].append({"dataset": REGISTRY.get("hanji-ko-v1").identity, "split": "holdout"})
+    rep["holdout_opened"] = {"opened": True, "entry": entry}
+    with pytest.raises(report.provenance.ProvenanceError, match="carries sealed sources under another label"):
+        report.write(rep, tmp_path / "out", REGISTRY, log)
+    assert not (tmp_path / "out").exists()
+
+
+def test_opened_needs_a_sealed_source_and_an_unknown_identity_is_a_provenance_error(tmp_path):
+    log = tmp_path / "holdout-log.json"
+    entry = holdout.admit(REGISTRY.get("hanji-ko-v1"), "holdout", "ev-d-public-claim", log, "b" * 40, None,
+                          "2026-11-12")
+    rep = _report([], "dev")
+    rep["holdout_opened"] = {"opened": True, "entry": entry}
+    with pytest.raises(report.ReportError, match="no sealed sources"):
+        report.write(rep, tmp_path / "out", REGISTRY, log)
+    rep["results"][0]["sources"].append({"dataset": "9" * 64, "split": "dev"})
+    with pytest.raises(report.provenance.ProvenanceError, match="unknown dataset identity"):
+        report.write(rep, tmp_path / "out", REGISTRY, log)
+    assert not (tmp_path / "out").exists()
+
+
+def test_the_markdown_failures_table_has_the_split():
+    rep = _report([])
+    rep["failures"] = [{"dataset": "hanji-ko-v1", "split": "dev", "tool": "hanji", "doc": "pdf-0001",
+                        "status": "timeout"}]
+    assert "| hanji-ko-v1 | dev | hanji | pdf-0001 | timeout |" in report.render_md(rep)

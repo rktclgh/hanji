@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from hanji_eval import cli, guard
 from hanji_eval.datasets import Registry, RegistryError, Source, verify
 
 EVAL = Path(__file__).resolve().parents[1]
@@ -94,3 +95,9 @@ def test_the_committed_table_loads():
     registry = Registry.load(EVAL / "datasets.toml")
     assert "corpus-big" in registry.names()
     assert registry.get("corpus-big").sealed_splits == {"holdout"}
+
+
+def test_every_registered_dataset_name_can_be_printed():
+    # 받기는 끝났는데 출력 단계에서 GuardError가 나지 않게: 표의 이름은 모두 guard.DATASETS 열거 안이다
+    names = set(Registry.load(cli.DATASETS).names())
+    assert names and names <= set(guard.DATASETS)
