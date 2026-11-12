@@ -1,0 +1,50 @@
+[project]
+name = "hanji-eval"
+version = "0.0.0"
+description = "Evaluation harness for hanji (repository only, never published)"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+classifiers = ["Private :: Do Not Upload"]
+dependencies = [
+    "hanji",
+    # 대규모 실행은 기본 설정(OCR·레이아웃 켬)으로 돈다. onnxruntime은 macOS x86_64 휠이 없다(루트 pyproject와 같은 표시)
+    "hanji[ocr,layout]; sys_platform != 'darwin' or platform_machine != 'x86_64'",
+    "hanji-contracts",
+    # 기본 설치와 같게 한국어 글꼴을 넣는다(루트 작업 공간과 같다, 컨트롤러 판정 R3)
+    "hanji-fonts",
+    "platformdirs>=4,<5",
+    "rapidfuzz>=3.9,<4",
+    "apted>=1.0.3,<2",
+]
+
+[project.scripts]
+hanji-eval = "hanji_eval.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8.3"]
+
+[tool.uv]
+# 엔진이 쓰는 배포판은 루트 uv.lock과 같은 판으로 묶는다(평가가 라이브러리 CI와 같은 엔진 스택을 잰다, test_licenses가 본다)
+constraint-dependencies = [
+    "annotated-types==0.8.0", "colorama==0.4.6", "flatbuffers==25.12.19", "iniconfig==2.3.0", "markdown-it-py==4.2.0",
+    "mdurl==0.1.2", "numpy==2.5.3", "onnxruntime==1.30.0", "packaging==26.3", "pillow==12.3.0", "platformdirs==4.12.2",
+    "pluggy==1.6.0", "protobuf==7.36.2", "pyclipper==1.4.0", "pydantic==2.13.5", "pydantic-core==2.46.5",
+    "pygments==2.21.0", "pypdfium2==5.13.0", "pytest==9.1.1", "typing-extensions==4.16.0", "typing-inspection==0.4.4",
+]
+
+[tool.uv.sources]
+hanji = { path = "../../packages/engine", editable = true }
+hanji-contracts = { path = "../../packages/contracts", editable = true }
+hanji-fonts = { path = "../../packages/fonts", editable = true }
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hanji_eval"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--import-mode=importlib"
+filterwarnings = ["error::EncodingWarning", "ignore::EncodingWarning:pypdfium2_raw"]
